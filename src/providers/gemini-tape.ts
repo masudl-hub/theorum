@@ -1,17 +1,6 @@
 import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
+import { sha256 } from '../kernel/engine/hash.ts';
 import { mapStrings } from '../kernel/engine/tree.ts';
-
-const HEX_PAD = 2;
-const HEX_RADIX = 16;
-
-function hexSha256(bytes: Uint8Array): string {
-  return [...bytes].map((b) => b.toString(HEX_RADIX).padStart(HEX_PAD, '0')).join('');
-}
-
-async function sha256(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return hexSha256(new Uint8Array(buf));
-}
 
 function isImageBlob(rec: Record<string, unknown>): boolean {
   if (rec.type === 'image' || rec.type === 'media') {

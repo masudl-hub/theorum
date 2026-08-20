@@ -65,7 +65,13 @@ function sanitizeHistory(
   }
   return history.map((m) => ({
     role: m.role,
-    content: sanitizeText(m.content),
+    ...(m.content !== undefined ? { content: sanitizeText(m.content) } : {}),
+    ...(m.parts
+      ? {
+          parts: m.parts.map((p) => (p.type === 'text' ? { ...p, text: sanitizeText(p.text) } : p)),
+        }
+      : {}),
+    ...(m.metadata ? { metadata: m.metadata } : {}),
   }));
 }
 
@@ -80,6 +86,10 @@ function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
   if (rawText !== undefined) {
     text = sanitizeText(rawText);
   }
+  let system = req.system;
+  if (system !== undefined) {
+    system = sanitizeText(system);
+  }
   const { attachments, voice } = sanitizeTurnBlobsForProfile(
     req.profile,
     input.attachments,
@@ -87,6 +97,7 @@ function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
   );
   return {
     ...req,
+    system,
     projectId: sanitizeProjectId(req.projectId),
     input: {
       ...input,

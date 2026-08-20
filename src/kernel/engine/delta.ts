@@ -165,6 +165,30 @@ function extractUsageTokens(raw: unknown): TurnTokens | undefined {
   return undefined;
 }
 
+function extractTokenEvent(
+  event: Record<string, unknown>,
+  interaction?: Record<string, unknown>,
+): TurnEvent | undefined {
+  const target = interaction ?? asRecord(event.interaction) ?? event;
+  const usage = extractUsageTokens(
+    target.usage ??
+      target.usage_metadata ??
+      target.usageMetadata ??
+      event.usage ??
+      event.usageMetadata ??
+      event.usage_metadata,
+  );
+  const interactionId = typeof target.id === 'string' ? target.id : undefined;
+  if (!usage) {
+    return undefined;
+  }
+  return {
+    type: 'tokens',
+    tokens: usage,
+    ...(interactionId ? { interactionId } : {}),
+  };
+}
+
 function eventsFromComplete(event: Record<string, unknown>, alreadyText: boolean): TurnEvent[] {
   const interaction = asRecord(event.interaction) ?? event;
   const outputText = interaction.output_text;
@@ -176,21 +200,9 @@ function eventsFromComplete(event: Record<string, unknown>, alreadyText: boolean
   if (media) {
     events.push(media);
   }
-  const usage = extractUsageTokens(
-    interaction.usage ??
-      interaction.usage_metadata ??
-      interaction.usageMetadata ??
-      event.usage ??
-      event.usageMetadata ??
-      event.usage_metadata,
-  );
-  const interactionId = typeof interaction.id === 'string' ? interaction.id : undefined;
-  if (usage) {
-    events.push({
-      type: 'tokens',
-      tokens: usage,
-      ...(interactionId ? { interactionId } : {}),
-    });
+  const tokenEvent = extractTokenEvent(event, interaction);
+  if (tokenEvent) {
+    events.push(tokenEvent);
   }
   return events;
 }
@@ -203,4 +215,10 @@ function tryStructured(text: string): TurnEvent | undefined {
   }
 }
 
-export { eventsFromComplete, eventsFromDelta, extractUsageTokens, tryStructured };
+export {
+  eventsFromComplete,
+  eventsFromDelta,
+  extractTokenEvent,
+  extractUsageTokens,
+  tryStructured,
+};

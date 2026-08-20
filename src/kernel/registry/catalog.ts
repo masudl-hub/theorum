@@ -3,6 +3,7 @@ import type {
   GeminiInputKind,
   ImageAspectRatio,
   ImageSize,
+  ModelCatalogEntry,
   ThinkingLevel,
 } from '../types.ts';
 
@@ -211,9 +212,7 @@ export {
 
 export const MODEL_CATALOG = CATALOG.models;
 
-/** Clamp a requested level to what this model accepts (3.7 has no minimal). */
-export function clampThinkingLevel(modelId: string, level: ThinkingLevel): ThinkingLevel {
-  const entry = MODEL_CATALOG[modelId as keyof typeof MODEL_CATALOG];
+function clampLevels(entry: ModelCatalogEntry | undefined, level: ThinkingLevel): ThinkingLevel {
   if (!entry?.thinkingLevels || entry.thinkingLevels.length === 0) {
     return level;
   }
@@ -226,6 +225,12 @@ export function clampThinkingLevel(modelId: string, level: ThinkingLevel): Think
   }
   const first = entry.thinkingLevels[0];
   return first ?? level;
+}
+
+/** Clamp a requested level to what this model accepts (3.7 has no minimal). */
+export function clampThinkingLevel(modelId: string, level: ThinkingLevel): ThinkingLevel {
+  const entry = MODEL_CATALOG[modelId as keyof typeof MODEL_CATALOG];
+  return clampLevels(entry, level);
 }
 
 export function modelEntryByApiId(apiId: string) {
@@ -234,16 +239,5 @@ export function modelEntryByApiId(apiId: string) {
 
 export function clampThinkingLevelForApiId(apiId: string, level: ThinkingLevel): ThinkingLevel {
   const entry = modelEntryByApiId(apiId);
-  if (!entry?.thinkingLevels || entry.thinkingLevels.length === 0) {
-    return level;
-  }
-  if (entry.thinkingLevels.includes(level)) {
-    return level;
-  }
-  const fallback = entry.thinking.off;
-  if (entry.thinkingLevels.includes(fallback)) {
-    return fallback;
-  }
-  const first = entry.thinkingLevels[0];
-  return first ?? level;
+  return clampLevels(entry, level);
 }

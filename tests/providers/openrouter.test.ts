@@ -55,8 +55,8 @@ function createMockTurnRequest(profile: string, text: string): ProviderCompleteR
 }
 
 Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () => {
-  assertEquals(resolveOpenRouterModel('gemini35FlashLite'), 'google/gemini-2.5-flash');
-  assertEquals(resolveOpenRouterModel('gemini31ProPreview'), 'google/gemini-2.5-pro');
+  assertEquals(resolveOpenRouterModel('gemini35FlashLite'), 'google/gemini-3.5-flash-lite');
+  assertEquals(resolveOpenRouterModel('gemini37Flash'), 'google/gemini-3.7-flash');
   assertEquals(
     resolveOpenRouterModel('gemini35FlashLite', {
       gemini35FlashLite: 'anthropic/claude-3.7-sonnet',
@@ -66,17 +66,45 @@ Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () 
   assertEquals(resolveOpenRouterModel('perplexity/sonar'), 'perplexity/sonar');
 });
 
-Deno.test('toOpenRouterPayload formats system, text, and thinking effort', () => {
+Deno.test('toOpenRouterPayload formats system, history, text, and thinking effort', () => {
   const req = createMockTurnRequest('pinned', 'Watering schedule?');
+  req.history = [
+    { role: 'system', content: '[meta] ago=5m speaker=masud' },
+    { role: 'user', content: 'What plants do I have?' },
+    { role: 'assistant', content: 'You have a Monstera deliciosa.' },
+  ];
+  req.dynamicTools = [
+    {
+      name: 'ground_plant_knowledge',
+      description: 'Fetch botanical guidance',
+      parameters: {
+        type: 'object',
+        properties: { topic: { type: 'string' } },
+        required: ['topic'],
+      },
+    },
+  ];
+
   const payload = toOpenRouterPayload(req, {});
-  assertEquals(payload.model, 'google/gemini-2.5-flash');
+  assertEquals(payload.model, 'google/gemini-3.5-flash-lite');
   assertEquals(payload.temperature, req.temperature);
   assertEquals((payload.reasoning as Record<string, unknown>).effort, 'low');
 
   const messages = payload.messages as Record<string, unknown>[];
   assertEquals(messages[0]?.role, 'system');
   assertEquals(messages[0]?.content, 'Orchid system prompt');
-  assertEquals(messages[1]?.role, 'user');
+  assertEquals(messages[1]?.role, 'system');
+  assertEquals(messages[1]?.content, '[meta] ago=5m speaker=masud');
+  assertEquals(messages[2]?.role, 'user');
+  assertEquals(messages[2]?.content, 'What plants do I have?');
+  assertEquals(messages[3]?.role, 'assistant');
+  assertEquals(messages[3]?.content, 'You have a Monstera deliciosa.');
+  assertEquals(messages[4]?.role, 'user');
+
+  const tools = payload.tools as Record<string, unknown>[];
+  assertEquals(tools.length, 1);
+  const fn = tools[0]?.function as Record<string, unknown>;
+  assertEquals(fn?.name, 'ground_plant_knowledge');
 });
 
 Deno.test('toOpenRouterPayload formats structured json_schema response_format', () => {

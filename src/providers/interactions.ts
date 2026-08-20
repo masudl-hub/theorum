@@ -49,6 +49,18 @@ function userInputStep(parts: InteractionPart[]): {
   return { type: USER_INPUT, content: parts.map(wirePart) };
 }
 
+function historyStep(msg: import('../kernel/types.ts').TurnHistoryMessage): {
+  type: string;
+  content: Record<string, string>[];
+} {
+  const isAssistant = msg.role === 'assistant';
+  const type = isAssistant ? 'model_turn' : 'user_input';
+  if (msg.parts && msg.parts.length > 0) {
+    return { type, content: msg.parts.map(wirePart) };
+  }
+  return { type, content: [{ type: 'text', text: msg.content ?? '' }] };
+}
+
 function systemHoldsUserInput(system: string, parts: InteractionPart[]): boolean {
   for (const part of parts) {
     if (part.type === 'text' && part.text && system.includes(part.text)) {
@@ -88,10 +100,18 @@ function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknow
     throw new TheorumError('user input cannot be placed in the system block');
   }
   const catalog = CATALOG.models[req.model];
+  const inputSteps: { type: string; content: Record<string, string>[] }[] = [];
+  if (req.history && req.history.length > 0) {
+    for (const h of req.history) {
+      inputSteps.push(historyStep(h));
+    }
+  }
+  inputSteps.push(userInputStep(req.input));
+
   const camel: Record<string, unknown> = {
     model: catalog.apiId,
     stream: true,
-    input: [userInputStep(req.input)],
+    input: inputSteps,
     generationConfig: {
       temperature: req.temperature,
       maxOutputTokens: req.maxOutputTokens,

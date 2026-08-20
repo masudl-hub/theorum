@@ -5,11 +5,13 @@
  */
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
-export type ModelId =
+export type StandardModelId =
   | 'gemini31FlashLite'
   | 'gemini35FlashLite'
   | 'gemini37Flash'
   | 'gemini31FlashLiteImage';
+
+export type ModelId = StandardModelId | (string & {});
 
 export type ToolId =
   | 'googleSearch'
@@ -228,8 +230,17 @@ export interface TurnBlob {
 }
 
 export interface TurnHistoryMessage {
-  role: 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant';
+  content?: string;
+  parts?: InteractionPart[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface DynamicToolDeclaration {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+  handler?: (args: Record<string, unknown>) => ToolEnvelope | Promise<ToolEnvelope>;
 }
 
 export interface TurnFixRequest {
@@ -244,8 +255,12 @@ export interface TurnRequest {
   projectId?: string;
   select?: string;
   thinking?: boolean;
+  /** Host-provided dynamic system prompt combined with profile persona */
+  system?: string;
   /** Opt-in gates. Profile `allow` is the ceiling; a tool is off until `tools[id]` is true. */
   tools?: Partial<Record<ToolId, boolean>>;
+  /** Runtime tool declarations (e.g. load_when_needed strategy) */
+  dynamicTools?: DynamicToolDeclaration[];
   input: {
     text?: string;
     role?: string;
@@ -266,6 +281,8 @@ export interface ResolvedGeneration {
   temperature: number;
   builtins: BuiltinToolId[];
   custom: CustomToolId[];
+  dynamicTools?: DynamicToolDeclaration[];
+  history?: TurnHistoryMessage[];
   maxSteps: number;
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
@@ -310,6 +327,8 @@ export interface ProviderCompleteRequest {
   builtins: BuiltinToolId[];
   system: string;
   input: InteractionPart[];
+  history?: TurnHistoryMessage[];
+  dynamicTools?: DynamicToolDeclaration[];
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
   geminiBucket: GeminiBucket;

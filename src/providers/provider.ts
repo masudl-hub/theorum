@@ -3,10 +3,9 @@ import { fetchGemini, type GeminiTransport } from '../guardrails/keys.ts';
 import {
   eventsFromComplete,
   eventsFromDelta,
-  extractUsageTokens,
+  extractTokenEvent,
   tryStructured,
 } from '../kernel/engine/delta.ts';
-import { asRecord } from '../kernel/engine/record.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../kernel/types.ts';
 import { tapFetch } from './google-tap.ts';
 import { toInteractionsBody } from './interactions.ts';
@@ -67,22 +66,11 @@ function foldPayload(event: Record<string, unknown>, acc: { text: string }): Tur
   }
 
   // Also check if usage was included on the event directly
-  const interaction = asRecord(event.interaction) ?? event;
-  const usage = extractUsageTokens(
-    interaction.usage ??
-      interaction.usage_metadata ??
-      interaction.usageMetadata ??
-      event.usage ??
-      event.usageMetadata ??
-      event.usage_metadata,
-  );
-  const interactionId = typeof interaction.id === 'string' ? interaction.id : undefined;
-  if (usage && !events.some((e) => e.type === 'tokens')) {
-    events.push({
-      type: 'tokens',
-      tokens: usage,
-      ...(interactionId ? { interactionId } : {}),
-    });
+  if (!events.some((e) => e.type === 'tokens')) {
+    const tokenEvent = extractTokenEvent(event);
+    if (tokenEvent) {
+      events.push(tokenEvent);
+    }
   }
   return events;
 }

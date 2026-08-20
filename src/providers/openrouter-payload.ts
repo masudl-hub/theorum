@@ -1,11 +1,13 @@
 import { CATALOG } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
 import type {
+  DynamicToolDeclaration,
   InteractionMediaPart,
   InteractionPart,
   ModelId,
   ProviderCompleteRequest,
   ThinkingLevel,
+  TurnHistoryMessage,
 } from '../kernel/types.ts';
 
 interface OpenRouterConfig {
@@ -17,13 +19,6 @@ interface OpenRouterConfig {
   modelMap?: Record<string, string>;
 }
 
-const DEFAULT_MODEL_MAP: Record<string, string> = {
-  gemini35FlashLite: 'google/gemini-2.5-flash',
-  gemini31FlashLite: 'google/gemini-2.5-flash',
-  gemini37Flash: 'google/gemini-2.5-pro',
-  gemini31ProPreview: 'google/gemini-2.5-pro',
-};
-
 function resolveOpenRouterModel(
   modelId: ModelId | string,
   customMap?: Record<string, string>,
@@ -31,10 +26,7 @@ function resolveOpenRouterModel(
   if (customMap?.[modelId]) {
     return customMap[modelId];
   }
-  if (DEFAULT_MODEL_MAP[modelId]) {
-    return DEFAULT_MODEL_MAP[modelId];
-  }
-  const catalogEntry = CATALOG.models[modelId as ModelId];
+  const catalogEntry = CATALOG.models[modelId as keyof typeof CATALOG.models];
   if (catalogEntry?.apiId) {
     return `google/${catalogEntry.apiId}`;
   }
@@ -97,6 +89,31 @@ function wireMessageContent(parts: InteractionPart[]): unknown {
   });
 }
 
+function wireHistoryMessage(msg: TurnHistoryMessage): Record<string, unknown> {
+  let content: unknown = msg.content ?? '';
+  if (msg.parts && msg.parts.length > 0) {
+    content = wireMessageContent(msg.parts);
+  }
+  return {
+    role: msg.role,
+    content,
+  };
+}
+
+function wireTools(dynamicTools?: DynamicToolDeclaration[]): Record<string, unknown>[] {
+  if (!dynamicTools || dynamicTools.length === 0) {
+    return [];
+  }
+  return dynamicTools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description ?? '',
+      parameters: t.parameters ?? { type: 'object', properties: {} },
+    },
+  }));
+}
+
 function toOpenRouterPayload(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,
@@ -106,6 +123,12 @@ function toOpenRouterPayload(
 
   if (req.system) {
     messages.push({ role: 'system', content: req.system });
+  }
+
+  if (req.history && req.history.length > 0) {
+    for (const h of req.history) {
+      messages.push(wireHistoryMessage(h));
+    }
   }
 
   if (req.input.length > 0) {
@@ -140,6 +163,11 @@ function toOpenRouterPayload(
         },
       };
     }
+  }
+
+  const tools = wireTools(req.dynamicTools);
+  if (tools.length > 0) {
+    payload.tools = tools;
   }
 
   if (req.builtins.includes('googleSearch')) {

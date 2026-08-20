@@ -1,14 +1,13 @@
 import { publicError } from '../guardrails/error.ts';
 import { sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
 import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
+import { sha256 } from '../kernel/engine/hash.ts';
 import type { ResolvedGeneration, TurnBlob, TurnEvent, TurnRequest } from '../kernel/types.ts';
 import { attachResolved, attachTape, attachUsage } from './trace-attach.ts';
 import { completedInteraction } from './trace-usage.ts';
 
 const TRACE_VERSION = 2;
 const TITLE_MAX = 80;
-const HEX_PAD = 2;
-const HEX_RADIX = 16;
 
 export interface TraceImage {
   mimeType: string;
@@ -82,15 +81,6 @@ interface TraceRecord {
     http?: unknown;
     error?: string;
   };
-}
-
-function hexSha256(bytes: Uint8Array): string {
-  return [...bytes].map((b) => b.toString(HEX_RADIX).padStart(HEX_PAD, '0')).join('');
-}
-
-async function sha256(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return hexSha256(new Uint8Array(buf));
 }
 
 function hashBlobs(blobs: TurnBlob[] | undefined): Promise<TraceImage[]> {

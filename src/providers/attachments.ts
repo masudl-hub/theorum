@@ -161,7 +161,8 @@ function sanitizeTurnBlobsForProfile(
   if (files.length === 0 && clips.length === 0) {
     return { attachments, voice };
   }
-  return sanitizeTurnBlobs(attachments, voice, requireMediaLimits(getProfile(profileId)));
+  const limits = requireMediaLimits(getProfile(profileId));
+  return sanitizeTurnBlobs(attachments, voice, limits);
 }
 
 export {

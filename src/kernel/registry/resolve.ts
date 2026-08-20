@@ -236,6 +236,8 @@ function resolveTurn(req: TurnRequest): {
       temperature: limits.temperature,
       builtins,
       custom: resolveCustom(profile, safe.tools),
+      dynamicTools: safe.dynamicTools,
+      history: safe.input.history,
       maxSteps: profile.maxSteps,
       structured: resolveStructured(profile, safe.input.slots),
       image: resolveImageFormat(profile, model, safe.input.slots),

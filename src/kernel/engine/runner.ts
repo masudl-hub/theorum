@@ -100,6 +100,8 @@ async function* yieldProviderEvents(args: {
     builtins: generation.builtins,
     system,
     input: generation.input,
+    history: generation.history,
+    dynamicTools: generation.dynamicTools,
     structured: generation.structured,
     image: generation.image,
     geminiBucket: generation.geminiBucket,
@@ -272,7 +274,9 @@ async function* runTurn(
     bucket = geminiBucket;
     canary = turnCanary;
     const role = pickSystemRole(profile, safe.input.role);
-    const bound = bindCanary(systemFromProfile(profile, role), turnCanary);
+    const profileSys = systemFromProfile(profile, role);
+    const combinedSys = [profileSys, safe.system].filter(Boolean).join('\n\n');
+    const bound = bindCanary(combinedSys, turnCanary);
     system = bound;
     for await (const event of emitTurn({
       safe,

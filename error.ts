@@ -35,7 +35,7 @@ function publicText(text: string): string {
   if (exact) {
     return exact;
   }
-  if (text.startsWith('Gemini HTTP')) {
+  if (text.startsWith('Gemini HTTP') || text.startsWith('OpenRouter HTTP')) {
     return PUBLIC_UNAVAILABLE;
   }
   if (text.includes('not gated') || text.includes('not allowed')) {

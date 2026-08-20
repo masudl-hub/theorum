@@ -11,3 +11,4 @@ export * from './trace.ts';
 export * from './quota.ts';
 export * from './keys.ts';
 export * from './sanitize.ts';
+export * from './openrouter.ts';

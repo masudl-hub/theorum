@@ -96,8 +96,6 @@ async function* streamComplete(
     withTap(req, transport),
   );
   if (res.status !== HTTP_OK) {
-    const errBody = await res.text().catch(() => '');
-    console.error(`Gemini HTTP ${res.status}:`, errBody);
     yield { type: 'error', error: publicError(`Gemini HTTP ${String(res.status)}`) };
     return;
   }
@@ -124,7 +122,6 @@ async function* streamGuarded(
   try {
     yield* streamComplete(req, transport);
   } catch (err) {
-    console.error('streamGuarded caught:', err);
     yield { type: 'error', error: publicError(err) };
   }
 }

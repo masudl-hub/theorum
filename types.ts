@@ -293,7 +293,7 @@ export interface TurnTokens {
 export interface TurnEvent {
   type: TurnEventType;
   text?: string;
-  tool?: { name: string; arguments?: Record<string, unknown>; result?: ToolEnvelope };
+  tool?: { name: string; arguments?: Record<string, unknown>; result?: ToolEnvelope; id?: string };
   structured?: unknown;
   media?: { mimeType: string; data: string };
   tokens?: TurnTokens;

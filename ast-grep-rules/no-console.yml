@@ -1,0 +1,6 @@
+id: no-console
+language: TypeScript
+severity: error
+message: console is banned in Theorum. Tests assert; production code returns events.
+rule:
+  pattern: console.$METHOD($$$ARGS)

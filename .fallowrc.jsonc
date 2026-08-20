@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": [
+    "runner.ts",
+    "provider.ts",
+    "reply.ts",
+    "mint-trace.ts",
+    "theorum.test.ts",
+    "vinylator-profile.test.ts",
+    "keys.test.ts",
+    "provider.test.ts",
+    "sanitize.test.ts",
+    "boundary.test.ts",
+    "quota.test.ts",
+    "error.test.ts",
+    "trace.test.ts",
+    "gemini-tape.test.ts",
+    "sse.test.ts"
+  ],
+  "ignorePatterns": ["node_modules/**", "coverage/**", "scripts/**"],
+  "health": {
+    "maxCyclomatic": 10,
+    "maxCognitive": 10,
+    "maxCrap": 16,
+    "maxUnitSize": 40,
+    "coverage": "coverage/coverage-final.json"
+  },
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "error",
+    "unused-types": "error",
+    "unused-dependencies": "error",
+    "circular-dependency": "error",
+    "unresolved-imports": "error",
+    "private-type-leaks": "error",
+    "boundary-violations": "error"
+  },
+  "duplicates": {
+    "mode": "strict",
+    "minTokens": 40,
+    "minLines": 5,
+    "minOccurrences": 2,
+    "ignoreImports": true
+  },
+  "audit": {
+    "gate": "all"
+  }
+}

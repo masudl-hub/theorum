@@ -1,0 +1,6 @@
+id: no-non-null-assertion
+language: TypeScript
+severity: error
+message: Non-null assertions are banned. Narrow the type.
+rule:
+  pattern: '$X!'

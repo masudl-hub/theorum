@@ -1,0 +1,6 @@
+ruleDirs:
+  - ast-grep-rules
+languageGlobs:
+  TypeScript:
+    - '*.ts'
+    - '**/*.ts'

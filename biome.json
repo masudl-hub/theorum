@@ -2,13 +2,17 @@
   "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
   "files": {
     "includes": [
-      "**/*.ts",
+      "src/**/*.ts",
+      "tests/**/*.ts",
+      "scripts/**/*.ts",
+      "scripts/**/*.mjs",
+      "mod.ts",
       "biome.json",
       "package.json",
       ".fallowrc.jsonc",
-      "!coverage",
       "!node_modules",
-      "!package-lock.json"
+      "!package-lock.json",
+      "!coverage"
     ]
   },
   "formatter": {
@@ -28,7 +32,22 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "all"
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noConstAssign": "error",
+        "noConstantCondition": "error"
+      },
+      "style": {
+        "useConst": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error"
+      },
+      "performance": {
+        "noBarrelFile": "off",
+        "noReExportAll": "off"
+      }
     }
   },
   "assist": {

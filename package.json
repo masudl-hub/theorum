@@ -1,21 +1,18 @@
 {
-  "private": true,
-  "name": "theorum",
+  "name": "@theorum/core",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "lint": "npm run lint:biome && npm run lint:ast-grep && npm run lint:fallow",
+    "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net",
+    "coverage": "rm -rf coverage && THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net --coverage=coverage tests/ && deno coverage coverage --lcov --output=coverage/lcov.info && node scripts/lcov-to-istanbul.mjs",
     "lint:biome": "biome check .",
     "lint:ast-grep": "ast-grep scan",
     "lint:fallow": "npm run coverage && fallow audit && fallow health && fallow dupes && fallow dead-code",
-    "coverage": "rm -rf coverage && THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net --coverage=coverage theorum.test.ts vinylator-profile.test.ts keys.test.ts provider.test.ts sanitize.test.ts boundary.test.ts quota.test.ts error.test.ts trace.test.ts gemini-tape.test.ts sse.test.ts && deno coverage coverage --lcov --output=coverage/lcov.info && node scripts/lcov-to-istanbul.mjs",
-    "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net theorum.test.ts vinylator-profile.test.ts keys.test.ts provider.test.ts sanitize.test.ts boundary.test.ts quota.test.ts error.test.ts trace.test.ts gemini-tape.test.ts sse.test.ts"
+    "lint": "npm run lint:biome && npm run lint:ast-grep && npm run lint:fallow"
   },
   "devDependencies": {
-    "@ast-grep/cli": "^0.39.9",
-    "@biomejs/biome": "2.5.8",
-    "fallow": "3.15.0"
-  },
-  "allowScripts": {
-    "@ast-grep/cli@0.39.9": true
+    "@biomejs/biome": "^2.5.8",
+    "@ast-grep/cli": "^0.41.0",
+    "fallow": "^0.3.0"
   }
 }

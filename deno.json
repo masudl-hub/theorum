@@ -1,9 +1,18 @@
 {
   "name": "@theorum/core",
   "version": "0.1.0",
-  "exports": "./mod.ts",
+  "exports": {
+    ".": "./mod.ts",
+    "./kernel": "./src/kernel/types.ts",
+    "./providers": "./src/providers/provider.ts",
+    "./openrouter": "./src/providers/openrouter.ts",
+    "./guardrails": "./src/guardrails/sanitize.ts",
+    "./observability": "./src/observability/trace.ts"
+  },
   "tasks": {
-    "test": "deno test -A",
-    "check": "deno check mod.ts"
+    "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net",
+    "check": "deno check mod.ts",
+    "lint": "npm run lint",
+    "verify:live": "deno run --allow-net --allow-env --allow-read scripts/verify-live.ts"
   }
 }

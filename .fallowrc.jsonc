@@ -1,21 +1,12 @@
 {
   "$schema": "./node_modules/fallow/schema.json",
   "entry": [
-    "runner.ts",
-    "provider.ts",
-    "reply.ts",
-    "mint-trace.ts",
-    "theorum.test.ts",
-    "vinylator-profile.test.ts",
-    "keys.test.ts",
-    "provider.test.ts",
-    "sanitize.test.ts",
-    "boundary.test.ts",
-    "quota.test.ts",
-    "error.test.ts",
-    "trace.test.ts",
-    "gemini-tape.test.ts",
-    "sse.test.ts"
+    "mod.ts",
+    "tests/kernel/**/*.ts",
+    "tests/guardrails/**/*.ts",
+    "tests/providers/**/*.ts",
+    "tests/observability/**/*.ts",
+    "tests/fixtures/**/*.ts"
   ],
   "ignorePatterns": ["node_modules/**", "coverage/**", "scripts/**"],
   "health": {

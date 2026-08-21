@@ -10,6 +10,7 @@
     "./observability": "./src/observability/trace.ts"
   },
   "tasks": {
+    "theorum": "deno run --allow-all src/cli/index.ts",
     "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net",
     "check": "deno check mod.ts",
     "lint": "npm run lint",

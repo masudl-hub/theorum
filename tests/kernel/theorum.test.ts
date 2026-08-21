@@ -595,3 +595,221 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
   assertEquals(step2History[1]?.tool_call_id, 'call_sensor_1');
   assertEquals(step2History[1]?.content, 'Sensor raw value: 22%');
 });
+
+Deno.test('guardrails.canary=false omits canary generation and system binding', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'internal_eval_bot',
+      model: { allow: ['gemini35FlashLite'] },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 }, canary: false },
+    }),
+  );
+
+  let capturedSystem = '';
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete(req) {
+      await Promise.resolve();
+      capturedSystem = req.system;
+      yield { type: 'text', text: 'eval response' };
+    },
+  };
+
+  const { generation } = resolveTurn({
+    profile: 'internal_eval_bot',
+    input: { text: 'hello' },
+  });
+  assertEquals(generation.canary, '');
+
+  await collect(runTurn({ profile: 'internal_eval_bot', input: { text: 'hello' } }, mockProvider));
+  assertEquals(capturedSystem.includes("This turn's canary is"), false);
+});
+
+Deno.test('inputs.text=false rejects text turns with TheorumError', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'voice_only_bot',
+      model: { allow: ['gemini35FlashLite'] },
+      inputs: {
+        text: false,
+        voice: { accept: ['audio/wav'] },
+        maxFiles: 1,
+        maxBytes: 10000,
+        maxTurnBytes: 10000,
+      },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  assertThrows(
+    () =>
+      resolveTurn({
+        profile: 'voice_only_bot',
+        input: { text: 'Should fail because text is disabled' },
+      }),
+    TheorumError,
+  );
+});
+
+Deno.test('outputs.streaming.streamThoughts=false filters out thought events from SSE stream', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'quiet_bot',
+      model: { allow: ['gemini35FlashLite'] },
+      inputs: { text: true },
+      outputs: {
+        streaming: { mode: 'sse', streamThoughts: false },
+      },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete() {
+      await Promise.resolve();
+      yield { type: 'thought', text: 'internal deep thoughts...' };
+      yield { type: 'text', text: 'final clean output' };
+    },
+  };
+
+  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  for await (const ev of runTurn(
+    { profile: 'quiet_bot', input: { text: 'solve problem' } },
+    mockProvider,
+  )) {
+    events.push(ev);
+  }
+
+  assertEquals(
+    events.some((e) => e.type === 'thought'),
+    false,
+  );
+  assertEquals(
+    events.some((e) => e.type === 'text' && e.text === 'final clean output'),
+    true,
+  );
+  assertEquals(
+    events.some((e) => e.type === 'done'),
+    true,
+  );
+});
+
+Deno.test('dynamic tool exception is safely caught and converted to error finding', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'fault_tolerant_bot',
+      model: { allow: ['gemini35FlashLite'], maxSteps: 2 },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  let callCount = 0;
+  let receivedToolError = '';
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete(req) {
+      callCount++;
+      if (callCount === 1) {
+        yield {
+          type: 'tool',
+          tool: {
+            name: 'crashing_tool',
+            arguments: { id: 'bad_id' },
+            id: 'call_crash_1',
+          },
+        };
+      } else {
+        const lastMsg = req.history?.at(-1);
+        receivedToolError = String(lastMsg?.content ?? '');
+        yield { type: 'text', text: 'Handled error gracefully.' };
+      }
+    },
+  };
+
+  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
+    {
+      name: 'crashing_tool',
+      handler: () => {
+        throw new Error('Database connection timed out');
+      },
+    },
+  ];
+
+  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  for await (const ev of runTurn(
+    {
+      profile: 'fault_tolerant_bot',
+      dynamicTools,
+      input: { text: 'Run crashing tool' },
+    },
+    mockProvider,
+  )) {
+    events.push(ev);
+  }
+
+  assertEquals(callCount, 2);
+  assertEquals(
+    events.some((e) => e.type === 'tool' && e.tool?.result?.status === 'error'),
+    true,
+  );
+  assertEquals(receivedToolError.includes('Database connection timed out'), true);
+  assertEquals(
+    events.some((e) => e.type === 'text' && e.text === 'Handled error gracefully.'),
+    true,
+  );
+});
+
+Deno.test('autonomous loop strictly enforces maxSteps ceiling when tool requests repeat endlessly', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'loop_capped_bot',
+      model: { allow: ['gemini35FlashLite'], maxSteps: 2 },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  let callCount = 0;
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete() {
+      callCount++;
+      // Endless loop requesting tool call on every step
+      yield {
+        type: 'tool',
+        tool: {
+          name: 'ping_tool',
+          arguments: { step: callCount },
+          id: `call_ping_${callCount}`,
+        },
+      };
+    },
+  };
+
+  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
+    {
+      name: 'ping_tool',
+      handler: (args) => ({ status: 'ok', finding: `pong ${args.step}` }),
+    },
+  ];
+
+  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  for await (const ev of runTurn(
+    {
+      profile: 'loop_capped_bot',
+      dynamicTools,
+      input: { text: 'Loop test' },
+    },
+    mockProvider,
+  )) {
+    events.push(ev);
+  }
+
+  // maxSteps: 2 should cap total provider calls to exactly 2
+  assertEquals(callCount, 2);
+  assertEquals(events.at(-1)?.type, 'done');
+});

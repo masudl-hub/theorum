@@ -1,4 +1,6 @@
-import { assertEquals, assertExists } from 'jsr:@std/assert';
+import { assertEquals, assertExists } from 'jsr:@std/assert@^1.0.0';
+import { listProfilesCommand, showProfileCommand } from '../../src/cli/commands/profile.ts';
+import { vaultStatusCommand } from '../../src/cli/commands/vault.ts';
 import {
   FIXTURE_PNG_BASE64,
   FIXTURE_WAV_BASE64,
@@ -10,6 +12,14 @@ import {
   synthesizeMatrixCombos,
   synthesizeStressCombo,
 } from '../../src/cli/matrix/synthesizer.ts';
+import {
+  dailyProfile,
+  mermaidProfile,
+  plannerProfile,
+  registerBuiltinProfiles,
+  studioProfile,
+} from '../../src/kernel/registry/builtin-profiles.ts';
+import { getProfile } from '../../src/kernel/registry/profiles.ts';
 import type { Profile } from '../../src/kernel/types.ts';
 
 const testProfile: Profile = {
@@ -92,4 +102,17 @@ Deno.test('buildCustomTurnRequest respects explicit CLI flag overrides', () => {
   assertEquals(req.select, 'fast');
   assertEquals(req.tools?.googleMaps, true);
   assertEquals(req.tools?.googleSearch, false);
+});
+
+Deno.test('builtin profiles register and commands render cards', () => {
+  registerBuiltinProfiles();
+  assertEquals(getProfile('mermaid').id, mermaidProfile.id);
+  assertEquals(getProfile('studio').id, studioProfile.id);
+  assertEquals(getProfile('planner').id, plannerProfile.id);
+  assertEquals(getProfile('daily').id, dailyProfile.id);
+
+  listProfilesCommand();
+  showProfileCommand('mermaid');
+  showProfileCommand('non_existent');
+  vaultStatusCommand();
 });

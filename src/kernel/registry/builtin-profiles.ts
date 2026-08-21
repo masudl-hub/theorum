@@ -1,11 +1,7 @@
-import {
-  CHAT_MEDIA_LIMITS,
-  IMAGE_INPUT_MIMES,
-  VOICE_INPUT_MIMES,
-} from './catalog.ts';
+import type { Profile } from '../types.ts';
+import { CHAT_MEDIA_LIMITS, IMAGE_INPUT_MIMES, VOICE_INPUT_MIMES } from './catalog.ts';
 import { registerProfile } from './profiles.ts';
 import { registerStructured } from './schemas.ts';
-import type { Profile } from '../types.ts';
 
 const MERMAID_ATTACH = [
   ...IMAGE_INPUT_MIMES,

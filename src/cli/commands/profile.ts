@@ -5,8 +5,7 @@ function formatProfileInputs(p: Profile): string {
   const inputs: string[] = [];
   if (p.inputs.text !== false) inputs.push('text');
   if (p.inputs.voice) inputs.push('voice');
-  if (p.inputs.attachments)
-    inputs.push(`attachments [${p.inputs.attachments.accept?.join(', ')}]`);
+  if (p.inputs.attachments) inputs.push(`attachments [${p.inputs.attachments.accept?.join(', ')}]`);
   return inputs.join(' | ');
 }
 

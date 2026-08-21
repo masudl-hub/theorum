@@ -109,6 +109,24 @@ function* interceptProviderTool(
   }
 }
 
+function shouldSkipStreamEvent(event: TurnEvent, profile: Profile): boolean {
+  return event.type === 'thought' && profile.outputs.streaming?.streamThoughts === false;
+}
+
+function* processNormalEvent(
+  event: TurnEvent,
+  profile: Profile,
+  generation: ReturnType<typeof resolveTurn>['generation'],
+): Generator<TurnEvent> {
+  if (event.type === 'tool') {
+    yield* interceptProviderTool(event, profile, generation);
+  } else if (event.type === 'error') {
+    yield { type: 'error', error: publicError(event.error) };
+  } else {
+    yield event;
+  }
+}
+
 async function* yieldProviderEvents(args: {
   profile: Profile;
   generation: ReturnType<typeof resolveTurn>['generation'];
@@ -137,18 +155,15 @@ async function* yieldProviderEvents(args: {
       gemini.push(row);
     },
   })) {
-    if (eventHasCanary(event, canary)) {
+    if (canary && eventHasCanary(event, canary)) {
       yield redactCanary(event, canary);
       yield { type: 'error', error: publicError('canary leaked') };
       return;
     }
-    if (event.type === 'tool') {
-      yield* interceptProviderTool(event, profile, generation);
-    } else if (event.type === 'error') {
-      yield { type: 'error', error: publicError(event.error) };
-    } else {
-      yield event;
+    if (shouldSkipStreamEvent(event, profile)) {
+      continue;
     }
+    yield* processNormalEvent(event, profile, generation);
   }
 }
 

@@ -1,6 +1,10 @@
 id: no-console
 language: TypeScript
 severity: error
-message: console is banned in Theorum. Tests assert; production code returns events.
+message: console is banned in Theorum kernel and providers. Tests assert; production code returns events.
+files:
+  - 'src/**/*.ts'
+ignores:
+  - 'src/cli/**/*.ts'
 rule:
   pattern: console.$METHOD($$$ARGS)

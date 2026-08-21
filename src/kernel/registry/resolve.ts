@@ -244,7 +244,7 @@ function resolveTurn(req: TurnRequest): {
       voice: profile.outputs.voice,
       input: resolveInputParts(profile, model, safe),
       geminiBucket: resolveGeminiBucket(profile.model.key ?? 'portfolio', model, builtins),
-      canary: mintCanary(),
+      canary: profile.guardrails.canary !== false ? mintCanary() : '',
     },
   };
 }

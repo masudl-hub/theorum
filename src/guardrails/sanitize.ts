@@ -99,7 +99,6 @@ function sanitizeHistory(
 function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
   let profileGuardrails: { sanitizeInput?: boolean; redactSensitive?: boolean } | undefined;
   try {
-    const { getProfile } = requireProfileLookup();
     profileGuardrails = getProfile(req.profile)?.guardrails;
   } catch {
     // If profile not registered yet, default to full guardrails
@@ -141,9 +140,6 @@ function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
       fix: sanitizeFix(input.fix, options),
       history: sanitizeHistory(input.history, options),
     },
-    toolInvoke: invoke,
-  };
-}
     toolInvoke: invoke,
   };
 }

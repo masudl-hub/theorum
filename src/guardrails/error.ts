@@ -28,6 +28,7 @@ const EXACT: Record<string, string> = {
   'askUser.prompt is required': 'That question needs a prompt.',
   'handoff.to is required': "That action isn't available.",
   'generateMedia is not wired; enable it on the profile when a media backend exists': PUBLIC_ACTION,
+  'This profile does not accept text input': PUBLIC_ACTION,
 };
 
 interface ErrorRule {

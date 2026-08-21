@@ -112,27 +112,48 @@ function mediaParts(
   });
 }
 
-function resolveInputParts(profile: Profile, model: ModelId, req: TurnRequest): InteractionPart[] {
-  const parts: InteractionPart[] = [];
-  const { text, attachments, voice, fix, history } = req.input;
+function extractTextPart(profile: Profile, req: TurnRequest): InteractionPart | null {
+  const { text, fix, history } = req.input;
+  if (profile.inputs.text === false) {
+    if (text) {
+      throw new TheorumError(`Profile ${profile.id} does not accept text input`);
+    }
+    return null;
+  }
   let promptText = text;
   if (fix) {
     promptText = synthesizeFixPrompt({ profile, fix, history });
   }
-  if (promptText) {
-    parts.push({ type: 'text', text: wrapUserData(promptText) });
+  if (!promptText) {
+    return null;
   }
+  return { type: 'text', text: wrapUserData(promptText) };
+}
+
+function extractMediaParts(profile: Profile, model: ModelId, req: TurnRequest): InteractionPart[] {
+  const { attachments, voice } = req.input;
   const files = attachments ?? [];
   const clips = voice ?? [];
   if (files.length + clips.length > 0) {
     assertAttachmentLimits([...files, ...clips], requireMediaLimits(profile));
   }
+  const parts: InteractionPart[] = [];
   if (files.length > 0) {
     parts.push(...mediaParts(profile, model, files, 'attachments'));
   }
   if (clips.length > 0) {
     parts.push(...mediaParts(profile, model, clips, 'voice'));
   }
+  return parts;
+}
+
+function resolveInputParts(profile: Profile, model: ModelId, req: TurnRequest): InteractionPart[] {
+  const parts: InteractionPart[] = [];
+  const textPart = extractTextPart(profile, req);
+  if (textPart) {
+    parts.push(textPart);
+  }
+  parts.push(...extractMediaParts(profile, model, req));
   return parts;
 }
 

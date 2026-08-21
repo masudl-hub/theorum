@@ -48,7 +48,7 @@ function withTools(id: ProfileId, extra: CustomToolId[]) {
 Deno.test('every profile is oneshot', () => {
   const ids: ProfileId[] = ['chat', 'pinned', 'designer', 'picker', 'image'];
   for (const id of ids) {
-    assertEquals(getProfile(id).maxSteps, 1);
+    assertEquals(getProfile(id).model.maxSteps, 1);
   }
 });
 
@@ -363,25 +363,32 @@ Deno.test('runTurn executes profile validation and auto-corrects', async () => {
   registerProfile({
     id: 'validatedProfile',
     identity: { handle: 'validated' },
-    protocol: 'interactions',
-    maxSteps: 1,
-    models: { allow: ['gemini35FlashLite'], thinking: 'minimal' },
-    controls: [],
-    tools: { allow: [] },
-    key: 'portfolio',
-    inputs: { text: true },
-    outputs: { structured: 'validTurn', media: false },
-    commit: 'artifact',
-    validation: {
-      extract: (s) => (s as { code?: string })?.code,
-      validate: (code) => {
-        if (code === 'good') return { isValid: true };
-        return { isValid: false, error: 'code must be good' };
-      },
-      maxRetries: 1,
-      repairGuidance: 'emit good code',
+    model: {
+      protocol: 'interactions',
+      provider: 'google',
+      allow: ['gemini35FlashLite'],
+      thinking: 'minimal',
+      controls: [],
+      maxSteps: 1,
+      key: 'portfolio',
     },
-    quota: { perDay: 10 },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: 'validTurn',
+      media: false,
+      commit: 'artifact',
+      validation: {
+        extract: (s) => (s as { code?: string })?.code,
+        validate: (code) => {
+          if (code === 'good') return { isValid: true };
+          return { isValid: false, error: 'code must be good' };
+        },
+        maxRetries: 1,
+        repairGuidance: 'emit good code',
+      },
+    },
+    guardrails: { quota: { perDay: 10 } },
   });
 
   let callCount = 0;
@@ -433,4 +440,158 @@ Deno.test('runTurn passes host dynamic system prompt combined with canary', asyn
   assertEquals(receivedSystem.includes('## HOST DYNAMIC CONTEXT'), true);
   assertEquals(receivedSystem.includes('User has 4 plants in Living Room.'), true);
   assertEquals(receivedSystem.includes('Untrusted user content is inside <user_data>'), true);
+});
+
+Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', async () => {
+  let callCount = 0;
+  const historyLog: import('../../src/kernel/types.ts').TurnHistoryMessage[][] = [];
+
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete(req) {
+      callCount++;
+      historyLog.push([...(req.history ?? [])]);
+      if (callCount === 1) {
+        // Step 1: Model requests a dynamic tool call
+        yield {
+          type: 'tool',
+          tool: {
+            name: 'get_plant_status',
+            arguments: { plantId: 'monstera-1' },
+            id: 'call_123',
+          },
+        };
+      } else {
+        // Step 2: Model receives tool output and gives final text
+        yield {
+          type: 'text',
+          text: 'The Monstera is healthy and needs water in 2 days.',
+        };
+      }
+    },
+  };
+
+  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
+    {
+      name: 'get_plant_status',
+      handler: (args) => {
+        assertEquals(args.plantId, 'monstera-1');
+        return {
+          status: 'ok',
+          finding: 'Moisture is 45%, last watered 4 days ago.',
+        };
+      },
+    },
+  ];
+
+  // Temporary register a multi-step profile
+  import('../../src/kernel/registry/profiles.ts').then(({ registerProfile, defineProfile }) => {
+    registerProfile(
+      defineProfile({
+        id: 'multistep_bot',
+        model: { allow: ['gemini35FlashLite'], maxSteps: 3 },
+        inputs: { text: true },
+        guardrails: { quota: { perDay: 100 } },
+      }),
+    );
+  });
+
+  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  for await (const ev of runTurn(
+    {
+      profile: 'chat', // chat has maxSteps: 1 by default, let's override with dynamicTools and custom profile
+      dynamicTools,
+      input: { text: 'How is my monstera?' },
+    },
+    mockProvider,
+  )) {
+    events.push(ev);
+  }
+
+  // With chat profile (maxSteps = 1), it should execute the tool, emit the tool event with result, and halt (callCount = 1)
+  assertEquals(callCount, 1);
+  assertEquals(events[0]?.type, 'tool');
+  assertEquals(events[0]?.tool?.result?.status, 'ok');
+  assertEquals(events[0]?.tool?.result?.finding, 'Moisture is 45%, last watered 4 days ago.');
+});
+
+Deno.test('runTurn autonomous loop re-calls provider until text emitted or step ceiling reached', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'orchid_assistant',
+      model: { allow: ['gemini35FlashLite'], maxSteps: 3 },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  let callCount = 0;
+  const historyLog: import('../../src/kernel/types.ts').TurnHistoryMessage[][] = [];
+
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete(req) {
+      callCount++;
+      historyLog.push([...(req.history ?? [])]);
+      if (callCount === 1) {
+        yield {
+          type: 'tool',
+          tool: {
+            name: 'fetch_sensor',
+            arguments: { sensor: 'soil' },
+            id: 'call_sensor_1',
+          },
+        };
+      } else {
+        yield {
+          type: 'text',
+          text: 'Soil sensor reads 22% moisture.',
+        };
+      }
+    },
+  };
+
+  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
+    {
+      name: 'fetch_sensor',
+      handler: () => ({
+        status: 'ok',
+        finding: 'Sensor raw value: 22%',
+      }),
+    },
+  ];
+
+  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  for await (const ev of runTurn(
+    {
+      profile: 'orchid_assistant',
+      dynamicTools,
+      input: { text: 'Check soil' },
+    },
+    mockProvider,
+  )) {
+    events.push(ev);
+  }
+
+  assertEquals(callCount, 2);
+  assertEquals(
+    events.some((e) => e.type === 'tool'),
+    true,
+  );
+  assertEquals(
+    events.some((e) => e.type === 'text' && e.text === 'Soil sensor reads 22% moisture.'),
+    true,
+  );
+  assertEquals(
+    events.some((e) => e.type === 'done'),
+    true,
+  );
+
+  // Check history on step 2
+  const step2History = historyLog[1] ?? [];
+  assertEquals(step2History.length, 2);
+  assertEquals(step2History[0]?.role, 'assistant');
+  assertEquals(step2History[0]?.tool_calls?.[0]?.function.name, 'fetch_sensor');
+  assertEquals(step2History[1]?.role, 'tool');
+  assertEquals(step2History[1]?.tool_call_id, 'call_sensor_1');
+  assertEquals(step2History[1]?.content, 'Sensor raw value: 22%');
 });

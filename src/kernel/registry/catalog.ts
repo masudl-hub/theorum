@@ -21,6 +21,7 @@ const DEFAULT_TEMPERATURE = 1;
 const FLASH_LITE_MAX_OUTPUT_TOKENS = 8192;
 const FLASH_37_MAX_OUTPUT_TOKENS = 64_000;
 const IMAGE_FLASH_LITE_MAX_OUTPUT_TOKENS = 4096;
+const TTS_FLASH_MAX_OUTPUT_TOKENS = 2048;
 
 const IMAGE_INPUT_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
 const VOICE_INPUT_MIMES = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4'];
@@ -111,6 +112,7 @@ const FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'low', 'medium',
 const FLASH_37_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
 /** 3.1 Flash Lite Image: docs only list minimal|high. */
 const IMAGE_FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'high'];
+const TTS_THINKING_LEVELS: ThinkingLevel[] = ['minimal'];
 
 const CATALOG: Catalog = {
   models: {
@@ -158,6 +160,15 @@ const CATALOG: Catalog = {
         outputMime: 'image/jpeg',
         allowsGrounding: false,
       },
+    },
+    gemini31FlashTts: {
+      apiId: 'gemini-3.1-flash-tts-preview',
+      thinking: { on: 'minimal', off: 'minimal' },
+      thinkingLevels: TTS_THINKING_LEVELS,
+      summaries: { on: 'none', off: 'none' },
+      maxOutputTokens: TTS_FLASH_MAX_OUTPUT_TOKENS,
+      temperature: DEFAULT_TEMPERATURE,
+      freeBuiltins: [],
     },
   },
   // Off until the turn sets tools[id]. Profile allow is only the ceiling.

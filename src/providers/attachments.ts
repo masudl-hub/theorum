@@ -131,16 +131,20 @@ function sanitizeAttachment(blob: TurnBlob): TurnBlob {
   return { mimeType, data: encodeB64(bytes) };
 }
 
+function hasTurnBlobs(attachments?: TurnBlob[], voice?: TurnBlob[]): boolean {
+  return (attachments?.length ?? 0) > 0 || (voice?.length ?? 0) > 0;
+}
+
 function sanitizeTurnBlobs(
   attachments: TurnBlob[] | undefined,
   voice: TurnBlob[] | undefined,
   limits: MediaLimits | undefined,
 ): { attachments?: TurnBlob[]; voice?: TurnBlob[] } {
-  const files = attachments ?? [];
-  const clips = voice ?? [];
-  if (files.length === 0 && clips.length === 0) {
+  if (!hasTurnBlobs(attachments, voice)) {
     return { attachments, voice };
   }
+  const files = attachments ?? [];
+  const clips = voice ?? [];
   if (!limits) {
     throw new TheorumError('This profile does not accept files.');
   }
@@ -156,9 +160,7 @@ function sanitizeTurnBlobsForProfile(
   attachments: TurnBlob[] | undefined,
   voice: TurnBlob[] | undefined,
 ): { attachments?: TurnBlob[]; voice?: TurnBlob[] } {
-  const files = attachments ?? [];
-  const clips = voice ?? [];
-  if (files.length === 0 && clips.length === 0) {
+  if (!hasTurnBlobs(attachments, voice)) {
     return { attachments, voice };
   }
   const limits = requireMediaLimits(getProfile(profileId));

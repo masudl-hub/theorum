@@ -177,29 +177,62 @@ function buildHeaders(apiKey: string, config: OpenRouterConfig): Record<string, 
   return headers;
 }
 
+async function postOpenRouter(
+  req: ProviderCompleteRequest,
+  config: OpenRouterConfig,
+  apiKey: string,
+): Promise<Response> {
+  const baseUrl = config.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL;
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const fetchFn = config.fetch ?? fetch;
+  const headers = buildHeaders(apiKey, config);
+  const body = JSON.stringify(toOpenRouterPayload(req, config));
+  return await fetchFn(url, { method: 'POST', headers, body });
+}
+
+function processChoiceDeltas(choices: unknown, acc: StreamAccumulator): TurnEvent[] {
+  if (!Array.isArray(choices)) {
+    return [];
+  }
+  const events: TurnEvent[] = [];
+  for (const choice of choices) {
+    if (choice && typeof choice === 'object') {
+      const c = choice as Record<string, unknown>;
+      if (c.delta && typeof c.delta === 'object') {
+        events.push(...processDelta(c.delta as Record<string, unknown>, acc));
+      }
+    }
+  }
+  return events;
+}
+
+function* yieldRemainingStreamEvents(
+  req: ProviderCompleteRequest,
+  acc: StreamAccumulator,
+): Generator<TurnEvent> {
+  for (const ev of emitRemainingTools(acc)) {
+    yield ev;
+  }
+  if (req.structured && acc.text) {
+    const structured = tryStructured(acc.text);
+    if (structured) {
+      yield structured;
+    }
+  }
+  yield { type: 'done' };
+}
+
 async function* streamOpenRouter(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,
 ): AsyncGenerator<TurnEvent> {
-  const apiKey =
-    config.apiKey ?? (typeof Deno !== 'undefined' ? Deno.env.get('OPENROUTER_API_KEY') : undefined);
+  const apiKey = resolveOpenRouterApiKey(config.apiKey);
   if (!apiKey) {
     yield { type: 'error', error: publicError('missing OpenRouter API key') };
     return;
   }
 
-  const baseUrl = config.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL;
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-  const fetchFn = config.fetch ?? fetch;
-
-  const headers = buildHeaders(apiKey, config);
-  const body = JSON.stringify(toOpenRouterPayload(req, config));
-  const res = await fetchFn(url, {
-    method: 'POST',
-    headers,
-    body,
-  });
-
+  const res = await postOpenRouter(req, config, apiKey);
   if (res.status !== HTTP_OK) {
     yield { type: 'error', error: publicError(`OpenRouter HTTP ${String(res.status)}`) };
     return;
@@ -210,17 +243,8 @@ async function* streamOpenRouter(
 
   for await (const payload of readSseLines(res)) {
     req.tapGemini?.(payload);
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
-    for (const choice of choices) {
-      if (choice && typeof choice === 'object') {
-        const c = choice as Record<string, unknown>;
-        if (c.delta && typeof c.delta === 'object') {
-          const events = processDelta(c.delta as Record<string, unknown>, acc);
-          for (const ev of events) {
-            yield ev;
-          }
-        }
-      }
+    for (const ev of processChoiceDeltas(payload.choices, acc)) {
+      yield ev;
     }
 
     const usage = parseUsage(payload.usage);
@@ -230,19 +254,13 @@ async function* streamOpenRouter(
     }
   }
 
-  const toolEvents = emitRemainingTools(acc);
-  for (const ev of toolEvents) {
-    yield ev;
-  }
+  yield* yieldRemainingStreamEvents(req, acc);
+}
 
-  if (req.structured && acc.text) {
-    const structured = tryStructured(acc.text);
-    if (structured) {
-      yield structured;
-    }
-  }
-
-  yield { type: 'done' };
+export function resolveOpenRouterApiKey(explicitKey?: string): string | undefined {
+  if (explicitKey) return explicitKey;
+  if (typeof Deno !== 'undefined') return Deno.env.get('OPENROUTER_API_KEY');
+  return undefined;
 }
 
 function createOpenRouterProvider(config: OpenRouterConfig = {}): ModelProvider {

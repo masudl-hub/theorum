@@ -44,25 +44,35 @@ function eventType(event: Record<string, unknown>): string {
   return String(event.event_type ?? event.type ?? '');
 }
 
-function foldPayload(event: Record<string, unknown>, acc: { text: string }): TurnEvent[] {
-  const kind = eventType(event);
-  const events: TurnEvent[] = [];
-  if (kind === 'content.delta' || kind === 'step.delta') {
-    const deltaEvents = eventsFromDelta(event.delta);
-    for (const item of deltaEvents) {
-      if (item.type === 'text' && item.text) {
-        acc.text += item.text;
-      }
-      events.push(item);
-    }
-  }
-  if (
+function isDeltaEvent(kind: string): boolean {
+  return kind === 'content.delta' || kind === 'step.delta';
+}
+
+function isCompleteEvent(kind: string): boolean {
+  return (
     kind === 'interaction.complete' ||
     kind === 'interaction.completed' ||
     kind.startsWith('interaction.')
-  ) {
-    const completeEvents = eventsFromComplete(event, acc.text.length > 0);
-    events.push(...completeEvents);
+  );
+}
+
+function foldDeltaPayload(event: Record<string, unknown>, acc: { text: string }): TurnEvent[] {
+  const deltaEvents = eventsFromDelta(event.delta);
+  for (const item of deltaEvents) {
+    if (item.type === 'text' && item.text) {
+      acc.text += item.text;
+    }
+  }
+  return deltaEvents;
+}
+
+function foldPayload(event: Record<string, unknown>, acc: { text: string }): TurnEvent[] {
+  const kind = eventType(event);
+  const events: TurnEvent[] = [];
+  if (isDeltaEvent(kind)) {
+    events.push(...foldDeltaPayload(event, acc));
+  } else if (isCompleteEvent(kind)) {
+    events.push(...eventsFromComplete(event, acc.text.length > 0));
   }
 
   // Also check if usage was included on the event directly

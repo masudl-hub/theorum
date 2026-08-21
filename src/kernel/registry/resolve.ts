@@ -38,7 +38,7 @@ function firstSelectKey(selectMap: Record<string, ModelId>): string | undefined 
 }
 
 function lookupSelectId(profile: Profile, select?: string): ModelId | undefined {
-  const { select: selectMap } = profile.models;
+  const { select: selectMap } = profile.model;
   if (!selectMap) {
     return undefined;
   }
@@ -53,9 +53,9 @@ function lookupSelectId(profile: Profile, select?: string): ModelId | undefined 
 }
 
 function pickModel(profile: Profile, select?: string): ModelId {
-  if (profile.models.select) {
+  if (profile.model.select) {
     const id = lookupSelectId(profile, select);
-    if (!(id && profile.models.allow.includes(id))) {
+    if (!(id && profile.model.allow.includes(id))) {
       let label = '';
       if (select) {
         label = select;
@@ -64,7 +64,7 @@ function pickModel(profile: Profile, select?: string): ModelId {
     }
     return id;
   }
-  const [only] = profile.models.allow;
+  const [only] = profile.model.allow;
   if (!only) {
     throw new TheorumError(`Profile ${profile.id} has no models`);
   }
@@ -90,7 +90,7 @@ function pinnedLevel(
 }
 
 function thinkingFromPin(profile: Profile, select?: string): ThinkingLevel {
-  const pinned = profile.models.thinking;
+  const pinned = profile.model.thinking;
   if (typeof pinned === 'string') {
     return pinned;
   }
@@ -101,7 +101,7 @@ function thinkingFromPin(profile: Profile, select?: string): ThinkingLevel {
   if (fromSelect) {
     return fromSelect;
   }
-  const fromFirst = pinnedLevel(pinned, firstSelectKey(profile.models.select ?? {}));
+  const fromFirst = pinnedLevel(pinned, firstSelectKey(profile.model.select ?? {}));
   if (fromFirst) {
     return fromFirst;
   }
@@ -114,7 +114,7 @@ function resolveThinking(
   thinkingOn: boolean | undefined,
   select?: string,
 ): ThinkingLevel {
-  const raw = profile.controls.includes('thinking')
+  const raw = profile.model.controls?.includes('thinking')
     ? thinkingFromControl(modelId, thinkingOn)
     : thinkingFromPin(profile, select);
   return clampThinkingLevel(modelId, raw);
@@ -125,12 +125,12 @@ function resolveSummaries(
   modelId: ModelId,
   thinkingOn: boolean | undefined,
 ): 'auto' | 'none' {
-  const override = profile.models.override?.[modelId]?.summaries;
+  const override = profile.model.override?.[modelId]?.summaries;
   if (override) {
     return override;
   }
   const catalog = CATALOG.models[modelId];
-  if (profile.controls.includes('thinking')) {
+  if (profile.model.controls?.includes('thinking')) {
     if (thinkingOn) {
       return catalog.summaries.on;
     }
@@ -173,7 +173,7 @@ function assertToolAllowed(profile: Profile, name: ToolId): void {
 }
 
 function assertHandoffTarget(profile: Profile, to: string): void {
-  const legal = profile.slots?.handoff;
+  const legal = profile.inputs.slots?.handoff;
   if (!legal?.includes(to)) {
     throw new TheorumError(`Handoff target '${to}' is not on ${profile.id}`);
   }
@@ -184,7 +184,7 @@ function resolveStructured(
   slots?: Record<string, string>,
 ): StructuredSchemaId | null {
   const { structured } = profile.outputs;
-  if (structured === null) {
+  if (!structured) {
     return null;
   }
   if (typeof structured === 'string') {
@@ -208,7 +208,7 @@ function generationLimits(
   temperature: number;
 } {
   const catalog = CATALOG.models[model];
-  const ov = profile.models.override?.[model];
+  const ov = profile.model.override?.[model];
   return {
     maxOutputTokens: ov?.maxOutputTokens ?? catalog.maxOutputTokens,
     temperature: ov?.temperature ?? catalog.temperature,
@@ -238,11 +238,12 @@ function resolveTurn(req: TurnRequest): {
       custom: resolveCustom(profile, safe.tools),
       dynamicTools: safe.dynamicTools,
       history: safe.input.history,
-      maxSteps: profile.maxSteps,
+      maxSteps: profile.model.maxSteps ?? 1,
       structured: resolveStructured(profile, safe.input.slots),
       image: resolveImageFormat(profile, model, safe.input.slots),
+      voice: profile.outputs.voice,
       input: resolveInputParts(profile, model, safe),
-      geminiBucket: resolveGeminiBucket(profile.key, model, builtins),
+      geminiBucket: resolveGeminiBucket(profile.model.key ?? 'portfolio', model, builtins),
       canary: mintCanary(),
     },
   };
@@ -259,17 +260,18 @@ function primaryImageSpec(allow: ModelId[]) {
 /** UI projection: catalog ∩ profile. Swatches are not included. */
 function projectProfile(id: Profile['id']) {
   const profile = getProfile(id);
-  const { models, slots, style, identity, tools, inputs, outputs, maxSteps, controls } = profile;
-  const { select } = models;
+  const { model, identity, tools, inputs, outputs } = profile;
+  const { select, allow, maxSteps, controls } = model;
   const { handle, chat } = identity;
+  const { slots } = inputs;
   return {
     id: profile.id,
     handle,
     chat: chat !== false,
-    maxSteps,
-    models: models.allow,
+    maxSteps: maxSteps ?? 1,
+    models: allow,
     select: select ?? null,
-    controls,
+    controls: controls ?? [],
     tools: tools.allow.map((name) => ({
       name,
       ...CATALOG.tools[name],
@@ -277,8 +279,7 @@ function projectProfile(id: Profile['id']) {
     inputs,
     slots: slots ?? {},
     outputs,
-    image: primaryImageSpec(models.allow),
-    style: style ?? null,
+    image: primaryImageSpec(allow),
   };
 }
 

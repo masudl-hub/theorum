@@ -26,3 +26,4 @@ export * from './src/providers/interactions.ts';
 export * from './src/providers/openrouter.ts';
 export * from './src/providers/openrouter-payload.ts';
 export * from './src/providers/provider.ts';
+export * from './src/providers/tts.ts';

@@ -105,6 +105,33 @@ Deno.test('chat voice audio wires as Interactions type audio', () => {
   );
 });
 
+Deno.test('Interactions body formats multi-turn history with text and parts', () => {
+  const req = fromMermaid();
+  req.history = [
+    { role: 'user', content: 'What is plant care?' },
+    { role: 'assistant', content: 'It is nurturing plants.' },
+    {
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'Check this image' },
+        { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+      ],
+    },
+  ];
+  const body = toInteractionsBody(req);
+  const input = body.input as Array<{ type: string; content: Array<Record<string, string>> }>;
+  assertEquals(input.length, 4);
+  assertEquals(input[0]?.type, 'user_input');
+  assertEquals(input[0]?.content[0]?.text, 'What is plant care?');
+  assertEquals(input[1]?.type, 'model_turn');
+  assertEquals(input[1]?.content[0]?.text, 'It is nurturing plants.');
+  assertEquals(input[2]?.type, 'user_input');
+  assertEquals(input[2]?.content[0]?.text, 'Check this image');
+  assertEquals(input[2]?.content[1]?.mime_type, 'image/png');
+  assertEquals(input[3]?.type, 'user_input');
+  assertEquals(input[3]?.content[0]?.text, '<user_data>\nhi\n</user_data>');
+});
+
 Deno.test('JSON Schema property names stay camelCase inside response_format.schema', () => {
   const { generation } = resolveTurn({
     profile: 'designer',

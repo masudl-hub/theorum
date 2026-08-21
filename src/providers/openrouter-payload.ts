@@ -6,6 +6,7 @@ import type {
   InteractionPart,
   ModelId,
   ProviderCompleteRequest,
+  StructuredSchemaId,
   ThinkingLevel,
   TurnHistoryMessage,
 } from '../kernel/types.ts';
@@ -94,10 +95,20 @@ function wireHistoryMessage(msg: TurnHistoryMessage): Record<string, unknown> {
   if (msg.parts && msg.parts.length > 0) {
     content = wireMessageContent(msg.parts);
   }
-  return {
+  const wired: Record<string, unknown> = {
     role: msg.role,
     content,
   };
+  if (msg.tool_calls && msg.tool_calls.length > 0) {
+    wired.tool_calls = msg.tool_calls;
+  }
+  if (msg.tool_call_id) {
+    wired.tool_call_id = msg.tool_call_id;
+  }
+  if (msg.name) {
+    wired.name = msg.name;
+  }
+  return wired;
 }
 
 function wireTools(dynamicTools?: DynamicToolDeclaration[]): Record<string, unknown>[] {
@@ -114,29 +125,51 @@ function wireTools(dynamicTools?: DynamicToolDeclaration[]): Record<string, unkn
   }));
 }
 
-function toOpenRouterPayload(
-  req: ProviderCompleteRequest,
-  config: OpenRouterConfig,
-): Record<string, unknown> {
-  const model = resolveOpenRouterModel(req.model, config.modelMap);
+function buildMessages(req: ProviderCompleteRequest): Record<string, unknown>[] {
   const messages: Record<string, unknown>[] = [];
-
   if (req.system) {
     messages.push({ role: 'system', content: req.system });
   }
-
   if (req.history && req.history.length > 0) {
     for (const h of req.history) {
       messages.push(wireHistoryMessage(h));
     }
   }
-
   if (req.input.length > 0) {
     messages.push({
       role: 'user',
       content: wireMessageContent(req.input),
     });
   }
+  return messages;
+}
+
+function resolveResponseFormat(
+  structured: StructuredSchemaId | null,
+): Record<string, unknown> | undefined {
+  if (!structured) {
+    return undefined;
+  }
+  const spec = getStructured(structured);
+  if (!spec.jsonSchema) {
+    return undefined;
+  }
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: String(structured),
+      strict: true,
+      schema: spec.jsonSchema,
+    },
+  };
+}
+
+function toOpenRouterPayload(
+  req: ProviderCompleteRequest,
+  config: OpenRouterConfig,
+): Record<string, unknown> {
+  const model = resolveOpenRouterModel(req.model, config.modelMap);
+  const messages = buildMessages(req);
 
   const payload: Record<string, unknown> = {
     model,
@@ -151,18 +184,9 @@ function toOpenRouterPayload(
     payload.reasoning = { effort };
   }
 
-  if (req.structured) {
-    const spec = getStructured(req.structured);
-    if (spec.jsonSchema) {
-      payload.response_format = {
-        type: 'json_schema',
-        json_schema: {
-          name: String(req.structured),
-          strict: true,
-          schema: spec.jsonSchema,
-        },
-      };
-    }
+  const responseFormat = resolveResponseFormat(req.structured);
+  if (responseFormat) {
+    payload.response_format = responseFormat;
   }
 
   const tools = wireTools(req.dynamicTools);

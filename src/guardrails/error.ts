@@ -30,48 +30,66 @@ const EXACT: Record<string, string> = {
   'generateMedia is not wired; enable it on the profile when a media backend exists': PUBLIC_ACTION,
 };
 
+interface ErrorRule {
+  match: (text: string) => boolean;
+  resolve: (text: string) => string;
+}
+
+const RULES: ErrorRule[] = [
+  {
+    match: (t) => /^(Gemini|OpenRouter|TTS|OpenRouter TTS) HTTP/.test(t) || t.includes('TTS HTTP'),
+    resolve: () => PUBLIC_UNAVAILABLE,
+  },
+  {
+    match: (t) =>
+      t.includes('not gated') ||
+      t.includes('not allowed') ||
+      t.includes('Unknown model select') ||
+      t.includes('Grounding tools') ||
+      t.includes('Handoff target'),
+    resolve: () => PUBLIC_ACTION,
+  },
+  {
+    match: (t) =>
+      t.includes('MIME') ||
+      t.includes('does not accept attachments') ||
+      t.includes('does not accept voice'),
+    resolve: () => PUBLIC_FILE_TYPE,
+  },
+  {
+    match: (t) => t.startsWith('At most'),
+    resolve: () => PUBLIC_FILE_COUNT,
+  },
+  {
+    match: (t) =>
+      (t.startsWith('Only ') && t.includes('file')) ||
+      t.startsWith('Each file must be') ||
+      t.startsWith('Those files together'),
+    resolve: (t) => t,
+  },
+  {
+    match: (t) => t.includes('attachment'),
+    resolve: () => PUBLIC_FILE_SIZE,
+  },
+  {
+    match: (t) => t.includes('aspect or size'),
+    resolve: () => PUBLIC_IMAGE_SIZE,
+  },
+  {
+    match: (t) => t.includes('must pin thinking') || t.includes('has no models'),
+    resolve: () => PUBLIC_GENERIC,
+  },
+];
+
 function publicText(text: string): string {
   const exact = EXACT[text];
   if (exact) {
     return exact;
   }
-  if (text.startsWith('Gemini HTTP') || text.startsWith('OpenRouter HTTP')) {
-    return PUBLIC_UNAVAILABLE;
-  }
-  if (text.includes('not gated') || text.includes('not allowed')) {
-    return PUBLIC_ACTION;
-  }
-  if (
-    text.includes('MIME') ||
-    text.includes('does not accept attachments') ||
-    text.includes('does not accept voice')
-  ) {
-    return PUBLIC_FILE_TYPE;
-  }
-  if (text.startsWith('At most')) {
-    return PUBLIC_FILE_COUNT;
-  }
-  if (
-    (text.startsWith('Only ') && text.includes('file')) ||
-    text.startsWith('Each file must be') ||
-    text.startsWith('Those files together')
-  ) {
-    return text;
-  }
-  if (text.includes('attachment')) {
-    return PUBLIC_FILE_SIZE;
-  }
-  if (text.includes('aspect or size')) {
-    return PUBLIC_IMAGE_SIZE;
-  }
-  if (text.includes('Unknown model select') || text.includes('Grounding tools')) {
-    return PUBLIC_ACTION;
-  }
-  if (text.includes('Handoff target')) {
-    return PUBLIC_ACTION;
-  }
-  if (text.includes('must pin thinking') || text.includes('has no models')) {
-    return PUBLIC_GENERIC;
+  for (const rule of RULES) {
+    if (rule.match(text)) {
+      return rule.resolve(text);
+    }
   }
   return PUBLIC_GENERIC;
 }

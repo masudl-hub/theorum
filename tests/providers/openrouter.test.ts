@@ -66,6 +66,17 @@ Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () 
   assertEquals(resolveOpenRouterModel('perplexity/sonar'), 'perplexity/sonar');
 });
 
+function assertMessage(
+  msg: Record<string, unknown> | undefined,
+  role: string,
+  content?: string,
+): void {
+  assertEquals(msg?.role, role);
+  if (content !== undefined) {
+    assertEquals(msg?.content, content);
+  }
+}
+
 Deno.test('toOpenRouterPayload formats system, history, text, and thinking effort', () => {
   const req = createMockTurnRequest('pinned', 'Watering schedule?');
   req.history = [
@@ -91,15 +102,11 @@ Deno.test('toOpenRouterPayload formats system, history, text, and thinking effor
   assertEquals((payload.reasoning as Record<string, unknown>).effort, 'low');
 
   const messages = payload.messages as Record<string, unknown>[];
-  assertEquals(messages[0]?.role, 'system');
-  assertEquals(messages[0]?.content, 'Orchid system prompt');
-  assertEquals(messages[1]?.role, 'system');
-  assertEquals(messages[1]?.content, '[meta] ago=5m speaker=masud');
-  assertEquals(messages[2]?.role, 'user');
-  assertEquals(messages[2]?.content, 'What plants do I have?');
-  assertEquals(messages[3]?.role, 'assistant');
-  assertEquals(messages[3]?.content, 'You have a Monstera deliciosa.');
-  assertEquals(messages[4]?.role, 'user');
+  assertMessage(messages[0], 'system', 'Orchid system prompt');
+  assertMessage(messages[1], 'system', '[meta] ago=5m speaker=masud');
+  assertMessage(messages[2], 'user', 'What plants do I have?');
+  assertMessage(messages[3], 'assistant', 'You have a Monstera deliciosa.');
+  assertMessage(messages[4], 'user');
 
   const tools = payload.tools as Record<string, unknown>[];
   assertEquals(tools.length, 1);

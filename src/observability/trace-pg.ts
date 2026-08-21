@@ -19,13 +19,23 @@ const INSERT_SQL = `
   ON CONFLICT (id) DO NOTHING
 `;
 
-function envFromRecord(rec: TraceRecord): string | null {
+const VALID_ENVS = new Set(['prod', 'stage', 'local', 'unknown']);
+
+function envFromConcourse(rec: TraceRecord): string | null {
   const concourse = (rec as unknown as Record<string, unknown>).concourse;
   if (concourse && typeof concourse === 'object' && !Array.isArray(concourse)) {
     const env = (concourse as { env?: unknown }).env;
-    if (env === 'prod' || env === 'stage' || env === 'local' || env === 'unknown') {
+    if (typeof env === 'string' && VALID_ENVS.has(env)) {
       return env;
     }
+  }
+  return null;
+}
+
+function envFromRecord(rec: TraceRecord): string | null {
+  const env = envFromConcourse(rec);
+  if (env) {
+    return env;
   }
   const profile = rec.profile ?? '';
   if (profile.includes('stage')) return 'stage';

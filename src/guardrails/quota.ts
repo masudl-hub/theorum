@@ -54,7 +54,7 @@ function takeSlot(profile: Profile, ip: string, now: number): 'ok' | 'busy' | 'q
   if (slot.busy) {
     return 'busy';
   }
-  if (slot.count >= profile.quota.perDay) {
+  if (slot.count >= profile.guardrails.quota.perDay) {
     return 'quota';
   }
   slot.busy = true;

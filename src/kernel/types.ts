@@ -9,7 +9,8 @@ export type StandardModelId =
   | 'gemini31FlashLite'
   | 'gemini35FlashLite'
   | 'gemini37Flash'
-  | 'gemini31FlashLiteImage';
+  | 'gemini31FlashLiteImage'
+  | 'gemini31FlashTts';
 
 export type ModelId = StandardModelId | (string & {});
 
@@ -167,10 +168,91 @@ export interface ProfileValidationSpec {
   repairGuidance?: string;
 }
 
+export type OpenRouterAudioFormat = 'pcm' | 'mp3';
+
+export type OpenRouterTtsVoice =
+  | 'Zephyr'
+  | 'Puck'
+  | 'Charon'
+  | 'Kore'
+  | 'Fenrir'
+  | 'Leda'
+  | 'Orus'
+  | 'Aoede'
+  | 'Callirrhoe'
+  | 'Autonoe'
+  | 'Enceladus'
+  | 'Iapetus'
+  | 'Umbriel'
+  | 'Algieba'
+  | 'Despina'
+  | 'Erinome'
+  | 'Algenib'
+  | 'Rasalgethi'
+  | 'Laomedeia'
+  | 'Achernar'
+  | 'Alnilam'
+  | 'Schedar'
+  | 'Gacrux'
+  | 'Pulcherrima'
+  | 'Achird'
+  | 'Zubenelgenubi'
+  | 'Vindemiatrix'
+  | 'Sadachbia'
+  | 'Sadaltager'
+  | 'Sulafat'
+  | (string & {});
+
+export interface ProfileVoiceSpec {
+  voice?: OpenRouterTtsVoice;
+  responseFormat?: OpenRouterAudioFormat;
+}
+
 export interface ProfileStreamingSpec {
   mode: 'sse' | 'buffered';
   streamThoughts?: boolean;
   gateArtifacts?: boolean;
+}
+
+export interface ProfileGuardrailsSpec {
+  quota: { perDay: number };
+  canary?: boolean;
+  sanitizeInput?: boolean;
+  redactSensitive?: boolean;
+}
+
+export interface ProfileModelSpec {
+  protocol: 'interactions' | 'openrouter';
+  provider: 'google' | 'openrouter';
+  allow: ModelId[];
+  select?: Record<string, ModelId>;
+  thinking?: ThinkingLevel | Record<string, ThinkingLevel>;
+  controls?: ControlId[];
+  maxSteps?: number;
+  key?: GeminiFreeBucket;
+  override?: Record<
+    string,
+    { maxOutputTokens?: number; temperature?: number; summaries?: 'auto' | 'none' }
+  >;
+}
+
+export interface ProfileInputsSpec {
+  text?: boolean;
+  attachments?: { accept: string[] };
+  voice?: { accept: string[] };
+  maxFiles?: number;
+  maxBytes?: number;
+  maxTurnBytes?: number;
+  slots?: Record<string, string[]>;
+}
+
+export interface ProfileOutputsSpec {
+  structured?: StructuredSchemaId | StructuredBySlot | null;
+  media?: boolean;
+  voice?: ProfileVoiceSpec;
+  validation?: ProfileValidationSpec;
+  streaming?: ProfileStreamingSpec;
+  commit?: 'artifact' | 'state' | string;
 }
 
 export interface Profile {
@@ -181,27 +263,11 @@ export interface Profile {
     system?: string;
     systemByRole?: Record<string, string>;
   };
-  protocol: 'interactions';
-  maxSteps: number;
-  models: ProfileModels;
-  controls: ControlId[];
+  model: ProfileModelSpec;
   tools: { allow: ToolId[] };
-  /** Free Gemini key. Paid is never stored here. */
-  key: GeminiFreeBucket;
-  inputs: MimeInputs;
-  slots?: Record<string, string[]>;
-  style?: string;
-  outputs: {
-    structured: StructuredSchemaId | StructuredBySlot | null;
-    media: boolean;
-  };
-  commit: string;
-  /** Optional in-harness validation and auto-correction specification. */
-  validation?: ProfileValidationSpec;
-  /** Streaming configuration for SSE endpoints and turn processing. */
-  streaming?: ProfileStreamingSpec;
-  /** Daily turns per client IP. In-flight is always one per profile per IP. */
-  quota: { perDay: number };
+  inputs: ProfileInputsSpec;
+  outputs: ProfileOutputsSpec;
+  guardrails: ProfileGuardrailsSpec;
 }
 
 export interface InteractionTextPart {
@@ -230,9 +296,17 @@ export interface TurnBlob {
 }
 
 export interface TurnHistoryMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content?: string;
   parts?: InteractionPart[];
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+    thoughtSignature?: string;
+  }>;
+  tool_call_id?: string;
+  name?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -286,6 +360,7 @@ export interface ResolvedGeneration {
   maxSteps: number;
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
+  voice?: ProfileVoiceSpec;
   input: InteractionPart[];
   geminiBucket: GeminiBucket;
   canary: string;
@@ -331,6 +406,7 @@ export interface ProviderCompleteRequest {
   dynamicTools?: DynamicToolDeclaration[];
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
+  voice?: ProfileVoiceSpec;
   geminiBucket: GeminiBucket;
   /** Scrubbed SSE / HTTP rows for traces. */
   tapGemini?: (row: Record<string, unknown>) => void;

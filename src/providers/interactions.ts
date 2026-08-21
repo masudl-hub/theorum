@@ -106,7 +106,9 @@ function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknow
       inputSteps.push(historyStep(h));
     }
   }
-  inputSteps.push(userInputStep(req.input));
+  if (req.input.length > 0 || inputSteps.length === 0) {
+    inputSteps.push(userInputStep(req.input));
+  }
 
   const camel: Record<string, unknown> = {
     model: catalog.apiId,

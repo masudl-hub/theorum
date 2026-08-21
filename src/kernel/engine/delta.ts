@@ -104,63 +104,95 @@ function mediaFromComplete(event: Record<string, unknown>): TurnEvent | undefine
   return mediaFromOutputs(interaction.outputs);
 }
 
+const INPUT_KEYS = [
+  'total_input_tokens',
+  'totalInputTokens',
+  'prompt_token_count',
+  'promptTokenCount',
+  'prompt_tokens',
+  'input_tokens',
+  'inputTokens',
+  'input',
+] as const;
+
+const OUTPUT_KEYS = [
+  'total_output_tokens',
+  'totalOutputTokens',
+  'candidates_token_count',
+  'candidatesTokenCount',
+  'candidates_tokens',
+  'completion_tokens',
+  'output_tokens',
+  'outputTokens',
+  'output',
+] as const;
+
+const THINKING_KEYS = [
+  'total_thought_tokens',
+  'totalThoughtTokens',
+  'thoughts_token_count',
+  'thoughtsTokenCount',
+  'thoughts_tokens',
+  'thinking_tokens',
+  'thinkingTokens',
+  'thinking',
+] as const;
+
+const TOOL_KEYS = [
+  'total_tool_use_tokens',
+  'totalToolUseTokens',
+  'tool_use_token_count',
+  'toolUseTokenCount',
+  'tool_tokens',
+  'toolTokens',
+  'toolUse',
+] as const;
+
+const TOTAL_KEYS = [
+  'total_tokens',
+  'totalTokens',
+  'total_token_count',
+  'totalTokenCount',
+  'total',
+] as const;
+
+function pickNumericField(record: Record<string, unknown>, keys: readonly string[]): number {
+  for (const key of keys) {
+    const val = record[key];
+    if (val !== undefined && val !== null) {
+      const n = Number(val);
+      if (!Number.isNaN(n)) {
+        return n;
+      }
+    }
+  }
+  return 0;
+}
+
 function extractUsageTokens(raw: unknown): TurnTokens | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
   const r = raw as Record<string, unknown>;
-  const input =
-    Number(
-      r.total_input_tokens ??
-        r.totalInputTokens ??
-        r.prompt_token_count ??
-        r.promptTokenCount ??
-        r.prompt_tokens ??
-        r.input_tokens ??
-        r.inputTokens ??
-        r.input ??
-        0,
-    ) || 0;
-  const output =
-    Number(
-      r.total_output_tokens ??
-        r.totalOutputTokens ??
-        r.candidates_token_count ??
-        r.candidatesTokenCount ??
-        r.candidates_tokens ??
-        r.completion_tokens ??
-        r.output_tokens ??
-        r.outputTokens ??
-        r.output ??
-        0,
-    ) || 0;
-  const thinking =
-    Number(
-      r.total_thought_tokens ??
-        r.totalThoughtTokens ??
-        r.thoughts_token_count ??
-        r.thoughtsTokenCount ??
-        r.thoughts_tokens ??
-        r.thinking_tokens ??
-        r.thinkingTokens ??
-        r.thinking ??
-        0,
-    ) || 0;
-  const toolUse =
-    Number(
-      r.total_tool_use_tokens ??
-        r.totalToolUseTokens ??
-        r.tool_use_token_count ??
-        r.toolUseTokenCount ??
-        r.tool_tokens ??
-        r.toolTokens ??
-        r.toolUse ??
-        0,
-    ) || 0;
-  const total =
-    Number(
-      r.total_tokens ?? r.totalTokens ?? r.total_token_count ?? r.totalTokenCount ?? r.total ?? 0,
-    ) || input + output + thinking + toolUse;
+  const input = pickNumericField(r, INPUT_KEYS);
+  const output = pickNumericField(r, OUTPUT_KEYS);
+  const thinking = pickNumericField(r, THINKING_KEYS);
+  const toolUse = pickNumericField(r, TOOL_KEYS);
+  const total = pickNumericField(r, TOTAL_KEYS) || input + output + thinking + toolUse;
   if (input > 0 || output > 0 || thinking > 0 || toolUse > 0 || total > 0) {
     return { input, output, thinking, toolUse, total };
+  }
+  return undefined;
+}
+
+const USAGE_KEYS = ['usage', 'usage_metadata', 'usageMetadata'] as const;
+
+function findUsageObject(target: Record<string, unknown>, event: Record<string, unknown>): unknown {
+  for (const key of USAGE_KEYS) {
+    if (target[key]) return target[key];
+  }
+  for (const key of USAGE_KEYS) {
+    if (event[key]) return event[key];
   }
   return undefined;
 }
@@ -170,14 +202,7 @@ function extractTokenEvent(
   interaction?: Record<string, unknown>,
 ): TurnEvent | undefined {
   const target = interaction ?? asRecord(event.interaction) ?? event;
-  const usage = extractUsageTokens(
-    target.usage ??
-      target.usage_metadata ??
-      target.usageMetadata ??
-      event.usage ??
-      event.usageMetadata ??
-      event.usage_metadata,
-  );
+  const usage = extractUsageTokens(findUsageObject(target, event));
   const interactionId = typeof target.id === 'string' ? target.id : undefined;
   if (!usage) {
     return undefined;

@@ -26,7 +26,7 @@ function synthesizeFixPrompt(args: {
   const { profile, fix, history } = args;
   const guidance =
     fix.guidance ||
-    profile.validation?.repairGuidance ||
+    profile.outputs.validation?.repairGuidance ||
     'Fix the errors indicated above. Ensure the emitted artifact is syntactically valid and well-formed.';
 
   const historyBlock = formatHistoryBlock(scopeHistory(history));

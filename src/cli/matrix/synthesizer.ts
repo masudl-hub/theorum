@@ -37,25 +37,26 @@ export function synthesizeStressCombo(
     select = keys[keys.length - 1];
   }
 
-  // 2. Resolve tools with conflict prevention (search XOR maps)
+  // 2. Resolve tools with conflict prevention (maps XOR search/urlContext)
   const allowed = tools.allow ?? [];
   const activeTools: Partial<Record<ToolId, boolean>> = {};
 
   const hasSearch = allowed.includes('googleSearch');
   const hasMaps = allowed.includes('googleMaps');
+  const hasUrl = allowed.includes('urlContext');
 
   for (const t of allowed) {
     activeTools[t] = true;
   }
 
-  if (hasSearch && hasMaps) {
-    if (options.preferMaps) {
-      activeTools.googleSearch = false;
-      activeTools.googleMaps = true;
-    } else {
-      activeTools.googleSearch = true;
-      activeTools.googleMaps = false;
-    }
+  if (hasMaps && options.preferMaps) {
+    activeTools.googleSearch = false;
+    activeTools.urlContext = false;
+    activeTools.googleMaps = true;
+  } else if (hasSearch || hasUrl) {
+    activeTools.googleMaps = false;
+    if (hasSearch) activeTools.googleSearch = true;
+    if (hasUrl) activeTools.urlContext = true;
   }
 
   // 3. Multimodal inputs
@@ -139,10 +140,11 @@ export function buildCustomTurnRequest(profile: Profile, options: MatrixOptions)
     if (options.map !== undefined) {
       base.tools.googleMaps = options.map;
     }
-    // Enforce search XOR maps
-    if (base.tools.googleSearch && base.tools.googleMaps) {
+    // Enforce maps XOR (search | urlContext)
+    if (base.tools.googleMaps && (base.tools.googleSearch || base.tools.urlContext)) {
       if (options.map) {
         base.tools.googleSearch = false;
+        base.tools.urlContext = false;
       } else {
         base.tools.googleMaps = false;
       }

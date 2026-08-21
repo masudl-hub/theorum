@@ -76,6 +76,7 @@ export async function executeSingleTest(
       } else if (event.type === 'error' && event.error) {
         hasError = true;
         errorMessage = event.error;
+        console.error(`\n  [Test Error Detail]: ${event.error}`);
       }
     }
   } catch (err) {

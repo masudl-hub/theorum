@@ -23,10 +23,12 @@ import { getProfile } from './profiles.ts';
 
 const BUILTINS: BuiltinToolId[] = ['googleSearch', 'googleMaps', 'urlContext'];
 
-function applySearchXorMaps(requested: BuiltinToolId[]): BuiltinToolId[] {
+function applyBuiltinMutualExclusions(requested: BuiltinToolId[]): BuiltinToolId[] {
   const search = requested.includes('googleSearch');
   const maps = requested.includes('googleMaps');
-  if (search && maps) {
+  const urlContext = requested.includes('urlContext');
+  // Google Interactions API: google_maps cannot be combined with google_search or url_context
+  if (maps && (search || urlContext)) {
     return requested.filter((id) => id !== 'googleMaps');
   }
   return requested;
@@ -154,7 +156,7 @@ function resolveBuiltins(
     (id): id is BuiltinToolId => CATALOG.tools[id].kind === 'builtin',
   );
   const picked = BUILTINS.filter((id) => allowed.includes(id) && isGatedOn(requested, id));
-  return applySearchXorMaps(picked);
+  return applyBuiltinMutualExclusions(picked);
 }
 
 function resolveCustom(

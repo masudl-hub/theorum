@@ -103,7 +103,8 @@ async function* streamComplete(
     withTap(req, transport),
   );
   if (res.status !== HTTP_OK) {
-    yield { type: 'error', error: publicError(`Gemini HTTP ${String(res.status)}`) };
+    const errorBody = await res.text().catch(() => '');
+    yield { type: 'error', error: publicError(`Gemini HTTP ${String(res.status)}: ${errorBody}`) };
     return;
   }
   const acc = { text: '' };

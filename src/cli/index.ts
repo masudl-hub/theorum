@@ -1,7 +1,11 @@
+import { registerBuiltinProfiles } from '../kernel/registry/builtin-profiles.ts';
 import { listProfilesCommand, showProfileCommand } from './commands/profile.ts';
 import { runCommand } from './commands/run.ts';
 import { testProfileCommand } from './commands/test.ts';
 import { vaultPingCommand, vaultStatusCommand } from './commands/vault.ts';
+
+// Register built-in portfolio profiles
+registerBuiltinProfiles();
 
 // Auto-load .env if present
 try {

@@ -117,12 +117,17 @@ export async function main(cliArgs = Deno.args): Promise<void> {
 
   switch (command) {
     case 'test': {
-      const profile = flags.profile || flags.p;
+      const profile =
+        typeof flags.profile === 'string'
+          ? flags.profile
+          : typeof flags.p === 'string'
+            ? flags.p
+            : undefined;
       const success = await testProfileCommand(profile, {
         all: Boolean(flags.all || flags.a),
         lite: Boolean(flags.lite),
         matrix: Boolean(flags.matrix),
-        mode: flags.mode,
+        mode: typeof flags.mode === 'string' ? flags.mode : undefined,
         search: flags.search ? true : undefined,
         map: flags.map ? true : undefined,
       });
@@ -133,17 +138,23 @@ export async function main(cliArgs = Deno.args): Promise<void> {
     }
 
     case 'run': {
-      const profile = flags.profile || flags.p;
+      const profile =
+        typeof flags.profile === 'string'
+          ? flags.profile
+          : typeof flags.p === 'string'
+            ? flags.p
+            : undefined;
       if (!profile) {
         console.error(
           'Error: Profile ID required (e.g. `theorum run --profile studio --prompt "Hello"`)',
         );
         Deno.exit(1);
       }
+      const prompt = typeof flags.prompt === 'string' ? flags.prompt : flags._.slice(1).join(' ');
       await runCommand({
         profile,
-        prompt: flags.prompt || flags._.slice(1).join(' '),
-        mode: flags.mode,
+        prompt,
+        mode: typeof flags.mode === 'string' ? flags.mode : undefined,
         search: Boolean(flags.search),
         map: Boolean(flags.map),
       });

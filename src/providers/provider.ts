@@ -4,6 +4,7 @@ import {
   eventsFromComplete,
   eventsFromDelta,
   extractTokenEvent,
+  groundingFromEvent,
   tryStructured,
 } from '../kernel/engine/delta.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../kernel/types.ts';
@@ -82,6 +83,10 @@ function foldPayload(event: Record<string, unknown>, acc: { text: string }): Tur
       events.push(tokenEvent);
     }
   }
+  const groundingEvent = groundingFromEvent(event);
+  if (groundingEvent && !events.some((e) => e.type === 'grounding')) {
+    events.push(groundingEvent);
+  }
   return events;
 }
 
@@ -104,7 +109,10 @@ async function* streamComplete(
   );
   if (res.status !== HTTP_OK) {
     const errorBody = await res.text().catch(() => '');
-    yield { type: 'error', error: publicError(`Gemini HTTP ${String(res.status)}: ${errorBody}`) };
+    yield {
+      type: 'error',
+      error: publicError(`Gemini HTTP ${String(res.status)}: ${errorBody}`),
+    };
     return;
   }
   const acc = { text: '' };

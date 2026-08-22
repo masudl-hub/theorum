@@ -19,9 +19,11 @@ const ASK_USER_SCHEMA = {
 
 const DEFAULT_TEMPERATURE = 1;
 const FLASH_LITE_MAX_OUTPUT_TOKENS = 8192;
+const PRO_PREVIEW_MAX_OUTPUT_TOKENS = 64_000;
 const FLASH_37_MAX_OUTPUT_TOKENS = 64_000;
 const IMAGE_FLASH_LITE_MAX_OUTPUT_TOKENS = 4096;
 const TTS_FLASH_MAX_OUTPUT_TOKENS = 2048;
+const SONAR_MAX_OUTPUT_TOKENS = 8192;
 
 const IMAGE_INPUT_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
 const VOICE_INPUT_MIMES = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4'];
@@ -108,11 +110,21 @@ const IMAGE_FLASH_LITE_ASPECT_RATIOS: ImageAspectRatio[] = [
 const IMAGE_FLASH_LITE_SIZES: ImageSize[] = ['1K'];
 
 const FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'low', 'medium', 'high'];
-/** 3.7 Flash: no `minimal` — API 400. */
 const FLASH_37_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
-/** 3.1 Flash Lite Image: docs only list minimal|high. */
+const PRO_PREVIEW_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
 const IMAGE_FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'high'];
 const TTS_THINKING_LEVELS: ThinkingLevel[] = ['minimal'];
+const OPENROUTER_SEARCH_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
+
+const GENERIC_MODEL_ENTRY: ModelCatalogEntry = {
+  apiId: '',
+  thinking: { on: 'high', off: 'low' },
+  thinkingLevels: ['low', 'medium', 'high'],
+  summaries: { on: 'auto', off: 'none' },
+  maxOutputTokens: FLASH_LITE_MAX_OUTPUT_TOKENS,
+  temperature: DEFAULT_TEMPERATURE,
+  freeBuiltins: [],
+};
 
 const CATALOG: Catalog = {
   models: {
@@ -124,6 +136,15 @@ const CATALOG: Catalog = {
       maxOutputTokens: FLASH_LITE_MAX_OUTPUT_TOKENS,
       temperature: DEFAULT_TEMPERATURE,
       freeBuiltins: ['googleMaps', 'urlContext'],
+    },
+    gemini31ProPreview: {
+      apiId: 'gemini-3.1-pro-preview',
+      thinking: { on: 'high', off: 'low' },
+      thinkingLevels: PRO_PREVIEW_THINKING_LEVELS,
+      summaries: { on: 'auto', off: 'none' },
+      maxOutputTokens: PRO_PREVIEW_MAX_OUTPUT_TOKENS,
+      temperature: DEFAULT_TEMPERATURE,
+      freeBuiltins: [],
     },
     gemini35FlashLite: {
       apiId: 'gemini-3.5-flash-lite',
@@ -167,6 +188,16 @@ const CATALOG: Catalog = {
       thinkingLevels: TTS_THINKING_LEVELS,
       summaries: { on: 'none', off: 'none' },
       maxOutputTokens: TTS_FLASH_MAX_OUTPUT_TOKENS,
+      temperature: DEFAULT_TEMPERATURE,
+      freeBuiltins: [],
+    },
+    sonar: {
+      apiId: 'sonar',
+      openRouterId: 'perplexity/sonar',
+      thinking: { on: 'high', off: 'low' },
+      thinkingLevels: OPENROUTER_SEARCH_THINKING_LEVELS,
+      summaries: { on: 'none', off: 'none' },
+      maxOutputTokens: SONAR_MAX_OUTPUT_TOKENS,
       temperature: DEFAULT_TEMPERATURE,
       freeBuiltins: [],
     },
@@ -223,6 +254,16 @@ export {
 
 export const MODEL_CATALOG = CATALOG.models;
 
+export function modelEntry(modelId: string): ModelCatalogEntry {
+  return (
+    MODEL_CATALOG[modelId as keyof typeof MODEL_CATALOG] ?? {
+      ...GENERIC_MODEL_ENTRY,
+      apiId: modelId,
+      openRouterId: modelId,
+    }
+  );
+}
+
 function clampLevels(entry: ModelCatalogEntry | undefined, level: ThinkingLevel): ThinkingLevel {
   if (!entry?.thinkingLevels || entry.thinkingLevels.length === 0) {
     return level;
@@ -238,13 +279,12 @@ function clampLevels(entry: ModelCatalogEntry | undefined, level: ThinkingLevel)
   return first ?? level;
 }
 
-/** Clamp a requested level to what this model accepts (3.7 has no minimal). */
+/** Clamp a requested thinking level to what the selected model accepts. */
 export function clampThinkingLevel(modelId: string, level: ThinkingLevel): ThinkingLevel {
-  const entry = MODEL_CATALOG[modelId as keyof typeof MODEL_CATALOG];
-  return clampLevels(entry, level);
+  return clampLevels(modelEntry(modelId), level);
 }
 
-export function modelEntryByApiId(apiId: string) {
+export function modelEntryByApiId(apiId: string): ModelCatalogEntry | undefined {
   return Object.values(MODEL_CATALOG).find((m) => m.apiId === apiId);
 }
 

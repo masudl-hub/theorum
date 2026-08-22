@@ -127,7 +127,7 @@ export const mermaidProfile: Profile = {
       'You are a Mermaid diagram architect. Always emit valid Mermaid code in the structured turn.',
   },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite'],
     controls: ['thinking'],
@@ -153,7 +153,7 @@ export const studioProfile: Profile = {
     system: 'Produce UI source in the structured turn schema. Chat in message only.',
   },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite', 'gemini37Flash'],
     select: { fast: 'gemini35FlashLite', smart: 'gemini37Flash' },
@@ -190,7 +190,7 @@ export const plannerProfile: Profile = {
     },
   },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite', 'gemini37Flash'],
     select: { fast: 'gemini35FlashLite', smart: 'gemini37Flash' },
@@ -223,7 +223,7 @@ export const dailyProfile: Profile = {
       'You are a wholesome daily card writer. Warm, specific, never cheesy. Authenticity over hype.',
   },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite'],
     thinking: 'minimal',

@@ -150,3 +150,58 @@ Deno.test('image projection exposes image spec not tools', () => {
   assertEquals(ui.image?.maxInputImages, spec?.maxInputImages);
   assertEquals(ui.controls, []);
 });
+
+Deno.test('media validations reject non-image model, structured mixing, grounding on image, and invalid mime', async () => {
+  const { registerProfile, defineProfile } = await import('../../src/kernel/registry/profiles.ts');
+
+  // Media enabled with non-image model
+  registerProfile(
+    defineProfile({
+      id: 'bad_media_profile',
+      model: { allow: ['gemini35FlashLite'] },
+      inputs: { text: true },
+      outputs: { structured: null, media: true },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  assertThrows(
+    () => resolveTurn({ profile: 'bad_media_profile', input: { text: 'test' } }),
+    TheorumError,
+  );
+
+  // Media enabled with structured output
+  registerProfile(
+    defineProfile({
+      id: 'mixed_media_profile',
+      model: { allow: ['gemini31FlashLiteImage'] },
+      inputs: { text: true },
+      outputs: { structured: 'custom', media: true },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  assertThrows(
+    () => resolveTurn({ profile: 'mixed_media_profile', input: { text: 'test' } }),
+    TheorumError,
+  );
+
+  // Grounding tool on image model profile
+  registerProfile(
+    defineProfile({
+      id: 'image_with_search',
+      model: { allow: ['gemini31FlashLiteImage'] },
+      tools: { allow: ['googleSearch'] },
+      inputs: { text: true },
+      outputs: { structured: null, media: true },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  assertThrows(
+    () =>
+      resolveTurn({
+        profile: 'image_with_search',
+        tools: { googleSearch: true },
+        input: { text: 'search image' },
+      }),
+    TheorumError,
+  );
+});

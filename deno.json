@@ -9,6 +9,10 @@
     "./guardrails": "./src/guardrails/sanitize.ts",
     "./observability": "./src/observability/trace.ts"
   },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "postgres": "https://deno.land/x/postgres@v0.19.3/mod.ts"
+  },
   "tasks": {
     "theorum": "deno run --allow-all src/cli/index.ts",
     "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net",

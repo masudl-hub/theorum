@@ -27,7 +27,7 @@ function buildDefaultIdentity(
 
 function buildDefaultModel(model: DefineProfileInput['model']): Profile['model'] {
   return {
-    protocol: model.protocol ?? 'interactions',
+    protocol: model.protocol ?? 'geminiInteractions',
     provider: model.provider ?? 'google',
     allow: model.allow,
     thinking: model.thinking ?? 'minimal',
@@ -47,6 +47,7 @@ function buildDefaultInputs(inputs?: Partial<Profile['inputs']>): Profile['input
     maxFiles: inputs?.maxFiles,
     maxBytes: inputs?.maxBytes,
     maxTurnBytes: inputs?.maxTurnBytes,
+    limitsByMime: inputs?.limitsByMime,
     slots: inputs?.slots,
   };
 }
@@ -68,6 +69,7 @@ function buildDefaultGuardrails(guardrails: Profile['guardrails']): Profile['gua
     canary: guardrails.canary ?? true,
     sanitizeInput: guardrails.sanitizeInput ?? true,
     redactSensitive: guardrails.redactSensitive ?? true,
+    egress: guardrails.egress,
   };
 }
 

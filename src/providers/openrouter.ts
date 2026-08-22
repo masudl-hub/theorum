@@ -26,6 +26,7 @@ interface OpenRouterToolDelta {
 interface StreamAccumulator {
   text: string;
   toolCalls: Map<number, OpenRouterToolDelta>;
+  evidenceSeen: boolean;
 }
 
 async function* readSseLines(res: Response): AsyncGenerator<Record<string, unknown>> {
@@ -111,7 +112,76 @@ function processDelta(delta: Record<string, unknown>, acc: StreamAccumulator): T
     processToolCalls(delta.tool_calls, acc.toolCalls);
   }
 
+  const evidence = evidenceFromRecord(delta);
+  if (evidence && !acc.evidenceSeen) {
+    acc.evidenceSeen = true;
+    events.push(evidence);
+  }
+
   return events;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const out = value.filter((item): item is string => typeof item === 'string');
+  return out.length > 0 ? out : undefined;
+}
+
+function recordField(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = record[key];
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function firstEvidenceRaw(record: Record<string, unknown>): unknown {
+  for (const key of [
+    'annotations',
+    'citations',
+    'search_results',
+    'searchResults',
+    'provider_metadata',
+    'providerMetadata',
+  ]) {
+    const value = record[key];
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function evidenceCitations(record: Record<string, unknown>): string[] | undefined {
+  return (
+    stringArray(record.citations) ??
+    stringArray(recordField(record, 'provider_metadata')?.citations) ??
+    stringArray(recordField(record, 'providerMetadata')?.citations)
+  );
+}
+
+function evidenceAnnotations(record: Record<string, unknown>): unknown[] | undefined {
+  return Array.isArray(record.annotations) ? record.annotations : undefined;
+}
+
+function evidenceFromRecord(record: Record<string, unknown>): TurnEvent | undefined {
+  if (firstEvidenceRaw(record) === undefined) {
+    return undefined;
+  }
+  return {
+    type: 'evidence',
+    evidence: {
+      provider: 'openrouter',
+      raw: record,
+      citations: evidenceCitations(record),
+      annotations: evidenceAnnotations(record),
+    },
+  };
 }
 
 function parseUsage(usageRaw: unknown): TurnTokens | undefined {
@@ -196,14 +266,44 @@ function processChoiceDeltas(choices: unknown, acc: StreamAccumulator): TurnEven
   }
   const events: TurnEvent[] = [];
   for (const choice of choices) {
-    if (choice && typeof choice === 'object') {
-      const c = choice as Record<string, unknown>;
-      if (c.delta && typeof c.delta === 'object') {
-        events.push(...processDelta(c.delta as Record<string, unknown>, acc));
-      }
-    }
+    events.push(...processChoiceDelta(choice, acc));
   }
   return events;
+}
+
+function processChoiceDelta(choice: unknown, acc: StreamAccumulator): TurnEvent[] {
+  if (!choice || typeof choice !== 'object') {
+    return [];
+  }
+  const c = choice as Record<string, unknown>;
+  const events = processChoiceDeltaPayload(c.delta, acc);
+  const evidence = evidenceFromChoiceMessage(c.message, acc);
+  if (evidence) {
+    events.push(evidence);
+  }
+  return events;
+}
+
+function processChoiceDeltaPayload(delta: unknown, acc: StreamAccumulator): TurnEvent[] {
+  if (!delta || typeof delta !== 'object') {
+    return [];
+  }
+  return processDelta(delta as Record<string, unknown>, acc);
+}
+
+function evidenceFromChoiceMessage(
+  message: unknown,
+  acc: StreamAccumulator,
+): TurnEvent | undefined {
+  if (!message || typeof message !== 'object') {
+    return undefined;
+  }
+  const evidence = evidenceFromRecord(message as Record<string, unknown>);
+  if (!evidence || acc.evidenceSeen) {
+    return undefined;
+  }
+  acc.evidenceSeen = true;
+  return evidence;
 }
 
 function* yieldRemainingStreamEvents(
@@ -222,6 +322,31 @@ function* yieldRemainingStreamEvents(
   yield { type: 'done' };
 }
 
+function evidenceFromPayload(
+  payload: Record<string, unknown>,
+  acc: StreamAccumulator,
+): TurnEvent | undefined {
+  const evidence = evidenceFromRecord(payload);
+  if (!evidence || acc.evidenceSeen) {
+    return undefined;
+  }
+  acc.evidenceSeen = true;
+  return evidence;
+}
+
+function* eventsFromPayload(
+  payload: Record<string, unknown>,
+  acc: StreamAccumulator,
+): Generator<TurnEvent> {
+  const evidence = evidenceFromPayload(payload, acc);
+  if (evidence) {
+    yield evidence;
+  }
+  for (const ev of processChoiceDeltas(payload.choices, acc)) {
+    yield ev;
+  }
+}
+
 async function* streamOpenRouter(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,
@@ -238,12 +363,12 @@ async function* streamOpenRouter(
     return;
   }
 
-  const acc: StreamAccumulator = { text: '', toolCalls: new Map() };
+  const acc: StreamAccumulator = { text: '', toolCalls: new Map(), evidenceSeen: false };
   let emittedTokens = false;
 
   for await (const payload of readSseLines(res)) {
     req.tapGemini?.(payload);
-    for (const ev of processChoiceDeltas(payload.choices, acc)) {
+    for (const ev of eventsFromPayload(payload, acc)) {
       yield ev;
     }
 

@@ -4,3 +4,4 @@ node_modules/
 .env.local
 traces/
 .DS_Store
+cov_profile/

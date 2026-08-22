@@ -228,3 +228,35 @@ Deno.test('missing free key throws before any fetch', async () => {
   }
   assertEquals(threw, true);
 });
+
+Deno.test('fetchGemini and withGeminiKey retry on transient network errors before succeeding', async () => {
+  let attempts = 0;
+  const res = await fetchGemini('https://example.com/v1/ping', { method: 'GET' }, 'portfolio', {
+    vault,
+    wait: noWait,
+    fetch: () => {
+      attempts++;
+      if (attempts === 1) {
+        return Promise.reject(new Error('fetch failed: network error socket'));
+      }
+      return Promise.resolve(new Response('pong', { status: HTTP_OK }));
+    },
+  });
+  assertEquals(res.status, HTTP_OK);
+  assertEquals(attempts, 2);
+
+  let keyAttempts = 0;
+  const result = await withGeminiKey(
+    'portfolio',
+    () => {
+      keyAttempts++;
+      if (keyAttempts === 1) {
+        return Promise.reject(new Error('network connection reset'));
+      }
+      return Promise.resolve('data');
+    },
+    { vault, wait: noWait },
+  );
+  assertEquals(result, 'data');
+  assertEquals(keyAttempts, 2);
+});

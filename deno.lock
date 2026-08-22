@@ -142,6 +142,9 @@
     "https://deno.land/x/postgres@v0.19.3/utils/utils.ts": "ca47193ea03ff5b585e487a06f106d367e509263a960b787197ce0c03113a738"
   },
   "workspace": {
+    "dependencies": [
+      "jsr:@std/assert@1"
+    ],
     "packageJson": {
       "dependencies": [
         "npm:@ast-grep/cli@0.41",

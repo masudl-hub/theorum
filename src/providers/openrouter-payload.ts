@@ -28,6 +28,12 @@ function resolveOpenRouterModel(
     return customMap[modelId];
   }
   const catalogEntry = CATALOG.models[modelId as keyof typeof CATALOG.models];
+  if (catalogEntry?.openRouterId) {
+    return catalogEntry.openRouterId;
+  }
+  if (catalogEntry?.apiId.includes('/')) {
+    return catalogEntry.apiId;
+  }
   if (catalogEntry?.apiId) {
     return `google/${catalogEntry.apiId}`;
   }

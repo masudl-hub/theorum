@@ -138,6 +138,8 @@ async function* yieldProviderEvents(args: {
   const { canary } = generation;
   for await (const event of provider.complete({
     model: generation.model,
+    previousInteractionId: generation.previousInteractionId,
+    store: generation.store,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -147,6 +149,7 @@ async function* yieldProviderEvents(args: {
     input: generation.input,
     history: generation.history,
     dynamicTools: generation.dynamicTools,
+    dynamicToolLoader: generation.dynamicToolLoader,
     structured: generation.structured,
     image: generation.image,
     voice: generation.voice,
@@ -159,9 +162,6 @@ async function* yieldProviderEvents(args: {
       yield redactCanary(event, canary);
       yield { type: 'error', error: publicError('canary leaked') };
       return;
-    }
-    if (shouldSkipStreamEvent(event, profile)) {
-      continue;
     }
     yield* processNormalEvent(event, profile, generation);
   }
@@ -191,7 +191,59 @@ function formatToolFinding(res: ToolEnvelope): string {
   return 'ok';
 }
 
-async function executeDynamicTool(
+function collectAttemptText(events: TurnEvent[]): string {
+  return events
+    .filter((e) => e.type === 'text' && e.text)
+    .map((e) => e.text)
+    .join('');
+}
+
+async function checkDynamicAuthorization(
+  decl: DynamicToolDeclaration,
+  args: Record<string, unknown>,
+  profile: Profile,
+  sessionPermissions?: string[],
+): Promise<ToolEnvelope | null> {
+  if (!decl.canExecute) {
+    return null;
+  }
+  try {
+    const decision = await decl.canExecute({ args, profile, sessionPermissions });
+    if (typeof decision === 'boolean' && !decision) {
+      return {
+        status: 'error',
+        finding: `Tool '${decl.name}' execution not authorized.`,
+      };
+    }
+    if (typeof decision === 'object' && decision !== null) {
+      return decision;
+    }
+    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: 'error', finding: `Authorization error for '${decl.name}': ${msg}` };
+  }
+}
+
+function checkDynamicPermissionTier(
+  decl: DynamicToolDeclaration,
+  args: Record<string, unknown>,
+  sessionPermissions?: string[],
+): ToolEnvelope | null {
+  if (decl.permissionTier === 'session_consent' || decl.permissionTier === 'always_confirm') {
+    const isGranted = sessionPermissions?.includes(decl.name) || sessionPermissions?.includes('*');
+    if (!isGranted) {
+      return {
+        status: 'pause',
+        finding: `Tool '${decl.name}' requires ${decl.permissionTier} authorization.`,
+        data: { tool: decl.name, permissionTier: decl.permissionTier, args },
+      };
+    }
+  }
+  return null;
+}
+
+async function runDynamicHandler(
   decl: DynamicToolDeclaration,
   args: Record<string, unknown>,
 ): Promise<ToolEnvelope> {
@@ -206,11 +258,106 @@ async function executeDynamicTool(
   }
 }
 
+async function executeDynamicTool(
+  decl: DynamicToolDeclaration,
+  args: Record<string, unknown>,
+  profile: Profile,
+  sessionPermissions?: string[],
+): Promise<ToolEnvelope> {
+  const authEnvelope = await checkDynamicAuthorization(decl, args, profile, sessionPermissions);
+  if (authEnvelope) {
+    return authEnvelope;
+  }
+
+  const permissionEnvelope = checkDynamicPermissionTier(decl, args, sessionPermissions);
+  if (permissionEnvelope) {
+    return permissionEnvelope;
+  }
+
+  return runDynamicHandler(decl, args);
+}
+
+function mergeDynamicTools(
+  current: DynamicToolDeclaration[] | undefined,
+  loaded: DynamicToolDeclaration[],
+): DynamicToolDeclaration[] {
+  const merged = [...(current ?? [])];
+  for (const tool of loaded) {
+    const existing = merged.findIndex((item) => item.name === tool.name);
+    if (existing >= 0) {
+      merged[existing] = tool;
+    } else {
+      merged.push(tool);
+    }
+  }
+  return merged;
+}
+
+async function executeDynamicToolLoader(args: {
+  decl: DynamicToolDeclaration;
+  toolArgs: Record<string, unknown>;
+  profile: Profile;
+  generation: ResolvedGeneration;
+}): Promise<ToolEnvelope> {
+  const { decl, toolArgs, profile, generation } = args;
+  const loader = generation.dynamicToolLoader;
+  if (!loader) {
+    return {
+      status: 'error',
+      finding: `Tool '${decl.name}' is marked as a loader but no loader is configured.`,
+    };
+  }
+  const loaded = await loader({
+    name: decl.name,
+    args: toolArgs,
+    profile,
+    currentTools: generation.dynamicTools ?? [],
+    sessionPermissions: generation.sessionPermissions,
+  });
+  generation.dynamicTools = mergeDynamicTools(generation.dynamicTools, loaded);
+  return {
+    status: 'ok',
+    finding: `Loaded ${String(loaded.length)} dynamic tool schema(s).`,
+    data: { loadedTools: loaded.map((tool) => tool.name) },
+  };
+}
+
+function isActionableDynamicDeclaration(
+  decl: DynamicToolDeclaration | undefined,
+): decl is DynamicToolDeclaration {
+  return Boolean(
+    decl?.handler || decl?.canExecute || decl?.permissionTier || decl?.loadsDynamicTools,
+  );
+}
+
+async function executeDynamicDeclaration(args: {
+  decl: DynamicToolDeclaration;
+  toolArgs: Record<string, unknown>;
+  profile: Profile;
+  generation: ResolvedGeneration;
+}): Promise<ToolEnvelope> {
+  const { decl, toolArgs, profile, generation } = args;
+  const res = await executeDynamicTool(decl, toolArgs, profile, generation.sessionPermissions);
+  if (res.status === 'ok' && decl.loadsDynamicTools) {
+    return await executeDynamicToolLoader({ decl, toolArgs, profile, generation });
+  }
+  return res;
+}
+
 interface StepExecutionState {
   currentHistory: TurnHistoryMessage[];
   stepCount: number;
   sawTokensEvent: boolean;
   allEmittedEvents: TurnEvent[];
+  attemptEvents: TurnEvent[];
+}
+
+function recordStepEvent(event: TurnEvent, state: StepExecutionState): void {
+  if (event.type === 'tokens') {
+    state.sawTokensEvent = true;
+  }
+  state.allEmittedEvents.push(event);
+  state.attemptEvents.push(event);
 }
 
 async function* executeAutonomousStep(
@@ -222,7 +369,7 @@ async function* executeAutonomousStep(
     gemini: Record<string, unknown>[];
   },
   state: StepExecutionState,
-  suppressStructured = false,
+  bufferOutputs = false,
 ): AsyncGenerator<TurnEvent, { pendingTools: TurnEvent[]; latestStructured?: unknown }> {
   const { profile, generation, system, provider, gemini } = args;
   const genForStep = { ...generation, history: state.currentHistory };
@@ -238,18 +385,13 @@ async function* executeAutonomousStep(
   })) {
     if (event.type === 'structured') {
       latestStructured = event.structured;
-      if (!suppressStructured) {
-        state.allEmittedEvents.push(event);
-        yield event;
-      }
-    } else if (event.type === 'tokens') {
-      state.sawTokensEvent = true;
-      state.allEmittedEvents.push(event);
-      yield event;
-    } else if (event.type === 'tool' && event.tool) {
+    }
+    if (event.type === 'tool' && event.tool) {
       pendingTools.push(event);
-    } else {
-      state.allEmittedEvents.push(event);
+      continue;
+    }
+    recordStepEvent(event, state);
+    if (!bufferOutputs || event.type === 'tokens') {
       yield event;
     }
   }
@@ -331,7 +473,8 @@ function* calculateFallbackTokens(
 
 async function* handlePendingDynamicTools(
   pendingTools: TurnEvent[],
-  dynamicTools: DynamicToolDeclaration[] | undefined,
+  generation: ResolvedGeneration,
+  profile: Profile,
   state: StepExecutionState,
 ): AsyncGenerator<TurnEvent, boolean> {
   let hasRunnableHandler = false;
@@ -340,21 +483,27 @@ async function* handlePendingDynamicTools(
     if (!tool) {
       continue;
     }
-    const decl = findDynamicDeclaration(dynamicTools, tool.name);
-    if (decl?.handler) {
-      hasRunnableHandler = true;
-      const res = await executeDynamicTool(decl, tool.arguments ?? {});
-      const enrichedEvent: TurnEvent = {
-        type: 'tool',
-        tool: { ...tool, result: res },
-      };
-      state.allEmittedEvents.push(enrichedEvent);
-      yield enrichedEvent;
-      appendToolTurnToHistory(state.currentHistory, toolEv, res);
-    } else {
+    const decl = findDynamicDeclaration(generation.dynamicTools, tool.name);
+    if (!isActionableDynamicDeclaration(decl)) {
       state.allEmittedEvents.push(toolEv);
       yield toolEv;
+      continue;
     }
+
+    hasRunnableHandler = true;
+    const finalResult = await executeDynamicDeclaration({
+      decl,
+      toolArgs: tool.arguments ?? {},
+      profile,
+      generation,
+    });
+    const enrichedEvent: TurnEvent = {
+      type: 'tool',
+      tool: { ...tool, result: finalResult },
+    };
+    state.allEmittedEvents.push(enrichedEvent);
+    yield enrichedEvent;
+    appendToolTurnToHistory(state.currentHistory, toolEv, finalResult);
   }
   return hasRunnableHandler;
 }
@@ -372,7 +521,8 @@ async function* executeAttempt(args: {
   let latestStructured: unknown;
   let pendingTools: TurnEvent[] = [];
   let stepInAttempt = 0;
-  const hasValidation = Boolean(profile.outputs.validation);
+  const shouldBuffer =
+    Boolean(profile.outputs.validation) || Boolean(profile.guardrails.egress?.enforce);
 
   while (!isStepLimitReached(stepInAttempt, generation.maxSteps)) {
     stepInAttempt++;
@@ -380,7 +530,7 @@ async function* executeAttempt(args: {
     const stepResult = yield* executeAutonomousStep(
       { profile, generation, system, provider, gemini },
       state,
-      hasValidation,
+      shouldBuffer,
     );
     if (stepResult.latestStructured !== undefined) {
       latestStructured = stepResult.latestStructured;
@@ -393,7 +543,8 @@ async function* executeAttempt(args: {
 
     const hasRunnableHandler = yield* handlePendingDynamicTools(
       pendingTools,
-      generation.dynamicTools,
+      generation,
+      profile,
       state,
     );
     if (!hasRunnableHandler) {
@@ -445,6 +596,235 @@ async function evaluateValidationAttempt(
   return { artifact, isValid: Boolean(check.isValid), error };
 }
 
+type EgressOutcome =
+  | { action: 'pass' }
+  | { action: 'refusal'; event: TurnEvent }
+  | { action: 'retry'; nextRequest: TurnRequest }
+  | { action: 'withhold'; event: TurnEvent };
+
+async function evaluateEgressOutcome(args: {
+  egress: NonNullable<Profile['guardrails']['egress']>;
+  attemptEvents: TurnEvent[];
+  generation: ResolvedGeneration;
+  request: TurnRequest;
+  profile: Profile;
+  canRetry: boolean;
+}): Promise<EgressOutcome> {
+  const { egress, attemptEvents, generation, request, profile, canRetry } = args;
+  const attemptText = collectAttemptText(attemptEvents);
+  const result = await egress.enforce({
+    text: attemptText,
+    canary: generation.canary,
+    slots: request.input.slots,
+    profile,
+    role: request.input.role,
+  });
+
+  if (!result.blocked) {
+    return { action: 'pass' };
+  }
+
+  if (egress.onBlock === 'refuse_to_user') {
+    return { action: 'refusal', event: { type: 'text', text: result.text } };
+  }
+
+  if (canRetry) {
+    const rejectionMsg = result.rejectionMessage || 'Egress disclosure violation detected.';
+    const repairGuidance =
+      egress.repairGuidance ||
+      'Rewrite the message as corrected user-visible prose only. Keep the same helpful substance; scrub all internal tool names, leak phrases, and disclosure markers.';
+    const nextRequest = buildFixRequest(request, attemptText, rejectionMsg, repairGuidance);
+    return { action: 'retry', nextRequest };
+  }
+
+  return {
+    action: 'withhold',
+    event: { type: 'error', error: publicError('Turn withheld: egress disclosure violation') },
+  };
+}
+
+type ValidationOutcome =
+  | { action: 'pass' }
+  | { action: 'retry'; nextRequest: TurnRequest }
+  | { action: 'accept'; event: TurnEvent };
+
+async function evaluateValidationOutcome(args: {
+  validation: NonNullable<ProfileOutputsSpec['validation']>;
+  latestStructured: unknown;
+  request: TurnRequest;
+  canRetry: boolean;
+}): Promise<ValidationOutcome> {
+  const { validation, latestStructured, request, canRetry } = args;
+  if (!hasValidatableArtifact(validation, latestStructured)) {
+    return { action: 'pass' };
+  }
+
+  const { artifact, isValid, error } = await evaluateValidationAttempt(
+    validation,
+    latestStructured,
+    request.input.slots,
+  );
+
+  if (isValid) {
+    return { action: 'pass' };
+  }
+
+  if (canRetry) {
+    const nextRequest = buildFixRequest(request, artifact, error, validation.repairGuidance);
+    return { action: 'retry', nextRequest };
+  }
+
+  return { action: 'accept', event: { type: 'structured', structured: latestStructured } };
+}
+
+function* yieldBufferedAttemptEvents(events: TurnEvent[]): Generator<TurnEvent> {
+  for (const ev of events) {
+    if (ev.type !== 'tokens') {
+      yield ev;
+    }
+  }
+}
+
+interface AttemptFlowState {
+  currentAttempt: number;
+  currentReq: TurnRequest;
+  currentGen: ResolvedGeneration;
+}
+
+function updateFlowForRetry(flow: AttemptFlowState, nextReq: TurnRequest): void {
+  flow.currentAttempt++;
+  flow.currentReq = nextReq;
+  flow.currentGen = resolveTurn(sanitizeTurnRequest(nextReq)).generation;
+}
+
+async function* handleEgressGate(
+  egress: NonNullable<Profile['guardrails']['egress']>,
+  flow: AttemptFlowState,
+  state: StepExecutionState,
+  profile: Profile,
+  maxRetries: number,
+): AsyncGenerator<TurnEvent, 'continue' | 'terminal' | 'pass'> {
+  const canRetry = flow.currentAttempt < maxRetries;
+  const outcome = await evaluateEgressOutcome({
+    egress,
+    attemptEvents: state.attemptEvents,
+    generation: flow.currentGen,
+    request: flow.currentReq,
+    profile,
+    canRetry,
+  });
+
+  if (outcome.action === 'refusal') {
+    state.allEmittedEvents.push(outcome.event);
+    yield outcome.event;
+    return 'terminal';
+  }
+  if (outcome.action === 'withhold') {
+    yield outcome.event;
+    return 'terminal';
+  }
+  if (outcome.action === 'retry') {
+    updateFlowForRetry(flow, outcome.nextRequest);
+    return 'continue';
+  }
+  return 'pass';
+}
+
+async function* handleValidationGate(
+  validation: NonNullable<ProfileOutputsSpec['validation']>,
+  flow: AttemptFlowState,
+  state: StepExecutionState,
+  latestStructured: unknown,
+  maxRetries: number,
+): AsyncGenerator<TurnEvent, 'continue' | 'terminal' | 'pass'> {
+  const canRetry = flow.currentAttempt < maxRetries;
+  const outcome = await evaluateValidationOutcome({
+    validation,
+    latestStructured,
+    request: flow.currentReq,
+    canRetry,
+  });
+
+  if (outcome.action === 'retry') {
+    updateFlowForRetry(flow, outcome.nextRequest);
+    return 'continue';
+  }
+  if (outcome.action === 'accept') {
+    state.allEmittedEvents.push(outcome.event);
+    yield outcome.event;
+    return 'terminal';
+  }
+  return 'pass';
+}
+
+type AttemptStepAction = { status: 'terminal' } | { status: 'continue' } | { status: 'success' };
+
+function gateStatusToAction(
+  status: 'continue' | 'terminal' | 'pass',
+  terminalStatus: 'terminal' | 'success' = 'terminal',
+): AttemptStepAction | null {
+  if (status === 'terminal') {
+    return { status: terminalStatus };
+  }
+  if (status === 'continue') {
+    return { status: 'continue' };
+  }
+  return null;
+}
+
+async function* executeSingleAttemptCycle(args: {
+  flow: AttemptFlowState;
+  state: StepExecutionState;
+  profile: Profile;
+  system: string;
+  provider: ModelProvider;
+  gemini: Record<string, unknown>[];
+  maxRetries: number;
+}): AsyncGenerator<TurnEvent, AttemptStepAction> {
+  const { flow, state, profile, system, provider, gemini, maxRetries } = args;
+  const validation = profile.outputs.validation;
+  const egress = profile.guardrails.egress;
+
+  state.attemptEvents = [];
+  const { latestStructured } = yield* executeAttempt({
+    safe: flow.currentReq,
+    profile,
+    generation: flow.currentGen,
+    system,
+    provider,
+    gemini,
+    state,
+  });
+
+  if (egress?.enforce) {
+    const status = yield* handleEgressGate(egress, flow, state, profile, maxRetries);
+    const action = gateStatusToAction(status, 'terminal');
+    if (action) {
+      return action;
+    }
+  }
+
+  if (validation) {
+    const status = yield* handleValidationGate(
+      validation,
+      flow,
+      state,
+      latestStructured,
+      maxRetries,
+    );
+    const action = gateStatusToAction(status, 'success');
+    if (action) {
+      return action;
+    }
+  }
+
+  if (validation || egress?.enforce) {
+    yield* yieldBufferedAttemptEvents(state.attemptEvents);
+  }
+
+  return { status: 'success' };
+}
+
 async function* runAttemptsWithValidation(
   safe: TurnRequest,
   profile: Profile,
@@ -454,44 +834,29 @@ async function* runAttemptsWithValidation(
   gemini: Record<string, unknown>[],
   state: StepExecutionState,
 ): AsyncGenerator<TurnEvent> {
-  const validation = profile.outputs.validation;
-  const maxRetries = validation?.maxRetries ?? 0;
-  let currentAttempt = 0;
-  let currentGen = generation;
-  let currentReq = safe;
+  const maxRetries = Math.max(
+    profile.outputs.validation?.maxRetries ?? 0,
+    profile.guardrails.egress?.maxRetries ?? 2,
+  );
+  const flow: AttemptFlowState = {
+    currentAttempt: 0,
+    currentGen: generation,
+    currentReq: safe,
+  };
 
-  while (currentAttempt <= maxRetries) {
-    const { latestStructured } = yield* executeAttempt({
-      safe: currentReq,
+  while (flow.currentAttempt <= maxRetries) {
+    const step = yield* executeSingleAttemptCycle({
+      flow,
+      state,
       profile,
-      generation: currentGen,
       system,
       provider,
       gemini,
-      state,
+      maxRetries,
     });
-
-    if (!validation || !hasValidatableArtifact(validation, latestStructured)) {
+    if (step.status === 'terminal' || step.status === 'success') {
       break;
     }
-
-    const { artifact, isValid, error } = await evaluateValidationAttempt(
-      validation,
-      latestStructured,
-      currentReq.input.slots,
-    );
-
-    if (isValid || currentAttempt + 1 > maxRetries) {
-      const structEv: TurnEvent = { type: 'structured', structured: latestStructured };
-      state.allEmittedEvents.push(structEv);
-      yield structEv;
-      break;
-    }
-
-    currentAttempt++;
-    currentReq = buildFixRequest(safe, artifact, error, validation.repairGuidance);
-    const resolved = resolveTurn(sanitizeTurnRequest(currentReq));
-    currentGen = resolved.generation;
   }
 }
 
@@ -514,6 +879,7 @@ async function* emitTurn(args: {
     stepCount: 0,
     sawTokensEvent: false,
     allEmittedEvents: [],
+    attemptEvents: [],
   };
 
   yield* runAttemptsWithValidation(safe, profile, generation, system, provider, gemini, state);
@@ -560,6 +926,9 @@ async function* runTurn(
       gemini,
     })) {
       seen.push(event);
+      if (shouldSkipStreamEvent(event, profile)) {
+        continue;
+      }
       yield event;
     }
   } catch (err) {

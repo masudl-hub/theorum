@@ -33,7 +33,7 @@ function handleRunEvent(event: TurnEvent): void {
 export async function runCommand(options: RunOptions): Promise<void> {
   const profile = getProfile(options.profile);
   const provider =
-    profile.model.protocol === 'openrouter' || profile.model.provider === 'openrouter'
+    profile.model.protocol === 'openAi' || profile.model.provider === 'openrouter'
       ? createOpenRouterProvider()
       : createInteractionsProvider({ vault: vaultFromEnv() });
 

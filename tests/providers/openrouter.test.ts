@@ -2,7 +2,7 @@ import '../fixtures/test-host.ts';
 import { PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
-import type { ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
+import type { ModelId, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import {
   createOpenRouterProvider,
   resolveOpenRouterModel,
@@ -56,6 +56,8 @@ function createMockTurnRequest(profile: string, text: string): ProviderCompleteR
 
 Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () => {
   assertEquals(resolveOpenRouterModel('gemini35FlashLite'), 'google/gemini-3.5-flash-lite');
+  assertEquals(resolveOpenRouterModel('gemini31ProPreview'), 'google/gemini-3.1-pro-preview');
+  assertEquals(resolveOpenRouterModel('sonar'), 'perplexity/sonar');
   assertEquals(resolveOpenRouterModel('gemini37Flash'), 'google/gemini-3.7-flash');
   assertEquals(
     resolveOpenRouterModel('gemini35FlashLite', {
@@ -64,6 +66,15 @@ Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () 
     'anthropic/claude-3.7-sonnet',
   );
   assertEquals(resolveOpenRouterModel('perplexity/sonar'), 'perplexity/sonar');
+});
+
+Deno.test('toOpenRouterPayload passes app-selected provider-native model ids through', () => {
+  const req: ProviderCompleteRequest = {
+    ...createMockTurnRequest('pinned', 'Research this'),
+    model: 'perplexity/sonar:online' as ModelId,
+  };
+  const payload = toOpenRouterPayload(req, {});
+  assertEquals(payload.model, 'perplexity/sonar:online');
 });
 
 function assertMessage(
@@ -223,6 +234,27 @@ Deno.test('createOpenRouterProvider streams reasoning, text, tools, tokens, and 
   assertEquals(tokenEvents[0]?.tokens?.output, EXPECTED_OUTPUT_TOKENS);
   assertEquals(tokenEvents[0]?.tokens?.total, EXPECTED_TOTAL_TOKENS);
   assertEquals(events.filter((e) => e.type === 'done').length, 1);
+});
+
+Deno.test('createOpenRouterProvider preserves citation evidence from provider payloads', async () => {
+  const evidencePayload = JSON.stringify({
+    provider_metadata: { citations: ['https://example.com/source'] },
+    annotations: [{ type: 'url_citation', url: 'https://example.com/source' }],
+    choices: [{ delta: { content: 'cited answer' } }],
+  });
+  const provider = createOpenRouterProvider({
+    apiKey: 'mock-auth-token',
+    fetch: () => Promise.resolve(sseResponse([`data: ${evidencePayload}\n\n`, 'data: [DONE]\n\n'])),
+  });
+
+  const events = await collect(provider.complete(createMockTurnRequest('pinned', 'cite')));
+  const evidence = events.find((event) => event.type === 'evidence')?.evidence;
+  assertEquals(evidence?.provider, 'openrouter');
+  assertEquals(evidence?.citations, ['https://example.com/source']);
+  assertEquals(
+    events.some((event) => event.type === 'text' && event.text === 'cited answer'),
+    true,
+  );
 });
 
 Deno.test('createOpenRouterProvider yields error on HTTP non-200', async () => {

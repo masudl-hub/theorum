@@ -92,6 +92,9 @@ function sanitizeHistory(
           ),
         }
       : {}),
+    ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+    ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+    ...(m.name ? { name: m.name } : {}),
     ...(m.metadata ? { metadata: m.metadata } : {}),
   }));
 }

@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert@^1.0.0';
+import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC, PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import type { ProviderCompleteRequest } from '../../src/kernel/types.ts';
 import {
@@ -75,14 +75,20 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
 });
 
 Deno.test('streamOpenRouterTts yields error when OPENROUTER_API_KEY is missing', async () => {
-  const req = createMockTtsRequest('Hello world');
-  const events = [];
-  for await (const event of streamOpenRouterTts(req, { apiKey: '' })) {
-    events.push(event);
+  const prevEnv = Deno.env.get('OPENROUTER_API_KEY');
+  Deno.env.delete('OPENROUTER_API_KEY');
+  try {
+    const req = createMockTtsRequest('Hello world');
+    const events = [];
+    for await (const event of streamOpenRouterTts(req, { apiKey: '' })) {
+      events.push(event);
+    }
+    assertEquals(events.length, 1);
+    assertEquals(events[0]?.type, 'error');
+    assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
+  } finally {
+    if (prevEnv) Deno.env.set('OPENROUTER_API_KEY', prevEnv);
   }
-  assertEquals(events.length, 1);
-  assertEquals(events[0]?.type, 'error');
-  assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
 });
 
 Deno.test('streamOpenRouterTts yields error on empty input text', async () => {

@@ -53,13 +53,16 @@ function assertFullTape(row: TraceRecord): void {
   );
   assertEquals(JSON.stringify(gemini).includes('sig-blob'), true);
   assertEquals(row.previousInteractionId, null);
-  assertEquals(row.store, false);
+  assertEquals(row.store, null);
   assertEquals(row.streamed, true);
   assertEquals(row.title, 'hi');
-  assertEquals(row.model, { id: 'gemini35FlashLite', apiId: 'gemini-3.5-flash-lite' });
+  assertEquals(row.model, {
+    id: 'gemini35FlashLite',
+    apiId: 'gemini-3.5-flash-lite',
+  });
   assertEquals(usage.total_input_tokens, INPUT_TOKENS);
   assertEquals(usage.total_output_tokens, OUTPUT_TOKENS);
-  assertEquals(wire.store, false);
+  assertEquals(Object.hasOwn(wire, 'store'), false);
   assertEquals(typeof wire[camelToSnake('systemInstruction')], 'string');
   assertEquals(Object.hasOwn(wire, camelToSnake('previousInteractionId')), false);
   assertEquals(row.upstream?.id, 'v1_x');
@@ -74,7 +77,9 @@ function sseResponse(events: unknown[]): Response {
       return `event: ${name}\ndata: ${JSON.stringify(event)}\n`;
     })
     .join('\n');
-  return new Response(`${blocks}\nevent: done\ndata: [DONE]\n`, { status: HTTP_OK });
+  return new Response(`${blocks}\nevent: done\ndata: [DONE]\n`, {
+    status: HTTP_OK,
+  });
 }
 
 Deno.test('tapeGemini hashes image data and redacts canary', async () => {

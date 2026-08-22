@@ -4,7 +4,7 @@
  *
  * Activated when CONCOURSE_PG_URL is set in the environment.
  */
-import { Pool } from 'https://deno.land/x/postgres@v0.19.3/mod.ts';
+import { Pool } from 'postgres';
 import type { TraceSink } from './trace.ts';
 import type { TraceRecord } from './trace-record.ts';
 

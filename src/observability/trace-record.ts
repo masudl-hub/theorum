@@ -24,6 +24,8 @@ export interface TraceEvent {
   };
   structured?: unknown;
   media?: TraceImage;
+  grounding?: TurnEvent['grounding'];
+  evidence?: TurnEvent['evidence'];
   error?: string;
 }
 
@@ -34,14 +36,15 @@ interface TraceRecord {
   ms: number;
   streamed: boolean;
   cancelled: boolean;
-  previousInteractionId: null;
-  store: boolean;
+  previousInteractionId: string | null;
+  store: boolean | null;
   profile: string;
   title?: string;
   projectId?: string;
   select?: string;
   thinking?: boolean;
   tools?: TurnRequest['tools'];
+  metadata?: Record<string, unknown>;
   model?: { id: string; apiId: string };
   bucket?: string;
   generation?: {
@@ -67,7 +70,12 @@ interface TraceRecord {
   events: TraceEvent[];
   gemini?: unknown;
   usage?: unknown;
-  upstream?: { status?: unknown; id?: unknown; finish?: unknown; serviceTier?: unknown };
+  upstream?: {
+    status?: unknown;
+    id?: unknown;
+    finish?: unknown;
+    serviceTier?: unknown;
+  };
   ok: boolean;
   error?: string;
   errorInternal?: string;
@@ -114,7 +122,16 @@ async function snapshotEvent(event: TurnEvent): Promise<TraceEvent> {
     }
   }
   if (event.media) {
-    row.media = { mimeType: event.media.mimeType, sha256: await sha256(event.media.data) };
+    row.media = {
+      mimeType: event.media.mimeType,
+      sha256: await sha256(event.media.data),
+    };
+  }
+  if (event.grounding) {
+    row.grounding = event.grounding;
+  }
+  if (event.evidence) {
+    row.evidence = event.evidence;
   }
   return row;
 }
@@ -192,8 +209,8 @@ async function buildRecord(args: {
     ms: Date.now() - started,
     streamed: true,
     cancelled: status === 'cancelled',
-    previousInteractionId: null,
-    store: false,
+    previousInteractionId: safe.previousInteractionId ?? null,
+    store: safe.store ?? null,
     profile: safe.profile,
     input: {
       text: safe.input.text,

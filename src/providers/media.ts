@@ -2,10 +2,10 @@ import { TheorumError } from '../guardrails/error.ts';
 import { wrapUserData } from '../kernel/engine/boundary.ts';
 import { synthesizeFixPrompt } from '../kernel/engine/fix.ts';
 import {
-  CATALOG,
   geminiKindForMime,
   mimeAllowed,
   mimeEssence,
+  modelEntry,
 } from '../kernel/registry/catalog.ts';
 import type {
   BuiltinToolId,
@@ -35,7 +35,7 @@ function listedValue<T extends string>(
 }
 
 function requireImageSpec(profile: Profile, model: ModelId) {
-  const spec = CATALOG.models[model].image;
+  const spec = modelEntry(model).image;
   if (!spec) {
     throw new TheorumError(
       `Profile ${profile.id} requests media but ${model} is not an image model`,
@@ -90,7 +90,7 @@ function mediaParts(
   if (!accept) {
     throw new TheorumError(`Profile ${profile.id} does not accept ${channel}`);
   }
-  const spec = CATALOG.models[model].image;
+  const spec = modelEntry(model).image;
   const imageCount = blobs.filter((blob) => geminiKindForMime(blob.mimeType) === 'image').length;
   if (spec && imageCount > spec.maxInputImages) {
     throw new TheorumError(`At most ${spec.maxInputImages} reference images on ${model}`);
@@ -158,7 +158,7 @@ function resolveInputParts(profile: Profile, model: ModelId, req: TurnRequest): 
 }
 
 function assertImageGrounding(model: ModelId, builtins: BuiltinToolId[]): void {
-  const spec = CATALOG.models[model].image;
+  const spec = modelEntry(model).image;
   if (spec && !spec.allowsGrounding && builtins.length > 0) {
     throw new TheorumError(`Grounding tools are not valid on ${model}`);
   }

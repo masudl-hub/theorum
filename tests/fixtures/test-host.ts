@@ -45,7 +45,7 @@ const chat: Profile = {
   id: 'chat',
   identity: { handle: 'chat', system: 'Reply in the structured turn schema.' },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite'],
     controls: ['thinking'],
@@ -67,7 +67,7 @@ const pinned: Profile = {
   id: 'pinned',
   identity: { handle: 'pinned', chat: false, system: 'Keep replies short.' },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite'],
     thinking: 'low',
@@ -88,7 +88,7 @@ const picker: Profile = {
     systemByRole: { creator: 'You are Creator.', critic: 'You are Critic.' },
   },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite', 'gemini37Flash'],
     select: { fast: 'gemini35FlashLite', smart: 'gemini37Flash' },
@@ -116,7 +116,7 @@ const designer: Profile = {
   id: 'designer',
   identity: { handle: 'designer', system: 'Produce UI source in the structured turn schema.' },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite'],
     controls: ['thinking'],
@@ -142,7 +142,7 @@ const image: Profile = {
   id: 'image',
   identity: { handle: 'image', system: 'Generate exactly one image.' },
   model: {
-    protocol: 'interactions',
+    protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini31FlashLiteImage'],
     thinking: 'minimal',

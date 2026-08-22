@@ -37,6 +37,7 @@ Deno.test('clientIp uses the socket peer and ignores x-forwarded-for', () => {
     headers: { 'x-forwarded-for': '9.9.9.9, 8.8.8.8' },
   });
   assertEquals(clientIp(ip, req), ip);
+  assertEquals(clientIp('', new Request('http://example.com/')), 'unknown');
 });
 
 Deno.test('clientIp uses cf-connecting-ip only when the peer is loopback', () => {
@@ -45,6 +46,9 @@ Deno.test('clientIp uses cf-connecting-ip only when the peer is loopback', () =>
   });
   assertEquals(clientIp('127.0.0.1', req), '203.0.113.9');
   assertEquals(clientIp('198.51.100.2', req), '198.51.100.2');
+
+  // Release non-existent slot does not throw
+  releaseSlot(getProfile('image'), 'non-existent-ip');
 });
 
 Deno.test('takeSlot is one inflight and perDay on that profile', () => {

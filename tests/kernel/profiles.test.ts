@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.0';
+import { assertEquals, assertThrows } from '@std/assert';
 import {
   defineProfile,
   getProfile,
@@ -17,7 +17,7 @@ Deno.test('defineProfile creates valid defaults', () => {
   });
 
   assertEquals(profile.id, 'orchid_orchestrator');
-  assertEquals(profile.model.protocol, 'interactions');
+  assertEquals(profile.model.protocol, 'geminiInteractions');
   assertEquals(profile.model.provider, 'google');
   assertEquals(profile.model.maxSteps, 1);
   assertEquals(profile.model.key, 'portfolio');

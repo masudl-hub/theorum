@@ -7,8 +7,8 @@ Every profile strictly namespaces its capabilities across 6 functional domains:
 2. `model` — Protocol, provider backend, model whitelist, thinking level, and controls.
 3. `tools` — Tool access ceiling.
 4. `inputs` — Strict ingress constraints, file limits, and routing slots.
-5. `outputs` — Egress contracts, structured schemas, voice, media, and validation/auto-repair.
-6. `guardrails` — Rate limits, canary leak detection, and content safety policies.
+5. `outputs` — Structured schemas, voice, media, streaming, and validation/auto-repair.
+6. `guardrails` — Rate limits, canary leak detection, content safety, and outbound disclosure policies.
 
 ---
 
@@ -29,7 +29,7 @@ export interface Profile {
 
   /** 2. Model & Execution Bounds */
   model: {
-    protocol: 'interactions' | 'openrouter';
+    protocol: 'geminiInteractions' | 'openAi';
     provider: 'google' | 'openrouter';
     allow: ModelId[];
     select?: Record<string, ModelId>;
@@ -52,10 +52,11 @@ export interface Profile {
     maxFiles?: number;
     maxBytes?: number;
     maxTurnBytes?: number;
+    limitsByMime?: Record<string, number>;
     slots?: Record<string, string[]>;
   };
 
-  /** 5. Egress (Structured output, voice, media, validation, streaming) */
+  /** 5. Outputs (Structured output, voice, media, validation, streaming) */
   outputs: {
     structured?: StructuredSchemaId | StructuredBySlot | null;
     media?: boolean;
@@ -71,6 +72,7 @@ export interface Profile {
     canary?: boolean;
     sanitizeInput?: boolean;
     redactSensitive?: boolean;
+    egress?: ProfileEgressSpec;
   };
 }
 ```
@@ -86,7 +88,7 @@ export interface Profile {
 - `identity.systemByRole`: Role-specialized system prompts (e.g., `{ critic: '...', planner: '...' }`).
 
 ### `model`
-- `model.protocol`: Wire framing protocol (`'interactions'` for Google Interactions API, `'openrouter'` for OpenRouter OpenAI-compatible API).
+- `model.protocol`: Wire framing protocol (`'geminiInteractions'` for Google Interactions API, `'openAi'` for OpenAI/OpenRouter compatible chat completions API).
 - `model.provider`: Provider execution backend (`'google'` or `'openrouter'`).
 - `model.allow`: Whitelist of allowable `ModelId`s for this profile.
 - `model.select`: Named model mappings (e.g. `{ fast: 'gemini35FlashLite', smart: 'gemini37Flash' }`).
@@ -105,6 +107,7 @@ export interface Profile {
 - `inputs.maxFiles`: Maximum number of files permitted per message.
 - `inputs.maxBytes`: Maximum byte size permitted per single file.
 - `inputs.maxTurnBytes`: Maximum total byte size permitted across all files in one turn.
+- `inputs.limitsByMime`: Granular per-MIME byte limits (e.g. `{ 'application/pdf': 50 * 1024 * 1024, 'video/*': 100 * 1024 * 1024 }`).
 - `inputs.slots`: Allowed values for dynamic routing slots.
 
 ### `outputs`
@@ -120,3 +123,11 @@ export interface Profile {
 - `guardrails.canary`: Enable unique token canary leak interception (default `true`).
 - `guardrails.sanitizeInput`: Run prompt injection / jailbreak redaction on ingress text (default `true`).
 - `guardrails.redactSensitive`: Redact SSN, credit cards, IP addresses, API keys from inputs (default `true`).
+- `guardrails.egress`: Generic outbound disclosure control engine (`enforce`, `onBlock: 'reject_to_agent' | 'refuse_to_user'`, `maxRetries`, `repairGuidance`). Runs deterministic auto-repair loops for chat or immediate in-character refusal for voice.
+
+### Per-turn Interactions state
+- `TurnRequest.previousInteractionId`: Optional Google Interactions server-side conversation pointer. Theorum passes it through as `previous_interaction_id` for profiles using `geminiInteractions`.
+- `TurnRequest.store`: Optional Google Interactions storage override. If omitted, Theorum does not send `store`; provider/project policy remains the authority. If supplied, Theorum serializes the explicit boolean.
+
+### Grounding events
+- `TurnEvent.type: 'grounding'`: Provider evidence passthrough for Google Search / Maps grounding. The event carries raw `groundingMetadata`, raw `groundingChunks`, optional search widget HTML, and lightweight `sources` for maps/web URIs. Host apps own domain-specific interpretation (e.g. Orchid store cards or Portfolio citation display).

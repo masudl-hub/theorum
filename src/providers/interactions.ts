@@ -1,5 +1,5 @@
 import { TheorumError } from '../guardrails/error.ts';
-import { CATALOG } from '../kernel/registry/catalog.ts';
+import { modelEntry } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
 import type { BuiltinToolId, InteractionPart, ProviderCompleteRequest } from '../kernel/types.ts';
 
@@ -94,40 +94,60 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
   camel.responseFormat = jsonResponseFormat(spec.jsonSchema);
 }
 
-/** Interactions REST body for one complete() call (Google snake_case keys). */
-function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
-  if (systemHoldsUserInput(req.system, req.input)) {
-    throw new TheorumError('user input cannot be placed in the system block');
-  }
-  const catalog = CATALOG.models[req.model];
+function inputStepsFromRequest(req: ProviderCompleteRequest): {
+  type: string;
+  content: Record<string, string>[];
+}[] {
   const inputSteps: { type: string; content: Record<string, string>[] }[] = [];
-  if (req.history && req.history.length > 0) {
-    for (const h of req.history) {
-      inputSteps.push(historyStep(h));
-    }
+  for (const h of req.history ?? []) {
+    inputSteps.push(historyStep(h));
   }
   if (req.input.length > 0 || inputSteps.length === 0) {
     inputSteps.push(userInputStep(req.input));
   }
+  return inputSteps;
+}
 
-  const camel: Record<string, unknown> = {
-    model: catalog.apiId,
-    stream: true,
-    input: inputSteps,
-    generationConfig: {
-      temperature: req.temperature,
-      maxOutputTokens: req.maxOutputTokens,
-      thinkingLevel: req.thinking,
-      thinkingSummaries: req.summaries,
-    },
-    store: false,
-  };
+function applyOptionalRequestFields(
+  req: ProviderCompleteRequest,
+  camel: Record<string, unknown>,
+): void {
+  if (req.store !== undefined) {
+    camel.store = req.store;
+  }
+  if (req.previousInteractionId) {
+    camel.previousInteractionId = req.previousInteractionId;
+  }
   if (req.system) {
     camel.systemInstruction = req.system;
   }
   if (req.builtins.length > 0) {
     camel.tools = req.builtins.map((id) => ({ type: BUILTIN_API[id] }));
   }
+}
+
+function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
+  const catalog = modelEntry(req.model);
+  return {
+    model: catalog.apiId,
+    stream: true,
+    input: inputStepsFromRequest(req),
+    generationConfig: {
+      temperature: req.temperature,
+      maxOutputTokens: req.maxOutputTokens,
+      thinkingLevel: req.thinking,
+      thinkingSummaries: req.summaries,
+    },
+  };
+}
+
+/** Interactions REST body for one complete() call (Google snake_case keys). */
+function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
+  if (systemHoldsUserInput(req.system, req.input)) {
+    throw new TheorumError('user input cannot be placed in the system block');
+  }
+  const camel = baseInteractionsBody(req);
+  applyOptionalRequestFields(req, camel);
   attachResponseFormat(req, camel);
   return toGoogleValue(camel) as Record<string, unknown>;
 }

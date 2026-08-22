@@ -12,13 +12,14 @@ import type {
   CustomToolId,
   ModelId,
   Profile,
+  ProjectedProfile,
   ResolvedGeneration,
   StructuredSchemaId,
   ThinkingLevel,
   ToolId,
   TurnRequest,
 } from '../types.ts';
-import { CATALOG, clampThinkingLevel } from './catalog.ts';
+import { CATALOG, clampThinkingLevel, modelEntry } from './catalog.ts';
 import { getProfile } from './profiles.ts';
 
 const BUILTINS: BuiltinToolId[] = ['googleSearch', 'googleMaps', 'urlContext'];
@@ -74,7 +75,7 @@ function pickModel(profile: Profile, select?: string): ModelId {
 }
 
 function thinkingFromControl(modelId: ModelId, thinkingOn: boolean | undefined): ThinkingLevel {
-  const catalog = CATALOG.models[modelId];
+  const catalog = modelEntry(modelId);
   if (thinkingOn) {
     return catalog.thinking.on;
   }
@@ -131,14 +132,14 @@ function resolveSummaries(
   if (override) {
     return override;
   }
-  const catalog = CATALOG.models[modelId];
+  const entry = modelEntry(modelId);
   if (profile.model.controls?.includes('thinking')) {
     if (thinkingOn) {
-      return catalog.summaries.on;
+      return entry.summaries.on;
     }
-    return catalog.summaries.off;
+    return entry.summaries.off;
   }
-  return catalog.summaries.on;
+  return entry.summaries.on;
 }
 
 function isGatedOn(requested: Partial<Record<ToolId, boolean>> | undefined, id: ToolId): boolean {
@@ -153,7 +154,7 @@ function resolveBuiltins(
   requested?: Partial<Record<ToolId, boolean>>,
 ): BuiltinToolId[] {
   const allowed = profile.tools.allow.filter(
-    (id): id is BuiltinToolId => CATALOG.tools[id].kind === 'builtin',
+    (id): id is BuiltinToolId => CATALOG.tools[id]?.kind === 'builtin',
   );
   const picked = BUILTINS.filter((id) => allowed.includes(id) && isGatedOn(requested, id));
   return applyBuiltinMutualExclusions(picked);
@@ -164,7 +165,7 @@ function resolveCustom(
   requested?: Partial<Record<ToolId, boolean>>,
 ): CustomToolId[] {
   return profile.tools.allow.filter(
-    (id): id is CustomToolId => CATALOG.tools[id].kind === 'custom' && isGatedOn(requested, id),
+    (id): id is CustomToolId => CATALOG.tools[id]?.kind === 'custom' && isGatedOn(requested, id),
   );
 }
 
@@ -209,7 +210,7 @@ function generationLimits(
   maxOutputTokens: number;
   temperature: number;
 } {
-  const catalog = CATALOG.models[model];
+  const catalog = modelEntry(model);
   const ov = profile.model.override?.[model];
   return {
     maxOutputTokens: ov?.maxOutputTokens ?? catalog.maxOutputTokens,
@@ -232,6 +233,8 @@ function resolveTurn(req: TurnRequest): {
     profile,
     generation: {
       model,
+      previousInteractionId: safe.previousInteractionId,
+      store: safe.store,
       thinking: resolveThinking(profile, model, thinkingOn, safe.select),
       summaries: resolveSummaries(profile, model, thinkingOn),
       maxOutputTokens: limits.maxOutputTokens,
@@ -239,6 +242,8 @@ function resolveTurn(req: TurnRequest): {
       builtins,
       custom: resolveCustom(profile, safe.tools),
       dynamicTools: safe.dynamicTools,
+      dynamicToolLoader: safe.dynamicToolLoader,
+      sessionPermissions: safe.sessionPermissions,
       history: safe.input.history,
       maxSteps: profile.model.maxSteps ?? 1,
       structured: resolveStructured(profile, safe.input.slots),
@@ -254,13 +259,13 @@ function resolveTurn(req: TurnRequest): {
 function primaryImageSpec(allow: ModelId[]) {
   const [primary] = allow;
   if (!primary) {
-    return null;
+    return undefined;
   }
-  return CATALOG.models[primary].image ?? null;
+  return modelEntry(primary).image;
 }
 
 /** UI projection: catalog ∩ profile. Swatches are not included. */
-function projectProfile(id: Profile['id']) {
+function projectProfile(id: Profile['id']): ProjectedProfile {
   const profile = getProfile(id);
   const { model, identity, tools, inputs, outputs } = profile;
   const { select, allow, maxSteps, controls } = model;

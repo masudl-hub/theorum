@@ -7,6 +7,12 @@ function assertEquals(left: unknown, right: unknown): void {
   }
 }
 
+function assertStringIncludes(actual: string, expected: string): void {
+  if (!actual.includes(expected)) {
+    throw new Error(`assertStringIncludes failed: "${actual}" does not include "${expected}"`);
+  }
+}
+
 function assertThrows(fn: () => unknown, ctor: ErrorConstructor): void {
   try {
     fn();
@@ -20,4 +26,4 @@ function assertThrows(fn: () => unknown, ctor: ErrorConstructor): void {
 }
 
 export type { ErrorConstructor };
-export { assertEquals, assertThrows };
+export { assertEquals, assertStringIncludes, assertThrows };

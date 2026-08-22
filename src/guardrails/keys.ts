@@ -1,4 +1,4 @@
-import { CATALOG } from '../kernel/registry/catalog.ts';
+import { modelEntry } from '../kernel/registry/catalog.ts';
 import type { BuiltinToolId, GeminiBucket, GeminiFreeBucket, ModelId } from '../kernel/types.ts';
 import { TheorumError, UPSTREAM_FAILED } from './error.ts';
 
@@ -40,7 +40,7 @@ function resolveGeminiBucket(
   model: ModelId,
   builtins: BuiltinToolId[],
 ): GeminiBucket {
-  const entry = CATALOG.models[model];
+  const entry = modelEntry(model);
   if (entry.image) {
     return 'paid';
   }

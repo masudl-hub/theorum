@@ -1,4 +1,4 @@
-import type { TurnEvent, TurnTokens } from '../types.ts';
+import type { GroundingEvent, GroundingSource, TurnEvent, TurnTokens } from '../types.ts';
 import { asRecord } from './record.ts';
 
 function deltaText(delta: Record<string, unknown>): string {
@@ -102,6 +102,164 @@ function mediaFromComplete(event: Record<string, unknown>): TurnEvent | undefine
     }
   }
   return mediaFromOutputs(interaction.outputs);
+}
+
+function sourceFromMaps(maps: Record<string, unknown>): GroundingSource | undefined {
+  const uri = maps.uri ?? maps.googleMapsUri ?? maps.google_maps_uri;
+  if (typeof uri !== 'string' || !uri) {
+    return undefined;
+  }
+  const title = maps.title ?? maps.name;
+  return {
+    type: 'maps',
+    uri,
+    title: typeof title === 'string' && title ? title : uri,
+  };
+}
+
+function sourceFromWeb(web: Record<string, unknown>): GroundingSource | undefined {
+  const uri = web.uri;
+  if (typeof uri !== 'string' || !uri) {
+    return undefined;
+  }
+  const title = web.title ?? web.domain;
+  return {
+    type: 'web',
+    uri,
+    title: typeof title === 'string' && title ? title : uri,
+  };
+}
+
+function pushUniqueSource(sources: GroundingSource[], source: GroundingSource | undefined): void {
+  if (!source) {
+    return;
+  }
+  if (!sources.some((item) => item.uri === source.uri && item.type === source.type)) {
+    sources.push(source);
+  }
+}
+
+function groundingChunks(metadata: Record<string, unknown>): unknown[] {
+  const chunks = metadata.groundingChunks ?? metadata.grounding_chunks;
+  if (Array.isArray(chunks)) {
+    return chunks;
+  }
+  return [];
+}
+
+function searchHtml(metadata: Record<string, unknown>): string | undefined {
+  const searchEntryPoint = asRecord(metadata.searchEntryPoint ?? metadata.search_entry_point);
+  const renderedContent = searchEntryPoint?.renderedContent ?? searchEntryPoint?.rendered_content;
+  if (typeof renderedContent === 'string' && renderedContent.trim()) {
+    return renderedContent;
+  }
+  return undefined;
+}
+
+function sourcesFromChunks(chunks: unknown[]): GroundingSource[] {
+  const sources: GroundingSource[] = [];
+  for (const chunk of chunks) {
+    const record = asRecord(chunk);
+    if (!record) {
+      continue;
+    }
+    const maps = asRecord(record.maps);
+    if (maps) {
+      pushUniqueSource(sources, sourceFromMaps(maps));
+    }
+    const web = asRecord(record.web);
+    if (web) {
+      pushUniqueSource(sources, sourceFromWeb(web));
+    }
+  }
+  return sources;
+}
+
+function mergeGrounding(
+  a: GroundingEvent | undefined,
+  b: GroundingEvent | undefined,
+): GroundingEvent | undefined {
+  if (!a) {
+    return b;
+  }
+  if (!b) {
+    return a;
+  }
+  const chunks = [...(a.chunks ?? []), ...(b.chunks ?? [])];
+  const sources = [...a.sources];
+  for (const source of b.sources) {
+    pushUniqueSource(sources, source);
+  }
+  return {
+    metadata: b.metadata ?? a.metadata,
+    ...(chunks.length > 0 ? { chunks } : {}),
+    searchHtml: b.searchHtml ?? a.searchHtml,
+    sources,
+  };
+}
+
+function groundingFromMetadata(metadataValue: unknown): GroundingEvent | undefined {
+  const metadata = asRecord(metadataValue);
+  if (!metadata) {
+    return undefined;
+  }
+  const chunks = groundingChunks(metadata);
+  const sources = sourcesFromChunks(chunks);
+  const html = searchHtml(metadata);
+  if (chunks.length === 0 && sources.length === 0 && !html) {
+    return { metadata, sources };
+  }
+  return {
+    metadata,
+    ...(chunks.length > 0 ? { chunks } : {}),
+    ...(html ? { searchHtml: html } : {}),
+    sources,
+  };
+}
+
+function groundingMetadataFromRecord(record: Record<string, unknown>): unknown {
+  return record.groundingMetadata ?? record.grounding_metadata;
+}
+
+function groundingFromStep(stepValue: unknown): GroundingEvent | undefined {
+  const step = asRecord(stepValue);
+  if (!step) {
+    return undefined;
+  }
+  let grounding = groundingFromMetadata(groundingMetadataFromRecord(step));
+  const content = step.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      grounding = mergeGrounding(
+        grounding,
+        groundingFromMetadata(groundingMetadataFromRecord(asRecord(block) ?? {})),
+      );
+    }
+  }
+  return grounding;
+}
+
+function groundingFromEvent(event: Record<string, unknown>): TurnEvent | undefined {
+  let grounding = groundingFromMetadata(groundingMetadataFromRecord(event));
+  grounding = mergeGrounding(grounding, groundingFromStep(event.step));
+  grounding = mergeGrounding(grounding, groundingFromStep(event.delta));
+  const interaction = asRecord(event.interaction);
+  if (interaction) {
+    grounding = mergeGrounding(
+      grounding,
+      groundingFromMetadata(groundingMetadataFromRecord(interaction)),
+    );
+  }
+  const steps = interaction?.steps;
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      grounding = mergeGrounding(grounding, groundingFromStep(step));
+    }
+  }
+  if (!grounding) {
+    return undefined;
+  }
+  return { type: 'grounding', grounding };
 }
 
 const INPUT_KEYS = [
@@ -229,6 +387,10 @@ function eventsFromComplete(event: Record<string, unknown>, alreadyText: boolean
   if (tokenEvent) {
     events.push(tokenEvent);
   }
+  const groundingEvent = groundingFromEvent(event);
+  if (groundingEvent) {
+    events.push(groundingEvent);
+  }
   return events;
 }
 
@@ -245,5 +407,6 @@ export {
   eventsFromDelta,
   extractTokenEvent,
   extractUsageTokens,
+  groundingFromEvent,
   tryStructured,
 };

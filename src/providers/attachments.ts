@@ -34,11 +34,26 @@ function turnTooLargeMessage(maxTurnBytes: number): string {
 }
 
 function mediaLimits(inputs: MimeInputs): MediaLimits | undefined {
-  const { maxFiles, maxBytes, maxTurnBytes } = inputs;
+  const { maxFiles, maxBytes, maxTurnBytes, limitsByMime } = inputs;
   if (maxFiles && maxBytes && maxTurnBytes) {
-    return { maxFiles, maxBytes, maxTurnBytes };
+    return { maxFiles, maxBytes, maxTurnBytes, limitsByMime };
   }
   return undefined;
+}
+
+function maxBytesForMime(mimeType: string, limits: MediaLimits): number {
+  if (limits.limitsByMime) {
+    const cleanMime = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (limits.limitsByMime[cleanMime]) {
+      return limits.limitsByMime[cleanMime];
+    }
+    const [category] = cleanMime.split('/');
+    const wildCard = `${category}/*`;
+    if (limits.limitsByMime[wildCard]) {
+      return limits.limitsByMime[wildCard];
+    }
+  }
+  return limits.maxBytes;
 }
 
 function requireMediaLimits(profile: Profile): MediaLimits {
@@ -107,13 +122,14 @@ function assertAttachmentLimits(blobs: TurnBlob[], limits: MediaLimits): void {
   }
   let total = 0;
   for (const blob of blobs) {
-    const { data } = blob;
+    const { data, mimeType } = blob;
     if (!B64_BODY.test(data)) {
       throw new TheorumError('attachment data must be base64');
     }
     const size = b64DecodedLen(data);
-    if (size > limits.maxBytes) {
-      throw new TheorumError(fileTooLargeMessage(limits.maxBytes));
+    const maxAllowed = maxBytesForMime(mimeType, limits);
+    if (size > maxAllowed) {
+      throw new TheorumError(fileTooLargeMessage(maxAllowed));
     }
     total += size;
   }

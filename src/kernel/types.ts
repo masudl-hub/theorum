@@ -1,23 +1,19 @@
-/** Gemini thinking_level — not every model accepts every value.
- * 3.1/3.5 Flash Lite: minimal|low|medium|high
- * 3.7 Flash: low|medium|high (no minimal)
- * 3.1 Flash Lite Image: minimal|high
- */
+/** Gemini thinking_level — not every model accepts every value. */
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
 export type StandardModelId =
   | 'gemini31FlashLite'
+  | 'gemini31ProPreview'
   | 'gemini35FlashLite'
   | 'gemini37Flash'
   | 'gemini31FlashLiteImage'
-  | 'gemini31FlashTts';
+  | 'gemini31FlashTts'
+  | 'sonar';
 
-export type ModelId = StandardModelId | (string & {});
+export type ModelId = StandardModelId | (string & Record<PropertyKey, never>);
 
-export type ToolId =
-  | 'googleSearch'
-  | 'googleMaps'
-  | 'urlContext'
+export type BuiltinToolId = 'googleSearch' | 'googleMaps' | 'urlContext';
+export type StandardCustomToolId =
   | 'askUser'
   | 'generateMedia'
   | 'writeArtifact'
@@ -25,9 +21,8 @@ export type ToolId =
   | 'analyze'
   | 'commit'
   | 'handoff';
-
-export type BuiltinToolId = 'googleSearch' | 'googleMaps' | 'urlContext';
-export type CustomToolId = Exclude<ToolId, BuiltinToolId>;
+export type CustomToolId = StandardCustomToolId | (string & Record<PropertyKey, never>);
+export type ToolId = BuiltinToolId | CustomToolId;
 
 export type StructuredSchemaId = string;
 
@@ -62,6 +57,8 @@ export type TurnEventType =
   | 'tool'
   | 'structured'
   | 'media'
+  | 'grounding'
+  | 'evidence'
   | 'commit'
   | 'tokens'
   | 'done'
@@ -89,6 +86,8 @@ export interface ImageModelSpec {
 
 export interface ModelCatalogEntry {
   apiId: string;
+  /** Provider-native id for OpenRouter-compatible gateways. Defaults to `google/${apiId}`. */
+  openRouterId?: string;
   thinking: ThinkingMap;
   /** Levels this model accepts on Interactions. Illegal values → 400. */
   thinkingLevels: ThinkingLevel[];
@@ -120,6 +119,7 @@ export interface MediaLimits {
   maxFiles: number;
   maxBytes: number;
   maxTurnBytes: number;
+  limitsByMime?: Record<string, number>;
 }
 
 export interface MimeInputs extends Partial<MediaLimits> {
@@ -143,7 +143,9 @@ export interface ProfileModels {
     Record<
       ModelId,
       Partial<
-        Pick<ModelCatalogEntry, 'maxOutputTokens' | 'temperature'> & { summaries?: 'auto' | 'none' }
+        Pick<ModelCatalogEntry, 'maxOutputTokens' | 'temperature'> & {
+          summaries?: 'auto' | 'none';
+        }
       >
     >
   >;
@@ -201,7 +203,7 @@ export type OpenRouterTtsVoice =
   | 'Sadachbia'
   | 'Sadaltager'
   | 'Sulafat'
-  | (string & {});
+  | (string & Record<PropertyKey, never>);
 
 export interface ProfileVoiceSpec {
   voice?: OpenRouterTtsVoice;
@@ -214,15 +216,42 @@ export interface ProfileStreamingSpec {
   gateArtifacts?: boolean;
 }
 
+export interface EgressContext {
+  text: string;
+  canary?: string;
+  slots?: Record<string, string>;
+  profile: Profile;
+  role?: string;
+}
+
+export interface EgressEnforcementResult {
+  blocked: boolean;
+  text: string;
+  hits?: string[];
+  rejectionMessage?: string | null;
+}
+
+export type EgressEnforcer = (
+  context: EgressContext,
+) => EgressEnforcementResult | Promise<EgressEnforcementResult>;
+
+export interface ProfileEgressSpec {
+  enforce: EgressEnforcer;
+  onBlock?: 'reject_to_agent' | 'refuse_to_user';
+  maxRetries?: number;
+  repairGuidance?: string;
+}
+
 export interface ProfileGuardrailsSpec {
   quota: { perDay: number };
   canary?: boolean;
   sanitizeInput?: boolean;
   redactSensitive?: boolean;
+  egress?: ProfileEgressSpec;
 }
 
 export interface ProfileModelSpec {
-  protocol: 'interactions' | 'openrouter';
+  protocol: 'geminiInteractions' | 'openAi';
   provider: 'google' | 'openrouter';
   allow: ModelId[];
   select?: Record<string, ModelId>;
@@ -232,7 +261,11 @@ export interface ProfileModelSpec {
   key?: GeminiFreeBucket;
   override?: Record<
     string,
-    { maxOutputTokens?: number; temperature?: number; summaries?: 'auto' | 'none' }
+    {
+      maxOutputTokens?: number;
+      temperature?: number;
+      summaries?: 'auto' | 'none';
+    }
   >;
 }
 
@@ -243,6 +276,7 @@ export interface ProfileInputsSpec {
   maxFiles?: number;
   maxBytes?: number;
   maxTurnBytes?: number;
+  limitsByMime?: Record<string, number>;
   slots?: Record<string, string[]>;
 }
 
@@ -310,11 +344,40 @@ export interface TurnHistoryMessage {
   metadata?: Record<string, unknown>;
 }
 
+export type ToolLoadTier = 'T0' | 'T1' | 'T2';
+export type ToolPermissionTier = 'auto' | 'session_consent' | 'always_confirm';
+
+export interface DynamicToolExecutionContext {
+  args: Record<string, unknown>;
+  profile: Profile;
+  sessionPermissions?: string[];
+}
+
+export interface DynamicToolLoadContext {
+  name: string;
+  args: Record<string, unknown>;
+  profile: Profile;
+  currentTools: DynamicToolDeclaration[];
+  sessionPermissions?: string[];
+}
+
+export type DynamicToolLoader = (
+  context: DynamicToolLoadContext,
+) => DynamicToolDeclaration[] | Promise<DynamicToolDeclaration[]>;
+
 export interface DynamicToolDeclaration {
   name: string;
   description?: string;
   parameters?: Record<string, unknown>;
+  loadTier?: ToolLoadTier;
+  permissionTier?: ToolPermissionTier;
+  category?: string;
+  /** Marks this declaration as a schema-loader tool for T2 expansion. */
+  loadsDynamicTools?: boolean;
   handler?: (args: Record<string, unknown>) => ToolEnvelope | Promise<ToolEnvelope>;
+  canExecute?: (
+    context: DynamicToolExecutionContext,
+  ) => boolean | Promise<boolean> | ToolEnvelope | Promise<ToolEnvelope>;
 }
 
 export interface TurnFixRequest {
@@ -327,14 +390,24 @@ export interface TurnRequest {
   profile: ProfileId;
   /** Caller project id when one exists. Omitted on some HTTP hosts. */
   projectId?: string;
+  /** Google Interactions server-side conversation state. Omit for stateless/manual history. */
+  previousInteractionId?: string;
+  /** Optional Interactions storage override. Omit to let provider/project policy decide. */
+  store?: boolean;
   select?: string;
   thinking?: boolean;
   /** Host-provided dynamic system prompt combined with profile persona */
   system?: string;
+  /** Session permissions granted for this conversation turn */
+  sessionPermissions?: string[];
   /** Opt-in gates. Profile `allow` is the ceiling; a tool is off until `tools[id]` is true. */
   tools?: Partial<Record<ToolId, boolean>>;
   /** Runtime tool declarations (e.g. load_when_needed strategy) */
   dynamicTools?: DynamicToolDeclaration[];
+  /** Generic host-owned loader for T2 dynamic tool schema expansion. */
+  dynamicToolLoader?: DynamicToolLoader;
+  /** Host-owned metadata preserved for traces; the kernel does not interpret it. */
+  metadata?: Record<string, unknown>;
   input: {
     text?: string;
     role?: string;
@@ -347,8 +420,25 @@ export interface TurnRequest {
   toolInvoke?: { name: CustomToolId; arguments: Record<string, unknown> };
 }
 
+export interface ProjectedProfile {
+  id: string;
+  handle: string;
+  chat: boolean;
+  maxSteps: number;
+  models: ModelId[];
+  select: Record<string, ModelId> | null;
+  controls: ControlId[];
+  tools: Array<ToolCatalogEntry & { name: ToolId }>;
+  inputs: Profile['inputs'];
+  slots: Record<string, string[]>;
+  outputs: Profile['outputs'];
+  image?: ImageModelSpec | null;
+}
+
 export interface ResolvedGeneration {
   model: ModelId;
+  previousInteractionId?: string;
+  store?: boolean;
   thinking: ThinkingLevel;
   summaries: 'auto' | 'none';
   maxOutputTokens: number;
@@ -356,6 +446,8 @@ export interface ResolvedGeneration {
   builtins: BuiltinToolId[];
   custom: CustomToolId[];
   dynamicTools?: DynamicToolDeclaration[];
+  dynamicToolLoader?: DynamicToolLoader;
+  sessionPermissions?: string[];
   history?: TurnHistoryMessage[];
   maxSteps: number;
   structured: StructuredSchemaId | null;
@@ -382,12 +474,40 @@ export interface TurnTokens {
   total: number;
 }
 
+export interface GroundingSource {
+  title: string;
+  uri: string;
+  type: 'maps' | 'web';
+}
+
+export interface GroundingEvent {
+  metadata?: Record<string, unknown>;
+  chunks?: unknown[];
+  searchHtml?: string;
+  sources: GroundingSource[];
+}
+
+export interface ProviderEvidenceEvent {
+  provider: 'openrouter' | 'google' | string;
+  raw?: Record<string, unknown>;
+  citations?: string[];
+  annotations?: unknown[];
+  sources?: GroundingSource[];
+}
+
 export interface TurnEvent {
   type: TurnEventType;
   text?: string;
-  tool?: { name: string; arguments?: Record<string, unknown>; result?: ToolEnvelope; id?: string };
+  tool?: {
+    name: string;
+    arguments?: Record<string, unknown>;
+    result?: ToolEnvelope;
+    id?: string;
+  };
   structured?: unknown;
   media?: { mimeType: string; data: string };
+  grounding?: GroundingEvent;
+  evidence?: ProviderEvidenceEvent;
   tokens?: TurnTokens;
   interactionId?: string;
   error?: string;
@@ -395,6 +515,8 @@ export interface TurnEvent {
 
 export interface ProviderCompleteRequest {
   model: ModelId;
+  previousInteractionId?: string;
+  store?: boolean;
   thinking: ThinkingLevel;
   summaries: 'auto' | 'none';
   maxOutputTokens: number;
@@ -404,6 +526,7 @@ export interface ProviderCompleteRequest {
   input: InteractionPart[];
   history?: TurnHistoryMessage[];
   dynamicTools?: DynamicToolDeclaration[];
+  dynamicToolLoader?: DynamicToolLoader;
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
   voice?: ProfileVoiceSpec;

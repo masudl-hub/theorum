@@ -1,4 +1,4 @@
-import { CATALOG } from '../kernel/registry/catalog.ts';
+import { modelEntry } from '../kernel/registry/catalog.ts';
 import type {
   ModelId,
   ProviderCompleteRequest,
@@ -13,6 +13,8 @@ import { httpStatus } from './trace-usage.ts';
 function completeRequest(generation: ResolvedGeneration, system: string): ProviderCompleteRequest {
   return {
     model: generation.model,
+    previousInteractionId: generation.previousInteractionId,
+    store: generation.store,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -48,8 +50,11 @@ function attachResolved(
   if (safe.tools) {
     record.tools = safe.tools;
   }
-  if (model && model in CATALOG.models) {
-    record.model = { id: model, apiId: CATALOG.models[model as ModelId].apiId };
+  if (safe.metadata) {
+    record.metadata = safe.metadata;
+  }
+  if (model) {
+    record.model = { id: model, apiId: modelEntry(model as ModelId).apiId };
   }
   if (bucket) {
     record.bucket = bucket;

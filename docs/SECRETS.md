@@ -21,7 +21,7 @@ deno run --allow-net --allow-env --allow-read --env-file=~/.config/theorum/.env 
 ## 2. Required Secrets
 
 ### `OPENROUTER_API_KEY`
-- **Scope**: Required for the OpenRouter provider (`createOpenRouterProvider`). Unlocks access to all models hosted via OpenRouter (e.g. `google/gemini-2.5-flash`, `google/gemini-2.5-pro`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-r1`, etc.).
+- **Scope**: Required for the OpenRouter provider (`createOpenRouterProvider`). Unlocks access to all models hosted via OpenRouter (for example `google/gemini-3.5-flash-lite`, `google/gemini-3.1-pro-preview`, `perplexity/sonar`, or another profile-selected provider model).
 - **Where to get it**: [https://openrouter.ai/keys](https://openrouter.ai/keys)
 - **Permissions**: Read/Write API token with sufficient credit balance.
 

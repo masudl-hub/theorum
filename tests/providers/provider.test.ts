@@ -45,7 +45,10 @@ function headerApiKey(init?: RequestInit): string {
 }
 
 function fromMermaid(): ProviderCompleteRequest {
-  const { generation } = resolveTurn({ profile: 'chat', input: { text: 'hi' } });
+  const { generation } = resolveTurn({
+    profile: 'chat',
+    input: { text: 'hi' },
+  });
   return {
     model: generation.model,
     thinking: generation.thinking,
@@ -67,13 +70,22 @@ Deno.test('mermaid Interactions body streams JSON schema and never ships geminiB
   const format = body[camelToSnake('responseFormat')] as unknown[];
   const config = body[camelToSnake('generationConfig')] as Record<string, unknown>;
   assertEquals(body.stream, true);
-  assertEquals(body.store, false);
+  assertEquals(Object.hasOwn(body, 'store'), false);
   assertEquals(body.model, 'gemini-3.5-flash-lite');
   assertEquals(config[camelToSnake('maxOutputTokens')], req.maxOutputTokens);
   assertEquals(Array.isArray(format), true);
   assertEquals(Object.hasOwn(body, camelToSnake('geminiBucket')), false);
   assertEquals(Object.hasOwn(body, 'geminiBucket'), false);
   assertEquals(Object.hasOwn(body, camelToSnake('previousInteractionId')), false);
+});
+
+Deno.test('Interactions body passes explicit store and previous interaction id', () => {
+  const req = fromMermaid();
+  req.store = false;
+  req.previousInteractionId = 'v1_prev';
+  const body = toInteractionsBody(req);
+  assertEquals(body.store, false);
+  assertEquals(body[camelToSnake('previousInteractionId')], 'v1_prev');
 });
 
 Deno.test('chat voice audio wires as Interactions type audio', () => {
@@ -233,6 +245,58 @@ Deno.test('provider POSTs Interactions SSE on the resolved free key', async () =
   ]);
 });
 
+Deno.test('provider emits Google grounding metadata as a grounding event', async () => {
+  const groundingMetadata = {
+    searchEntryPoint: { renderedContent: '<div>search</div>' },
+    groundingChunks: [
+      {
+        maps: {
+          title: 'Plant Shop',
+          uri: 'https://maps.google.com/?cid=1',
+          placeId: 'places/abc',
+          text: '**Address:** 1 Fern St\n**Location:** 47.1, -122.2',
+        },
+      },
+      {
+        web: {
+          title: 'Care source',
+          uri: 'https://example.com/care',
+        },
+      },
+    ],
+  };
+  const provider = createInteractionsProvider({
+    vault,
+    wait: noWait,
+    fetch: () =>
+      Promise.resolve(
+        sseResponse([
+          {
+            event_type: 'interaction.completed',
+            interaction: {
+              id: 'v1_grounded',
+              status: 'completed',
+              groundingMetadata,
+            },
+          },
+        ]),
+      ),
+  });
+  const events = await collect(provider.complete(fromMermaid()));
+  const grounding = events.find((event) => event.type === 'grounding')?.grounding;
+  assertEquals(grounding?.metadata, groundingMetadata);
+  assertEquals(grounding?.chunks?.length, 2);
+  assertEquals(grounding?.searchHtml, '<div>search</div>');
+  assertEquals(grounding?.sources, [
+    {
+      type: 'maps',
+      uri: 'https://maps.google.com/?cid=1',
+      title: 'Plant Shop',
+    },
+    { type: 'web', uri: 'https://example.com/care', title: 'Care source' },
+  ]);
+});
+
 Deno.test('provider overflows to paid only after 429 backoff', async () => {
   const used: string[] = [];
   const provider = createInteractionsProvider({
@@ -277,7 +341,10 @@ Deno.test('thrown fetch errors become upstream failed', async () => {
 });
 
 Deno.test('image delta yields media', async () => {
-  const { generation } = resolveTurn({ profile: 'image', input: { text: 'fox' } });
+  const { generation } = resolveTurn({
+    profile: 'image',
+    input: { text: 'fox' },
+  });
   const provider = createInteractionsProvider({
     vault,
     wait: noWait,
@@ -305,11 +372,19 @@ Deno.test('image delta yields media', async () => {
       geminiBucket: generation.geminiBucket,
     }),
   );
-  assertEquals(events, [{ type: 'media', media: { mimeType: 'image/png', data: 'abc' } }]);
+  assertEquals(events, [
+    {
+      type: 'media',
+      media: { mimeType: 'image/png', data: 'abc' },
+    },
+  ]);
 });
 
 Deno.test('interaction complete yields output_image media', async () => {
-  const { generation } = resolveTurn({ profile: 'image', input: { text: 'fox' } });
+  const { generation } = resolveTurn({
+    profile: 'image',
+    input: { text: 'fox' },
+  });
   const provider = createInteractionsProvider({
     vault,
     wait: noWait,
@@ -337,11 +412,19 @@ Deno.test('interaction complete yields output_image media', async () => {
       geminiBucket: generation.geminiBucket,
     }),
   );
-  assertEquals(events, [{ type: 'media', media: { mimeType: 'image/png', data: 'xyz' } }]);
+  assertEquals(events, [
+    {
+      type: 'media',
+      media: { mimeType: 'image/png', data: 'xyz' },
+    },
+  ]);
 });
 
 Deno.test('interaction complete yields outputs image media', async () => {
-  const { generation } = resolveTurn({ profile: 'image', input: { text: 'fox' } });
+  const { generation } = resolveTurn({
+    profile: 'image',
+    input: { text: 'fox' },
+  });
   const provider = createInteractionsProvider({
     vault,
     wait: noWait,
@@ -369,5 +452,10 @@ Deno.test('interaction complete yields outputs image media', async () => {
       geminiBucket: generation.geminiBucket,
     }),
   );
-  assertEquals(events, [{ type: 'media', media: { mimeType: 'image/png', data: 'out' } }]);
+  assertEquals(events, [
+    {
+      type: 'media',
+      media: { mimeType: 'image/png', data: 'out' },
+    },
+  ]);
 });

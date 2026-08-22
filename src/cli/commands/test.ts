@@ -11,7 +11,7 @@ import {
 } from '../matrix/synthesizer.ts';
 
 function createDefaultProvider(profile: Profile): ModelProvider {
-  if (profile.model.protocol === 'openrouter' || profile.model.provider === 'openrouter') {
+  if (profile.model.protocol === 'openAi' || profile.model.provider === 'openrouter') {
     return createOpenRouterProvider();
   }
   return createInteractionsProvider({ vault: vaultFromEnv() });

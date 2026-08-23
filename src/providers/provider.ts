@@ -1,3 +1,12 @@
+/**
+ * Google Interactions provider adapter.
+ *
+ * This adapter converts THEORUM's provider-neutral request into the Google
+ * Interactions wire format and streams normalized `TurnEvent` objects.
+ *
+ * @module
+ */
+
 import { publicError, TheorumError } from '../guardrails/error.ts';
 import { fetchGemini, type GeminiTransport } from '../guardrails/keys.ts';
 import {
@@ -142,6 +151,7 @@ async function* streamGuarded(
   }
 }
 
+/** Create a `ModelProvider` backed by Google Interactions streaming. */
 function createInteractionsProvider(transport: GeminiTransport): ModelProvider {
   return {
     complete: (req) => streamGuarded(req, transport),

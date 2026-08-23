@@ -1,3 +1,12 @@
+/**
+ * Trace record construction types.
+ *
+ * Trace records preserve useful execution evidence while hashing or omitting
+ * unsafe media bytes and canary-sensitive content.
+ *
+ * @module
+ */
+
 import { publicError } from '../guardrails/error.ts';
 import { sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
 import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
@@ -9,18 +18,20 @@ import { completedInteraction } from './trace-usage.ts';
 const TRACE_VERSION = 2;
 const TITLE_MAX = 80;
 
+/** Hash-only image reference stored in trace records. */
 export interface TraceImage {
   mimeType: string;
   sha256: string;
 }
 
+/** Trace-safe copy of a public turn event. */
 export interface TraceEvent {
   type: string;
   text?: string;
   tool?: {
     name: string;
     arguments?: Record<string, unknown>;
-    result?: { status: string; finding: string };
+    result?: { status: string; finding?: string; data?: Record<string, unknown> };
   };
   structured?: unknown;
   media?: TraceImage;
@@ -29,6 +40,7 @@ export interface TraceEvent {
   error?: string;
 }
 
+/** Complete trace-safe record for one attempted turn. */
 interface TraceRecord {
   v: number;
   id: string;
@@ -118,7 +130,11 @@ async function snapshotEvent(event: TurnEvent): Promise<TraceEvent> {
     const { name, arguments: args, result } = event.tool;
     row.tool = { name, arguments: args };
     if (result) {
-      row.tool.result = { status: result.status, finding: result.finding };
+      row.tool.result = {
+        status: result.status,
+        ...(result.finding ? { finding: result.finding } : {}),
+        ...(result.data ? { data: result.data } : {}),
+      };
     }
   }
   if (event.media) {
@@ -197,6 +213,7 @@ async function buildRecord(args: {
 }): Promise<TraceRecord> {
   const { req, events, started, model, bucket, thrown, gemini, canary, system, generation } = args;
   const safe = requestForTrace(req);
+  const input = safe.input ?? {};
   const snapped = await Promise.all(events.map((event) => snapshotEvent(event)));
   const lastErr = [...snapped].reverse().find((row) => row.type === 'error');
   const done = completedInteraction(gemini);
@@ -213,16 +230,16 @@ async function buildRecord(args: {
     store: safe.store ?? null,
     profile: safe.profile,
     input: {
-      text: safe.input.text,
-      role: safe.input.role,
-      slots: safe.input.slots,
-      attachments: await hashBlobs(safe.input.attachments),
-      voice: await hashBlobs(safe.input.voice),
+      text: input.text,
+      role: input.role,
+      slots: input.slots,
+      attachments: await hashBlobs(input.attachments),
+      voice: await hashBlobs(input.voice),
     },
     events: snapped,
     ok,
   };
-  const title = titleFrom(safe.input.text);
+  const title = titleFrom(input.text);
   if (title) {
     record.title = title;
   }

@@ -2,14 +2,14 @@
 
 ## 1. Overview & Goals
 
-The `theorum` CLI provides developer tooling, automated profile verification, stress-matrix synthesis, and key/quota observability for applications powered by Theorum.
+The `theorum` CLI provides developer tooling, profile inspection, and stress-matrix synthesis for applications powered by Theorum.
 
 ### Core Objectives:
 1. **Zero-Config Profile Stress Testing**: Automatically construct the most demanding valid payload (multimodal, deep reasoning, maximum tools) for any registered profile.
 2. **Capability Matrix Permutations**: Systematically test or isolate specific capabilities (`--lite`, `--attachment`, `--voice`, `--map`, `--search`).
 3. **Conflict Resolution**: Deterministically resolve provider conflicts (e.g. `search XOR maps`) and mutual exclusions without crashing.
-4. **Credential & Key Vault Diagnostics**: Audit and verify active keys across buckets (`studio`, `planner`, `portfolio`, `paid`, `openrouter`).
-5. **Interactive Turn REPL**: Execute ad-hoc runs directly in terminal with streamed SSE events and reasoning visibility.
+4. **Host-Owned Execution**: The CLI never reads secrets or creates providers. Hosts supply providers when executing live tests programmatically.
+5. **Interactive Turn REPL**: Execute ad-hoc runs only when the host has supplied a `ModelProvider`.
 
 ---
 
@@ -21,20 +21,20 @@ theorum <command> [subcommand] [flags]
 
 ### 2.1 `theorum test` (Profile Verification & Stress Runner)
 
-Executes live validation turns against registered profiles.
+Builds validation turns against registered profiles. Live execution requires an explicit host-provided `ModelProvider`; Theorum does not read keys or create providers.
 
 ```bash
-# 1. Stress Combo (Default): Auto-constructs the toughest valid test for this profile
-theorum test --profile studio
+# 1. Stress Combo (Default): Auto-constructs the toughest valid test for this host profile
+theorum test --profile your-profile
 
 # 2. Lite (Smoke ping): Minimal prompt, fast mode, tools disabled
-theorum test --profile mermaid --lite
+theorum test --profile your-profile --lite
 
 # 3. Explicit capability flags: Override/test specific modalities
-theorum test --profile studio --attachment ./wireframe.png --map --voice ./audio.wav
+theorum test --profile your-profile --attachment ./reference.png --map --voice ./audio.wav
 
 # 4. Full matrix test: Runs every permutation of supported tools/inputs for a profile
-theorum test --profile planner --matrix
+theorum test --profile your-profile --matrix
 
 # 5. Global suite: Test all registered profiles
 theorum test --all [--lite] [--concurrency 4]
@@ -43,7 +43,7 @@ theorum test --all [--lite] [--concurrency 4]
 #### CLI Flag Matrix:
 | Flag | Type | Description |
 | :--- | :--- | :--- |
-| `--profile, -p` | `string` | Target profile ID (e.g. `studio`, `planner`, `mermaid`, `daily`, `vinylator`) |
+| `--profile, -p` | `string` | Target profile ID registered by the host application |
 | `--all, -a` | `boolean` | Run test across all registered profiles |
 | `--lite` | `boolean` | Minimal single-turn connectivity ping (fast mode, tools off, text only) |
 | `--matrix` | `boolean` | Generate and execute all valid permutations for the profile |
@@ -58,14 +58,14 @@ theorum test --all [--lite] [--concurrency 4]
 
 ### 2.2 `theorum run` (Terminal REPL & Ad-hoc Execution)
 
-Interactive execution in the terminal with live streaming.
+Interactive execution in the terminal with live streaming when called from a host that supplies a provider.
 
 ```bash
 # Interactive REPL
-theorum run --profile studio
+theorum run --profile your-profile
 
 # One-shot CLI run
-theorum run --profile planner --prompt "Create a 3-tier architecture plan" --mode smart
+theorum run --profile your-profile --prompt "Create a 3-tier architecture plan" --mode smart
 ```
 
 ---
@@ -77,22 +77,10 @@ theorum run --profile planner --prompt "Create a 3-tier architecture plan" --mod
 theorum profile list
 
 # Show detailed profile definition (inputs, tools, schema, model config)
-theorum profile show studio
+theorum profile show your-profile
 
 # Validate structured output schemas
 theorum profile validate
-```
-
----
-
-### 2.4 `theorum vault` (API Keys & Quota Diagnostics)
-
-```bash
-# Display configured key buckets and statuses
-theorum vault status
-
-# Probe live provider connectivity for all keys
-theorum vault ping
 ```
 
 ---
@@ -157,8 +145,7 @@ theorum/
 │   │   ├── commands/
 │   │   │   ├── test.ts                  # 'theorum test' execution & reporting
 │   │   │   ├── run.ts                   # 'theorum run' REPL & SSE streaming
-│   │   │   ├── profile.ts               # 'theorum profile' inspector
-│   │   │   └── vault.ts                 # 'theorum vault' key auditor
+│   │   │   └── profile.ts               # 'theorum profile' inspector
 │   │   └── matrix/
 │   │       ├── fixtures.ts              # Built-in synthetic media fixtures
 │   │       └── synthesizer.ts           # Matrix & stress combo generator
@@ -176,11 +163,11 @@ theorum/
 `theorum test` outputs concise terminal telemetry:
 
 ```
-[THEORUM TEST] Profile: studio (smart mode)
+[THEORUM TEST] Profile: your-profile (smart mode)
 ------------------------------------------------------------
 Inputs:      [Text, Voice (1s WAV), Attachment (1 PNG)]
 Tools:       [googleSearch, codeExecution]
-Key Vault:   GEMINI_API_KEY_STUDIO (Free bucket)
+Provider:    host-supplied ModelProvider
 
 ⚡ Streaming Turn Execution:
   ✓ Thinking tokens: 1,420 tokens (1.12s)

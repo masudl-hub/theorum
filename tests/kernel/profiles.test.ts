@@ -10,21 +10,50 @@ import {
 
 Deno.test('defineProfile creates valid defaults', () => {
   const profile = defineProfile({
-    id: 'orchid_orchestrator',
+    id: 'host_profile',
     model: { allow: ['gemini35FlashLite'], thinking: 'low' },
-    inputs: { text: true },
-    guardrails: { quota: { perDay: 100 } },
   });
 
-  assertEquals(profile.id, 'orchid_orchestrator');
+  assertEquals(profile.id, 'host_profile');
   assertEquals(profile.model.protocol, 'geminiInteractions');
   assertEquals(profile.model.provider, 'google');
   assertEquals(profile.model.maxSteps, 1);
-  assertEquals(profile.model.key, 'portfolio');
-  assertEquals(profile.identity.handle, 'orchid_orchestrator');
-  assertEquals(profile.outputs.commit, 'artifact');
+  assertEquals(profile.model.key, 'freeA');
+  assertEquals(profile.identity.handle, 'host_profile');
+  assertEquals(profile.tools.allow, []);
+  assertEquals(profile.inputs.text, true);
   assertEquals(profile.outputs.structured, null);
   assertEquals(profile.outputs.media, false);
+  assertEquals(profile.guardrails.canary, true);
+  assertEquals(profile.guardrails.quota, undefined);
+});
+
+Deno.test('defineProfile defaults all optional host-authored sections', () => {
+  const profile = defineProfile({
+    id: 'bare_host_profile',
+    model: { allow: ['gemini35FlashLite'] },
+  });
+
+  assertEquals(profile.identity.handle, 'bare_host_profile');
+  assertEquals(profile.model.thinking, 'minimal');
+  assertEquals(profile.tools.allow, []);
+  assertEquals(profile.inputs.text, true);
+  assertEquals(profile.outputs.media, false);
+  assertEquals(profile.guardrails.sanitizeInput, true);
+});
+
+Deno.test('registerProfile accepts minimal host-authored profile definitions', () => {
+  registerProfile({
+    id: 'minimal_host_bot',
+    model: { allow: ['gemini35FlashLite'] },
+  });
+
+  const profile = getProfile('minimal_host_bot');
+  assertEquals(profile.identity.handle, 'minimal_host_bot');
+  assertEquals(profile.tools.allow, []);
+  assertEquals(profile.inputs.text, true);
+  assertEquals(profile.outputs.structured, null);
+  assertEquals(profile.guardrails.quota, undefined);
 });
 
 Deno.test('registerProfile and getProfile manage runtime profile lifecycle', () => {

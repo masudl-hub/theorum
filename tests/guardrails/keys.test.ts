@@ -1,18 +1,13 @@
 import '../fixtures/test-host.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../src/guardrails/error.ts';
-import {
-  fetchGemini,
-  type GeminiVault,
-  vaultFromEnv,
-  withGeminiKey,
-} from '../../src/guardrails/keys.ts';
+import { fetchGemini, type GeminiVault, withGeminiKey } from '../../src/guardrails/keys.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 
 const vault: GeminiVault = {
-  studio: 'studio-key',
-  portfolio: 'portfolio-key',
-  planner: 'planner-key',
+  freeA: 'free-a-key',
+  freeB: 'free-b-key',
+  freeC: 'free-c-key',
   paid: 'paid-key',
 };
 
@@ -34,38 +29,38 @@ function responseForKey(key: string): Response {
   return new Response('body', { status: HTTP_QUOTA });
 }
 
-Deno.test('vaultFromEnv exposes every Gemini bucket', () => {
-  assertEquals(Object.keys(vaultFromEnv()).sort(), ['paid', 'planner', 'portfolio', 'studio']);
-});
-
-Deno.test('mermaid daily studio planner default to their free keys', () => {
+Deno.test('host profiles default to their configured free key slots', () => {
   assertEquals(
     resolveTurn({ profile: 'chat', input: { text: 'x' } }).generation.geminiBucket,
-    'portfolio',
+    'freeA',
   );
-  assertEquals(resolveTurn({ profile: 'pinned', input: {} }).generation.geminiBucket, 'portfolio');
+  assertEquals(resolveTurn({ profile: 'pinned', input: {} }).generation.geminiBucket, 'freeA');
   assertEquals(
-    resolveTurn({ profile: 'designer', input: { text: 'x' } }).generation.geminiBucket,
-    'studio',
+    resolveTurn({ profile: 'formatter', input: { text: 'x' } }).generation.geminiBucket,
+    'freeC',
   );
   assertEquals(
-    resolveTurn({ profile: 'picker', select: 'fast', input: { text: 'x' } }).generation
+    resolveTurn({ profile: 'selector', select: 'fast', input: { text: 'x' } }).generation
       .geminiBucket,
-    'planner',
+    'freeB',
   );
 });
 
-Deno.test('vinylator image model uses GEMINI_API_KEY', () => {
+Deno.test('image model uses the paid Gemini key', () => {
   assertEquals(
     resolveTurn({ profile: 'image', input: { text: 'fox' } }).generation.geminiBucket,
     'paid',
   );
 });
 
-Deno.test('3.7 flash without search or maps stays on the free planner key', () => {
-  const { generation } = resolveTurn({ profile: 'picker', select: 'smart', input: { text: 'x' } });
-  assertEquals(generation.model, 'gemini37Flash');
-  assertEquals(generation.geminiBucket, 'planner');
+Deno.test('pro preview without search or maps stays on the configured free key', () => {
+  const { generation } = resolveTurn({
+    profile: 'selector',
+    select: 'smart',
+    input: { text: 'x' },
+  });
+  assertEquals(generation.model, 'gemini31ProPreview');
+  assertEquals(generation.geminiBucket, 'freeB');
 });
 
 Deno.test('search forces the paid key on every free profile', () => {
@@ -75,13 +70,13 @@ Deno.test('search forces the paid key on every free profile', () => {
     'paid',
   );
   assertEquals(
-    resolveTurn({ profile: 'designer', tools: { googleSearch: true }, input: { text: 'x' } })
+    resolveTurn({ profile: 'formatter', tools: { googleSearch: true }, input: { text: 'x' } })
       .generation.geminiBucket,
     'paid',
   );
   assertEquals(
     resolveTurn({
-      profile: 'picker',
+      profile: 'selector',
       select: 'fast',
       tools: { googleSearch: true },
       input: { text: 'x' },
@@ -90,24 +85,24 @@ Deno.test('search forces the paid key on every free profile', () => {
   );
 });
 
-Deno.test('maps on flash lite stays free; maps on 3.7 flash is paid', () => {
+Deno.test('maps on flash lite stays free; maps on pro preview is paid', () => {
   assertEquals(
     resolveTurn({ profile: 'chat', tools: { googleMaps: true }, input: { text: 'x' } }).generation
       .geminiBucket,
-    'portfolio',
+    'freeA',
   );
   assertEquals(
     resolveTurn({
-      profile: 'picker',
+      profile: 'selector',
       select: 'fast',
       tools: { googleMaps: true },
       input: { text: 'x' },
     }).generation.geminiBucket,
-    'planner',
+    'freeB',
   );
   assertEquals(
     resolveTurn({
-      profile: 'picker',
+      profile: 'selector',
       select: 'smart',
       tools: { googleMaps: true },
       input: { text: 'x' },
@@ -120,14 +115,14 @@ Deno.test('url context does not force paid', () => {
   assertEquals(
     resolveTurn({ profile: 'chat', tools: { urlContext: true }, input: { text: 'x' } }).generation
       .geminiBucket,
-    'portfolio',
+    'freeA',
   );
 });
 
 Deno.test('withGeminiKey stays on the free key when it succeeds', async () => {
   const used: string[] = [];
   const out = await withGeminiKey(
-    'portfolio',
+    'freeA',
     (apiKey) => {
       used.push(apiKey);
       return Promise.resolve('ok');
@@ -135,13 +130,13 @@ Deno.test('withGeminiKey stays on the free key when it succeeds', async () => {
     { vault, wait: noWait },
   );
   assertEquals(out, 'ok');
-  assertEquals(used, ['portfolio-key']);
+  assertEquals(used, ['free-a-key']);
 });
 
 Deno.test('withGeminiKey overflows to paid after quota backoff on a free bucket', async () => {
   const used: string[] = [];
   const out = await withGeminiKey(
-    'studio',
+    'freeC',
     (apiKey) => {
       used.push(apiKey);
       if (apiKey !== 'paid-key') {
@@ -152,7 +147,7 @@ Deno.test('withGeminiKey overflows to paid after quota backoff on a free bucket'
     { vault, wait: noWait },
   );
   assertEquals(out, 'ok');
-  assertEquals(used, ['studio-key', 'studio-key', 'studio-key', 'paid-key']);
+  assertEquals(used, ['free-c-key', 'free-c-key', 'free-c-key', 'paid-key']);
 });
 
 Deno.test('withGeminiKey never overflows when the bucket is already paid', async () => {
@@ -176,21 +171,16 @@ Deno.test('withGeminiKey never overflows when the bucket is already paid', async
 
 Deno.test('fetchGemini never starts on paid for a free bucket that is not 429', async () => {
   const used: string[] = [];
-  const res = await fetchGemini(
-    'https://example.com/v1',
-    { method: 'POST', body: '{}' },
-    'planner',
-    {
-      vault,
-      wait: noWait,
-      fetch: (_url, init) => {
-        used.push(headerApiKey(init));
-        return Promise.resolve(new Response('ok', { status: HTTP_OK }));
-      },
+  const res = await fetchGemini('https://example.com/v1', { method: 'POST', body: '{}' }, 'freeB', {
+    vault,
+    wait: noWait,
+    fetch: (_url, init) => {
+      used.push(headerApiKey(init));
+      return Promise.resolve(new Response('ok', { status: HTTP_OK }));
     },
-  );
+  });
   assertEquals(res.status, HTTP_OK);
-  assertEquals(used, ['planner-key']);
+  assertEquals(used, ['free-b-key']);
 });
 
 Deno.test('fetchGemini overflows to paid after 429 backoff, not before', async () => {
@@ -198,7 +188,7 @@ Deno.test('fetchGemini overflows to paid after 429 backoff, not before', async (
   const res = await fetchGemini(
     'https://example.com/v1?key=strip-me',
     { method: 'POST', body: '{}' },
-    'portfolio',
+    'freeA',
     {
       vault,
       wait: noWait,
@@ -210,14 +200,14 @@ Deno.test('fetchGemini overflows to paid after 429 backoff, not before', async (
     },
   );
   assertEquals(res.status, HTTP_OK);
-  assertEquals(used, ['portfolio-key', 'portfolio-key', 'portfolio-key', 'paid-key']);
+  assertEquals(used, ['free-a-key', 'free-a-key', 'free-a-key', 'paid-key']);
 });
 
 Deno.test('missing free key throws before any fetch', async () => {
   let threw = false;
   try {
-    await fetchGemini('https://example.com/v1', {}, 'studio', {
-      vault: { ...vault, studio: undefined },
+    await fetchGemini('https://example.com/v1', {}, 'freeC', {
+      vault: { ...vault, freeC: undefined },
       wait: noWait,
       fetch: () => {
         throw new Error('must not fetch');
@@ -231,7 +221,7 @@ Deno.test('missing free key throws before any fetch', async () => {
 
 Deno.test('fetchGemini and withGeminiKey retry on transient network errors before succeeding', async () => {
   let attempts = 0;
-  const res = await fetchGemini('https://example.com/v1/ping', { method: 'GET' }, 'portfolio', {
+  const res = await fetchGemini('https://example.com/v1/ping', { method: 'GET' }, 'freeA', {
     vault,
     wait: noWait,
     fetch: () => {
@@ -247,7 +237,7 @@ Deno.test('fetchGemini and withGeminiKey retry on transient network errors befor
 
   let keyAttempts = 0;
   const result = await withGeminiKey(
-    'portfolio',
+    'freeA',
     () => {
       keyAttempts++;
       if (keyAttempts === 1) {

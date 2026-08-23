@@ -31,7 +31,7 @@ Deno.test('toOpenRouterPayload tests all modalities, tools, thinking, structured
     system: 'You are an assistant',
     summaries: 'auto',
     image: null,
-    geminiBucket: 'portfolio',
+    geminiBucket: 'freeA',
     input: [
       { type: 'text', text: 'Hello text' },
       { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' },

@@ -1,3 +1,12 @@
+/**
+ * Profile resolution for THEORUM turns.
+ *
+ * This module validates caller overrides, selects models and tools, normalizes
+ * input parts, and produces the provider request state consumed by `runTurn`.
+ *
+ * @module
+ */
+
 import { TheorumError } from '../../guardrails/error.ts';
 import { resolveGeminiBucket } from '../../guardrails/keys.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
@@ -175,13 +184,6 @@ function assertToolAllowed(profile: Profile, name: ToolId): void {
   }
 }
 
-function assertHandoffTarget(profile: Profile, to: string): void {
-  const legal = profile.inputs.slots?.handoff;
-  if (!legal?.includes(to)) {
-    throw new TheorumError(`Handoff target '${to}' is not on ${profile.id}`);
-  }
-}
-
 function resolveStructured(
   profile: Profile,
   slots?: Record<string, string>,
@@ -218,11 +220,13 @@ function generationLimits(
   };
 }
 
+/** Resolve a host `TurnRequest` into provider-ready generation state. */
 function resolveTurn(req: TurnRequest): {
   profile: Profile;
   generation: ResolvedGeneration;
 } {
   const safe = sanitizeTurnRequest(req);
+  const input = safe.input ?? {};
   const profile = getProfile(safe.profile);
   const model = pickModel(profile, safe.select);
   const thinkingOn = safe.thinking === true;
@@ -244,13 +248,13 @@ function resolveTurn(req: TurnRequest): {
       dynamicTools: safe.dynamicTools,
       dynamicToolLoader: safe.dynamicToolLoader,
       sessionPermissions: safe.sessionPermissions,
-      history: safe.input.history,
+      history: input.history,
       maxSteps: profile.model.maxSteps ?? 1,
-      structured: resolveStructured(profile, safe.input.slots),
-      image: resolveImageFormat(profile, model, safe.input.slots),
+      structured: resolveStructured(profile, input.slots),
+      image: resolveImageFormat(profile, model, input.slots),
       voice: profile.outputs.voice,
       input: resolveInputParts(profile, model, safe),
-      geminiBucket: resolveGeminiBucket(profile.model.key ?? 'portfolio', model, builtins),
+      geminiBucket: resolveGeminiBucket(profile.model.key ?? 'freeA', model, builtins),
       canary: profile.guardrails.canary !== false ? mintCanary() : '',
     },
   };
@@ -265,6 +269,7 @@ function primaryImageSpec(allow: ModelId[]) {
 }
 
 /** UI projection: catalog ∩ profile. Swatches are not included. */
+/** Project a registered profile into a safe host/UI inspection object. */
 function projectProfile(id: Profile['id']): ProjectedProfile {
   const profile = getProfile(id);
   const { model, identity, tools, inputs, outputs } = profile;
@@ -281,7 +286,7 @@ function projectProfile(id: Profile['id']): ProjectedProfile {
     controls: controls ?? [],
     tools: tools.allow.map((name) => ({
       name,
-      ...CATALOG.tools[name],
+      ...(CATALOG.tools[name] ?? { kind: 'custom' as const, ui: true }),
     })),
     inputs,
     slots: slots ?? {},
@@ -299,4 +304,4 @@ function pickSystemRole(profile: Profile, requested?: string): string {
   return handle;
 }
 
-export { assertHandoffTarget, assertToolAllowed, pickSystemRole, projectProfile, resolveTurn };
+export { assertToolAllowed, pickSystemRole, projectProfile, resolveTurn };

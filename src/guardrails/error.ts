@@ -1,3 +1,13 @@
+/**
+ * Public-safe error mapping for THEORUM.
+ *
+ * Kernel internals may contain provider status text, tool names, or exception
+ * details. This module maps those failures to stable user-safe strings.
+ *
+ * @module
+ */
+
+/** Error class used for expected THEORUM contract failures. */
 class TheorumError extends Error {
   constructor(message = '', options?: ErrorOptions) {
     super(message, options);
@@ -5,14 +15,23 @@ class TheorumError extends Error {
   }
 }
 
+/** Internal marker for provider or transport failure. */
 const UPSTREAM_FAILED = 'upstream failed';
+/** Generic safe fallback shown when details must not be surfaced. */
 const PUBLIC_GENERIC = 'Something went wrong. Try again.';
+/** Safe copy for transient provider unavailability. */
 const PUBLIC_UNAVAILABLE = 'The model is unavailable. Try again.';
+/** Safe copy for canary or egress disclosure violations. */
 const PUBLIC_CANARY = "That reply wasn't safe to show. Try again.";
+/** Safe copy for tool or permission denials. */
 const PUBLIC_ACTION = "That action isn't available.";
+/** Safe copy for unsupported MIME types. */
 const PUBLIC_FILE_TYPE = "That file type isn't supported.";
+/** Safe copy for oversized files. */
 const PUBLIC_FILE_SIZE = 'That file is too large.';
+/** Safe copy for too many files in one turn. */
 const PUBLIC_FILE_COUNT = 'Too many files for one message.';
+/** Safe copy for unsupported generated image dimensions. */
 const PUBLIC_IMAGE_SIZE = "That image size isn't supported.";
 
 const EXACT: Record<string, string> = {
@@ -27,8 +46,6 @@ const EXACT: Record<string, string> = {
   'attachments exceed the per-turn budget': PUBLIC_FILE_SIZE,
   'askUser.kind must be confirm, choice, or text': "That question isn't valid.",
   'askUser.prompt is required': 'That question needs a prompt.',
-  'handoff.to is required': "That action isn't available.",
-  'generateMedia is not wired; enable it on the profile when a media backend exists': PUBLIC_ACTION,
   'This profile does not accept text input': PUBLIC_ACTION,
 };
 
@@ -46,9 +63,9 @@ const RULES: ErrorRule[] = [
     match: (t) =>
       t.includes('not gated') ||
       t.includes('not allowed') ||
+      t.includes('has no kernel executor') ||
       t.includes('Unknown model select') ||
-      t.includes('Grounding tools') ||
-      t.includes('Handoff target'),
+      t.includes('Grounding tools'),
     resolve: () => PUBLIC_ACTION,
   },
   {
@@ -96,6 +113,7 @@ function publicText(text: string): string {
   return PUBLIC_GENERIC;
 }
 
+/** Convert an unknown thrown value or internal message to user-safe text. */
 function publicError(err: unknown): string {
   if (typeof err === 'string') {
     return publicText(err);
@@ -106,6 +124,7 @@ function publicError(err: unknown): string {
   return PUBLIC_UNAVAILABLE;
 }
 
+/** Backwards-compatible alias for `publicError`. */
 function errorMessage(err: unknown): string {
   return publicError(err);
 }

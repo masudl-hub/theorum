@@ -1,3 +1,12 @@
+/**
+ * Prompt-injection span detection.
+ *
+ * These utilities return spans that can be redacted from untrusted user text
+ * before provider submission.
+ *
+ * @module
+ */
+
 import { blobAt, type RedactSpan, spansFromPatterns } from '../observability/spans.ts';
 
 const IGNORE_PREVIOUS =
@@ -232,6 +241,7 @@ function spacedSpans(text: string): RedactSpan[] {
   return spans;
 }
 
+/** Detect prompt-injection spans in a string. */
 function injectionSpans(text: string): RedactSpan[] {
   const shadow = typoNormalize(text);
   let typo: RedactSpan[] = [];

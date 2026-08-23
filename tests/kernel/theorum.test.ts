@@ -5,10 +5,10 @@ import {
   assertStringIncludes,
   assertThrows,
 } from '../../src/kernel/engine/assert.ts';
-import { synthesizeFixPrompt } from '../../src/kernel/engine/fix.ts';
+import { synthesizeRepairPrompt } from '../../src/kernel/engine/repair.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { CATALOG, clampThinkingLevel } from '../../src/kernel/registry/catalog.ts';
-import { getProfile, registerProfile } from '../../src/kernel/registry/profiles.ts';
+import { defineProfile, getProfile, registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import { executeTool } from '../../src/kernel/registry/tools.ts';
 import type {
@@ -18,7 +18,136 @@ import type {
   ProfileId,
   ProviderCompleteRequest,
   TurnEvent,
+  TurnRequest,
 } from '../../src/kernel/types.ts';
+
+Deno.test('runner internal helper branches: dynamic loaders, tool findings, step ceilings, and fallback handlers', async () => {
+  // 1. Dynamic loader when no dynamicToolLoader is provided on generation
+  const mockLoaderProvider: ModelProvider = {
+    complete: () => {
+      return (async function* () {
+        yield {
+          type: 'tool',
+          tool: { name: 'load_more', arguments: { query: 'test' } },
+        };
+        yield { type: 'text', text: 'done' };
+        yield { type: 'done' };
+      })();
+    },
+  };
+
+  const dynamicReq: TurnRequest = {
+    profile: 'chat',
+    dynamicTools: [
+      {
+        name: 'load_more',
+        loadsDynamicTools: true,
+      },
+    ],
+    input: {
+      text: 'load tools',
+    },
+  };
+
+  const loaderEvents: TurnEvent[] = [];
+  for await (const ev of runTurn(dynamicReq, mockLoaderProvider)) {
+    loaderEvents.push(ev);
+  }
+  const toolResult = loaderEvents.find((e) => e.type === 'tool')?.tool?.result;
+  assertEquals(toolResult?.status, 'error');
+
+  // 2. Dynamic tool with no handler (default acceptance) on multi-step profile
+  registerProfile(
+    defineProfile({
+      id: 'dynamic_runner_bot',
+      model: { allow: ['gemini35FlashLite'], maxSteps: 3 },
+      inputs: { text: true },
+      outputs: { structured: null, media: false },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+
+  const noHandlerReq: TurnRequest = {
+    profile: 'dynamic_runner_bot',
+    dynamicTools: [
+      {
+        name: 'stub_tool',
+        permissionTier: 'auto',
+        // no handler
+      },
+    ],
+    input: {
+      text: 'run stub',
+    },
+  };
+  let callCount = 0;
+  const noHandlerProvider: ModelProvider = {
+    complete: () => {
+      return (async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield {
+            type: 'tool',
+            tool: { name: 'stub_tool', arguments: { value: 123 } },
+          };
+        } else {
+          yield { type: 'text', text: 'finished' };
+        }
+      })();
+    },
+  };
+  const stubEvents: TurnEvent[] = [];
+  for await (const ev of runTurn(noHandlerReq, noHandlerProvider)) {
+    stubEvents.push(ev);
+  }
+  const textEv = stubEvents.find((e) => e.type === 'text');
+  assertEquals(textEv?.text, 'finished');
+
+  // 3. Dynamic tool updating an existing declaration in mergeDynamicTools
+  const updateReq: TurnRequest = {
+    profile: 'chat',
+    dynamicTools: [{ name: 'existing_tool', description: 'v1' }],
+    dynamicToolLoader: () => [{ name: 'existing_tool', description: 'v2' }],
+    input: {
+      text: 'reload',
+    },
+  };
+  const updateLoaderProvider: ModelProvider = {
+    complete: () => {
+      return (async function* () {
+        yield {
+          type: 'tool',
+          tool: { name: 'existing_tool', arguments: {} },
+        };
+        yield { type: 'text', text: 'updated' };
+        yield { type: 'done' };
+      })();
+    },
+  };
+  for await (const _ev of runTurn(updateReq, updateLoaderProvider)) {
+    // drain
+  }
+});
+
+Deno.test('runTurn emits one final done when provider also emits done', async () => {
+  const provider: ModelProvider = {
+    complete: () => {
+      return (async function* () {
+        yield { type: 'text', text: 'single terminal event' };
+        yield { type: 'tokens', tokens: { input: 1, output: 1, total: 2 } };
+        yield { type: 'done' };
+      })();
+    },
+  };
+
+  const events: TurnEvent[] = [];
+  for await (const ev of runTurn({ profile: 'chat', input: { text: 'ping' } }, provider)) {
+    events.push(ev);
+  }
+
+  assertEquals(events.filter((event) => event.type === 'done').length, 1);
+  assertEquals(events.at(-1)?.type, 'done');
+});
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -52,10 +181,28 @@ function withTools(id: ProfileId, extra: CustomToolId[]) {
 }
 
 Deno.test('every profile is oneshot', () => {
-  const ids: ProfileId[] = ['chat', 'pinned', 'designer', 'picker', 'image'];
+  const ids: ProfileId[] = ['chat', 'pinned', 'formatter', 'selector', 'image'];
   for (const id of ids) {
     assertEquals(getProfile(id).model.maxSteps, 1);
   }
+});
+
+Deno.test('runTurn accepts an omitted input object', async () => {
+  registerProfile({
+    id: 'no_input_bot',
+    model: { allow: ['gemini35FlashLite'] },
+  });
+
+  const provider: ModelProvider = {
+    async *complete() {
+      await Promise.resolve();
+      yield { type: 'text', text: 'empty input ok' };
+    },
+  };
+  const events = await collect(runTurn({ profile: 'no_input_bot' }, provider));
+
+  assertEquals(events.find((e) => e.type === 'text')?.text, 'empty input ok');
+  assertEquals(events.at(-1)?.type, 'done');
 });
 
 Deno.test('flash lite thinking off is minimal', () => {
@@ -83,10 +230,10 @@ Deno.test('thinking level shapes differ by model family', () => {
     'medium',
     'high',
   ]);
-  assertEquals(CATALOG.models.gemini37Flash.thinkingLevels, ['low', 'medium', 'high']);
+  assertEquals(CATALOG.models.gemini31ProPreview.thinkingLevels, ['low', 'medium', 'high']);
   assertEquals(CATALOG.models.gemini31FlashLiteImage.thinkingLevels, ['minimal', 'high']);
-  assertEquals(CATALOG.models.gemini37Flash.thinking.off, 'low');
-  assertEquals(clampThinkingLevel('gemini37Flash', 'minimal'), 'low');
+  assertEquals(CATALOG.models.gemini31ProPreview.thinking.off, 'low');
+  assertEquals(clampThinkingLevel('gemini31ProPreview', 'minimal'), 'low');
   assertEquals(clampThinkingLevel('gemini31FlashLite', 'minimal'), 'minimal');
 });
 
@@ -100,19 +247,27 @@ Deno.test('flash lite thinking on is high', () => {
   assertEquals(generation.summaries, 'auto');
 });
 
-Deno.test('daily pins thinking low without a control', () => {
+Deno.test('pinned profile uses fixed thinking without a control', () => {
   const { generation } = resolveTurn({ profile: 'pinned', input: {} });
   assertEquals(generation.thinking, 'low');
   assertEquals(projectProfile('pinned').controls, []);
 });
 
-Deno.test('planner fast/smart pick model and pinned thinking', () => {
-  const fast = resolveTurn({ profile: 'picker', select: 'fast', input: { text: 'x' } });
+Deno.test('selectable profile picks model and pinned thinking', () => {
+  const fast = resolveTurn({
+    profile: 'selector',
+    select: 'fast',
+    input: { text: 'x' },
+  });
   assertEquals(fast.generation.model, 'gemini35FlashLite');
   assertEquals(fast.generation.thinking, 'low');
   assertEquals(fast.generation.maxOutputTokens, LONG_FLASH);
-  const smart = resolveTurn({ profile: 'picker', select: 'smart', input: { text: 'x' } });
-  assertEquals(smart.generation.model, 'gemini37Flash');
+  const smart = resolveTurn({
+    profile: 'selector',
+    select: 'smart',
+    input: { text: 'x' },
+  });
+  assertEquals(smart.generation.model, 'gemini31ProPreview');
   assertEquals(smart.generation.thinking, 'high');
 });
 
@@ -125,9 +280,9 @@ Deno.test('search xor maps drops maps', () => {
   assertEquals(generation.builtins, ['googleSearch']);
 });
 
-Deno.test('studio cannot enable urlContext', () => {
+Deno.test('profile allowlist blocks unavailable builtins', () => {
   const { generation } = resolveTurn({
-    profile: 'designer',
+    profile: 'formatter',
     tools: { urlContext: true, googleSearch: true },
     input: { text: 'x' },
   });
@@ -147,28 +302,26 @@ Deno.test('tools stay off until the turn gates them', () => {
   assertEquals(search.generation.custom, []);
 });
 
-Deno.test('studio language slot picks structured schema', () => {
+Deno.test('language slot picks structured schema', () => {
   const html = resolveTurn({
-    profile: 'designer',
+    profile: 'formatter',
     input: { text: 'x', slots: { language: 'html' } },
   });
   assertEquals(html.generation.structured, 'htmlTurn');
   const tsx = resolveTurn({
-    profile: 'designer',
+    profile: 'formatter',
     input: { text: 'x', slots: { language: 'tsx' } },
   });
   assertEquals(tsx.generation.structured, 'tsxTurn');
 });
 
-Deno.test('handoff target is a profile slot', () => {
-  const planner = withTools('picker', ['handoff']);
-  executeTool(planner, 'handoff', { to: 'critic' });
-  assertThrows(() => executeTool(planner, 'handoff', { to: 'mermaid' }), TheorumError);
-});
-
 Deno.test('disallowed tool cannot run', () => {
   assertThrows(
-    () => executeTool(getProfile('pinned'), 'askUser', { kind: 'text', prompt: 'q' }),
+    () =>
+      executeTool(getProfile('pinned'), 'askUser', {
+        kind: 'text',
+        prompt: 'q',
+      }),
     TheorumError,
   );
 });
@@ -181,13 +334,16 @@ Deno.test('askUser pauses when allowed', () => {
   assertEquals(env.status, 'pause');
 });
 
-Deno.test('ui invoke askUser on mermaid is denied until allowed', async () => {
+Deno.test('ui invoke askUser is denied until allowed', async () => {
   const events = await collect(
     runTurn(
       {
         profile: 'chat',
         input: { text: 'x' },
-        toolInvoke: { name: 'askUser', arguments: { kind: 'text', prompt: 'q' } },
+        toolInvoke: {
+          name: 'askUser',
+          arguments: { kind: 'text', prompt: 'q' },
+        },
       },
       fake,
     ),
@@ -207,7 +363,7 @@ Deno.test('runTurn oneshot yields text structured done', async () => {
 });
 
 Deno.test('projection lists only allowed tools', () => {
-  const ui = projectProfile('designer');
+  const ui = projectProfile('formatter');
   assertEquals(
     ui.tools.map((t) => t.name),
     ['googleSearch', 'googleMaps'],
@@ -216,9 +372,14 @@ Deno.test('projection lists only allowed tools', () => {
   assertEquals(ui.inputs.voice, undefined);
 });
 
-Deno.test('unknown planner select is rejected', () => {
+Deno.test('unknown profile select is rejected', () => {
   assertThrows(
-    () => resolveTurn({ profile: 'picker', select: 'turbo', input: { text: 'x' } }),
+    () =>
+      resolveTurn({
+        profile: 'selector',
+        select: 'turbo',
+        input: { text: 'x' },
+      }),
     TheorumError,
   );
 });
@@ -229,17 +390,12 @@ Deno.test('askUser validates kind and prompt', () => {
   assertEquals(executeTool(profile, 'askUser', { kind: 'text', prompt: '  ' }).status, 'error');
 });
 
-Deno.test('generateMedia is unwired and other custom tools stub', () => {
-  assertEquals(
-    executeTool(withTools('chat', ['generateMedia']), 'generateMedia', {}).status,
-    'error',
-  );
-  assertEquals(executeTool(withTools('chat', ['validate']), 'validate', { n: 1 }).status, 'ok');
-});
-
-Deno.test('handoff requires a string target', () => {
-  const planner = withTools('picker', ['handoff']);
-  assertEquals(executeTool(planner, 'handoff', { to: 1 }).status, 'error');
+Deno.test('non-kernel custom tools require dynamic handlers', () => {
+  const result = executeTool(withTools('chat', ['hostTool']), 'hostTool', {
+    n: 1,
+  });
+  assertEquals(result.status, 'error');
+  assertStringIncludes(result.finding ?? '', 'dynamic tool handler');
 });
 
 Deno.test('provider tool call is dispatched', async () => {
@@ -259,9 +415,16 @@ Deno.test('provider tool call is dispatched', async () => {
   assertEquals(events.at(-1)?.type, 'done');
 });
 
-Deno.test('planner critic role still completes', async () => {
+Deno.test('role-specific system prompt still completes', async () => {
   const events = await collect(
-    runTurn({ profile: 'picker', select: 'fast', input: { text: 'plan', role: 'critic' } }, fake),
+    runTurn(
+      {
+        profile: 'selector',
+        select: 'fast',
+        input: { text: 'plan', role: 'reviewer' },
+      },
+      fake,
+    ),
   );
   assertEquals(
     events.some((e) => e.type === 'text'),
@@ -269,7 +432,7 @@ Deno.test('planner critic role still completes', async () => {
   );
 });
 
-Deno.test('empty mermaid input still runs', async () => {
+Deno.test('empty text input still runs', async () => {
   const events = await collect(runTurn({ profile: 'chat', input: {} }, fake));
   assertEquals(
     events.some((e) => e.type === 'done'),
@@ -309,7 +472,10 @@ Deno.test('chat rejects video because the profile does not allow it', () => {
     () =>
       resolveTurn({
         profile: 'chat',
-        input: { text: 'hi', attachments: [{ mimeType: 'video/mp4', data: 'dGVzdA==' }] },
+        input: {
+          text: 'hi',
+          attachments: [{ mimeType: 'video/mp4', data: 'dGVzdA==' }],
+        },
       }),
     TheorumError,
   );
@@ -320,7 +486,10 @@ Deno.test('chat rejects audio on the attachments channel', () => {
     () =>
       resolveTurn({
         profile: 'chat',
-        input: { text: 'hi', attachments: [{ mimeType: 'audio/webm', data: 'dGVzdA==' }] },
+        input: {
+          text: 'hi',
+          attachments: [{ mimeType: 'audio/webm', data: 'dGVzdA==' }],
+        },
       }),
     TheorumError,
   );
@@ -337,13 +506,13 @@ Deno.test('pinned does not accept voice', () => {
   );
 });
 
-Deno.test('synthesizeFixPrompt scopes history to last 2 exchanges and includes error/artifact', () => {
-  const prompt = synthesizeFixPrompt({
+Deno.test('synthesizeRepairPrompt scopes history to last 2 exchanges and includes rejection/output', () => {
+  const prompt = synthesizeRepairPrompt({
     profile: getProfile('chat'),
-    fix: {
-      artifact: 'graph TD\nA-->B',
-      error: 'syntax error on line 2',
-      guidance: 'Use valid Mermaid',
+    repair: {
+      previousOutput: 'The answer leaked internal_marker.',
+      rejection: 'Remove internal_marker from user-visible prose.',
+      guidance: 'Rewrite as safe user-facing text.',
     },
     history: [
       { role: 'user', content: 'msg 1' },
@@ -357,9 +526,9 @@ Deno.test('synthesizeFixPrompt scopes history to last 2 exchanges and includes e
   assertEquals(prompt.includes('msg 1'), false);
   assertEquals(prompt.includes('msg 2'), true);
   assertEquals(prompt.includes('reply 3'), true);
-  assertEquals(prompt.includes('graph TD\nA-->B'), true);
-  assertEquals(prompt.includes('syntax error on line 2'), true);
-  assertEquals(prompt.includes('Use valid Mermaid'), true);
+  assertEquals(prompt.includes('The answer leaked internal_marker.'), true);
+  assertEquals(prompt.includes('Remove internal_marker from user-visible prose.'), true);
+  assertEquals(prompt.includes('Rewrite as safe user-facing text.'), true);
 });
 
 Deno.test('runTurn executes profile validation and auto-corrects', async () => {
@@ -373,14 +542,13 @@ Deno.test('runTurn executes profile validation and auto-corrects', async () => {
       thinking: 'minimal',
       controls: [],
       maxSteps: 1,
-      key: 'portfolio',
+      key: 'freeA',
     },
     tools: { allow: [] },
     inputs: { text: true },
     outputs: {
       structured: 'validTurn',
       media: false,
-      commit: 'artifact',
       validation: {
         extract: (s: unknown) => (s as { code?: string })?.code,
         validate: (code: unknown) => {
@@ -417,7 +585,41 @@ Deno.test('runTurn executes profile validation and auto-corrects', async () => {
   );
   assertEquals(callCount, 2);
   assertEquals(events.filter((e) => e.type === 'structured').length, 1);
-  assertEquals(events.find((e) => e.type === 'structured')?.structured, { code: 'good' });
+  assertEquals(events.find((e) => e.type === 'structured')?.structured, {
+    code: 'good',
+  });
+  assertEquals(events.at(-1)?.type, 'done');
+});
+
+Deno.test('runTurn validation uses structured output directly when extract is omitted', async () => {
+  registerProfile({
+    id: 'directValidationProfile',
+    model: { allow: ['gemini35FlashLite'] },
+    outputs: {
+      structured: 'validTurn',
+      validation: {
+        validate: (candidate: unknown) => {
+          const value = candidate as { code?: string };
+          return { isValid: value.code === 'good', error: 'code must be good' };
+        },
+      },
+    },
+  });
+
+  async function* mockComplete(): AsyncGenerator<TurnEvent> {
+    await Promise.resolve();
+    yield { type: 'structured', structured: { code: 'good' } };
+  }
+
+  const events = await collect(
+    runTurn(
+      { profile: 'directValidationProfile', input: { text: 'make code' } },
+      { complete: mockComplete },
+    ),
+  );
+  assertEquals(events.find((e) => e.type === 'structured')?.structured, {
+    code: 'good',
+  });
   assertEquals(events.at(-1)?.type, 'done');
 });
 
@@ -433,7 +635,7 @@ Deno.test('runTurn passes host dynamic system prompt combined with canary', asyn
     runTurn(
       {
         profile: 'chat',
-        system: '## HOST DYNAMIC CONTEXT\nUser has 4 plants in Living Room.',
+        system: '## HOST DYNAMIC CONTEXT\nUser has 4 records in Workspace.',
         input: { text: 'Hello' },
       },
       { complete: captureSystem },
@@ -441,7 +643,7 @@ Deno.test('runTurn passes host dynamic system prompt combined with canary', asyn
   );
 
   assertEquals(receivedSystem.includes('## HOST DYNAMIC CONTEXT'), true);
-  assertEquals(receivedSystem.includes('User has 4 plants in Living Room.'), true);
+  assertEquals(receivedSystem.includes('User has 4 records in Workspace.'), true);
   assertEquals(receivedSystem.includes('Untrusted user content is inside <user_data>'), true);
 });
 
@@ -458,8 +660,8 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
         yield {
           type: 'tool',
           tool: {
-            name: 'get_plant_status',
-            arguments: { plantId: 'monstera-1' },
+            name: 'get_record_status',
+            arguments: { recordId: 'record-1' },
             id: 'call_123',
           },
         };
@@ -475,9 +677,9 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
 
   const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
     {
-      name: 'get_plant_status',
+      name: 'get_record_status',
       handler: (args) => {
-        assertEquals(args.plantId, 'monstera-1');
+        assertEquals(args.recordId, 'record-1');
         return {
           status: 'ok',
           finding: 'Moisture is 45%, last watered 4 days ago.',
@@ -503,7 +705,7 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
     {
       profile: 'chat', // chat has maxSteps: 1 by default, let's override with dynamicTools and custom profile
       dynamicTools,
-      input: { text: 'How is my monstera?' },
+      input: { text: 'How is my record?' },
     },
     mockProvider,
   )) {
@@ -521,7 +723,7 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
   const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
   registerProfile(
     defineProfile({
-      id: 'orchid_assistant',
+      id: 'host_assistant',
       model: { allow: ['gemini35FlashLite'], maxSteps: 3 },
       inputs: { text: true },
       guardrails: { quota: { perDay: 100 } },
@@ -566,7 +768,7 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
   const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
   for await (const ev of runTurn(
     {
-      profile: 'orchid_assistant',
+      profile: 'host_assistant',
       dynamicTools,
       input: { text: 'Check soil' },
     },
@@ -664,7 +866,7 @@ Deno.test('outputs.streaming.streamThoughts=false filters out thought events fro
       model: { allow: ['gemini35FlashLite'] },
       inputs: { text: true },
       outputs: {
-        streaming: { mode: 'sse', streamThoughts: false },
+        streaming: { streamThoughts: false },
       },
       guardrails: { quota: { perDay: 100 } },
     }),
@@ -937,13 +1139,21 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
       if (callCount === 1) {
         yield {
           type: 'tool',
-          tool: { name: 'load_tools', arguments: { names: ['plant_lookup'] }, id: 'call_load' },
+          tool: {
+            name: 'load_tools',
+            arguments: { names: ['record_lookup'] },
+            id: 'call_load',
+          },
         };
         return;
       }
       yield {
         type: 'tool',
-        tool: { name: 'plant_lookup', arguments: { q: 'monstera' }, id: 'call_lookup' },
+        tool: {
+          name: 'record_lookup',
+          arguments: { q: 'record' },
+          id: 'call_lookup',
+        },
       };
       yield { type: 'text', text: 'lookup complete' };
     },
@@ -953,10 +1163,16 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
     runTurn(
       {
         profile: 'loader_bot',
-        dynamicTools: [{ name: 'load_tools', loadTier: 'T0', loadsDynamicTools: true }],
+        dynamicTools: [
+          {
+            name: 'load_tools',
+            loadTier: 'T0',
+            loadsDynamicTools: true,
+          },
+        ],
         dynamicToolLoader: () => [
           {
-            name: 'plant_lookup',
+            name: 'record_lookup',
             loadTier: 'T2',
             handler: (args) => ({ status: 'ok', finding: `found ${args.q}` }),
           },
@@ -969,16 +1185,85 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
 
   assertEquals(callCount, 3);
   assertEquals(seenToolLists[0], ['load_tools']);
-  assertEquals(seenToolLists[1], ['load_tools', 'plant_lookup']);
+  assertEquals(seenToolLists[1], ['load_tools', 'record_lookup']);
   assertEquals(
     events.some((event) => event.tool?.result?.data?.loadedTools),
     true,
   );
   assertEquals(
     events.some(
-      (event) => event.tool?.name === 'plant_lookup' && event.tool.result?.status === 'ok',
+      (event) => event.tool?.name === 'record_lookup' && event.tool.result?.status === 'ok',
     ),
     true,
+  );
+});
+
+Deno.test('dynamic loader does not inject T2 schemas before required permission is granted', async () => {
+  registerProfile({
+    id: 'loader_permission_bot',
+    identity: { handle: 'loader_permission_bot', chat: true },
+    model: {
+      protocol: 'openAi',
+      provider: 'openrouter',
+      allow: ['gemini35FlashLite'],
+      thinking: 'minimal',
+      maxSteps: 2,
+    },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {},
+    guardrails: { quota: { perDay: 50 } },
+  });
+
+  let loaderCalled = false;
+  const seenToolLists: string[][] = [];
+  const provider: ModelProvider = {
+    async *complete(req) {
+      seenToolLists.push((req.dynamicTools ?? []).map((tool) => tool.name));
+      if (seenToolLists.length === 1) {
+        yield {
+          type: 'tool',
+          tool: {
+            name: 'load_tools',
+            arguments: { names: ['record_lookup'] },
+            id: 'call_load',
+          },
+        };
+        return;
+      }
+      yield { type: 'text', text: 'permission not granted' };
+    },
+  };
+
+  const events = await collect(
+    runTurn(
+      {
+        profile: 'loader_permission_bot',
+        dynamicTools: [
+          {
+            name: 'load_tools',
+            loadTier: 'T0',
+            permissionTier: 'session_consent',
+            loadsDynamicTools: true,
+          },
+        ],
+        dynamicToolLoader: () => {
+          loaderCalled = true;
+          return [{ name: 'record_lookup', loadTier: 'T2' }];
+        },
+        input: { text: 'try loading without consent' },
+      },
+      provider,
+    ),
+  );
+
+  assertEquals(loaderCalled, false);
+  assertEquals(seenToolLists, [['load_tools'], ['load_tools']]);
+  const loadEvent = events.find((event) => event.tool?.name === 'load_tools');
+  assertEquals(loadEvent?.tool?.result?.status, 'pause');
+  assertEquals(
+    events.some((event) => event.tool?.result?.data?.loadedTools),
+    false,
   );
 });
 
@@ -1074,9 +1359,12 @@ Deno.test('guardrails.egress reject_to_agent triggers auto-repair retry loop', a
     async *complete(req) {
       callCount++;
       if (callCount === 1) {
-        yield { type: 'text', text: 'Here is what internal_tool_abc returned.' };
+        yield {
+          type: 'text',
+          text: 'Here is what internal_tool_abc returned.',
+        };
       } else {
-        // Verify model received the fix request in input
+        // Verify model received the repair request in input
         const inputStr = JSON.stringify(req.input);
         assertStringIncludes(inputStr, 'Do not mention internal_tool_abc');
         yield { type: 'text', text: 'Here is the clean public answer.' };
@@ -1156,7 +1444,7 @@ Deno.test('guardrails.egress reject_to_agent withholds turn when retries exhaust
   assertEquals(textEv, undefined);
 });
 
-Deno.test('guardrails.egress withholds media artifacts until prose clears', async () => {
+Deno.test('guardrails.egress withholds media until prose clears', async () => {
   const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
   registerProfile(
     defineProfile({
@@ -1194,11 +1482,17 @@ Deno.test('guardrails.egress withholds media artifacts until prose clears', asyn
       callCount++;
       if (callCount === 1) {
         yield { type: 'text', text: 'draft from internal_tool_abc' };
-        yield { type: 'media', media: { mimeType: 'image/jpeg', data: 'leaky-image' } };
+        yield {
+          type: 'media',
+          media: { mimeType: 'image/jpeg', data: 'leaky-image' },
+        };
         return;
       }
       yield { type: 'text', text: 'clean public caption' };
-      yield { type: 'media', media: { mimeType: 'image/jpeg', data: 'clean-image' } };
+      yield {
+        type: 'media',
+        media: { mimeType: 'image/jpeg', data: 'clean-image' },
+      };
     },
   };
 
@@ -1206,7 +1500,10 @@ Deno.test('guardrails.egress withholds media artifacts until prose clears', asyn
     runTurn(
       {
         profile: 'media_egress_bot',
-        input: { text: 'make image', slots: { aspectRatio: '1:1', imageSize: '1K' } },
+        input: {
+          text: 'make image',
+          slots: { aspectRatio: '1:1', imageSize: '1K' },
+        },
       },
       provider,
     ),
@@ -1273,7 +1570,10 @@ Deno.test('dynamic tool canExecute returning envelope yields custom status', asy
   const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
     {
       name: 'custom_auth_tool',
-      canExecute: () => ({ status: 'pause', finding: 'custom auth challenge' }),
+      canExecute: () => ({
+        status: 'pause',
+        finding: 'custom auth challenge',
+      }),
     },
   ];
   const events = await collect(

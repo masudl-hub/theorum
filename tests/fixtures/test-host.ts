@@ -10,11 +10,11 @@ import { registerStructured } from '../../src/kernel/registry/schemas.ts';
 import type { Profile } from '../../src/kernel/types.ts';
 
 const CHAT_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/csv', 'text/plain'];
-const DESIGNER_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/plain'];
+const FORMATTER_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/plain'];
 const LONG_FLASH = 40_000;
 const PIN_QUOTA = 4;
 const CHAT_QUOTA = 10;
-const DESIGNER_QUOTA = 20;
+const FORMATTER_QUOTA = 20;
 
 const MESSAGE_SCHEMA = {
   type: 'object',
@@ -50,7 +50,7 @@ const chat: Profile = {
     allow: ['gemini35FlashLite'],
     controls: ['thinking'],
     maxSteps: 1,
-    key: 'portfolio',
+    key: 'freeA',
   },
   tools: { allow: ['googleSearch', 'googleMaps', 'urlContext'] },
   inputs: {
@@ -59,7 +59,7 @@ const chat: Profile = {
     voice: { accept: [...VOICE_INPUT_MIMES] },
     ...CHAT_MEDIA_LIMITS,
   },
-  outputs: { structured: 'chatTurn', media: false, commit: 'diagram' },
+  outputs: { structured: 'chatTurn', media: false },
   guardrails: { quota: { perDay: CHAT_QUOTA } },
 };
 
@@ -73,69 +73,67 @@ const pinned: Profile = {
     thinking: 'low',
     controls: [],
     maxSteps: 1,
-    key: 'portfolio',
+    key: 'freeA',
   },
   tools: { allow: [] },
   inputs: { text: true },
-  outputs: { structured: 'chatTurn', media: false, commit: 'card' },
+  outputs: { structured: 'chatTurn', media: false },
   guardrails: { quota: { perDay: PIN_QUOTA } },
 };
 
-const picker: Profile = {
-  id: 'picker',
+const selector: Profile = {
+  id: 'selector',
   identity: {
-    handle: 'creator',
-    systemByRole: { creator: 'You are Creator.', critic: 'You are Critic.' },
+    handle: 'primary',
+    systemByRole: { primary: 'You are Primary.', reviewer: 'You are Reviewer.' },
   },
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini35FlashLite', 'gemini37Flash'],
-    select: { fast: 'gemini35FlashLite', smart: 'gemini37Flash' },
+    allow: ['gemini35FlashLite', 'gemini31ProPreview'],
+    select: { fast: 'gemini35FlashLite', smart: 'gemini31ProPreview' },
     thinking: { fast: 'low', smart: 'high' },
     override: {
       gemini35FlashLite: { maxOutputTokens: LONG_FLASH, summaries: 'auto' },
     },
     controls: [],
     maxSteps: 1,
-    key: 'planner',
+    key: 'freeB',
   },
   tools: { allow: ['googleSearch', 'googleMaps', 'urlContext'] },
   inputs: {
     text: true,
     attachments: { accept: CHAT_ATTACH },
     voice: { accept: [...VOICE_INPUT_MIMES] },
-    slots: { handoff: ['creator', 'critic'] },
     ...CHAT_MEDIA_LIMITS,
   },
-  outputs: { structured: 'promptTurn', media: false, commit: 'artifact' },
+  outputs: { structured: 'promptTurn', media: false },
   guardrails: { quota: { perDay: CHAT_QUOTA } },
 };
 
-const designer: Profile = {
-  id: 'designer',
-  identity: { handle: 'designer', system: 'Produce UI source in the structured turn schema.' },
+const formatter: Profile = {
+  id: 'formatter',
+  identity: { handle: 'formatter', system: 'Produce source text in the structured turn schema.' },
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite'],
     controls: ['thinking'],
     maxSteps: 1,
-    key: 'studio',
+    key: 'freeC',
   },
   tools: { allow: ['googleSearch', 'googleMaps'] },
   inputs: {
     text: true,
-    attachments: { accept: DESIGNER_ATTACH },
+    attachments: { accept: FORMATTER_ATTACH },
     slots: { language: ['html', 'tsx'] },
     ...CHAT_MEDIA_LIMITS,
   },
   outputs: {
     structured: { by: 'language', map: { html: 'htmlTurn', tsx: 'tsxTurn' }, fallback: 'htmlTurn' },
     media: false,
-    commit: 'artifact',
   },
-  guardrails: { quota: { perDay: DESIGNER_QUOTA } },
+  guardrails: { quota: { perDay: FORMATTER_QUOTA } },
 };
 
 const image: Profile = {
@@ -148,7 +146,7 @@ const image: Profile = {
     thinking: 'minimal',
     controls: [],
     maxSteps: 1,
-    key: 'portfolio',
+    key: 'freeA',
   },
   tools: { allow: [] },
   inputs: {
@@ -160,12 +158,12 @@ const image: Profile = {
     },
     ...CHAT_MEDIA_LIMITS,
   },
-  outputs: { structured: null, media: true, commit: 'image' },
+  outputs: { structured: null, media: true },
   guardrails: { quota: { perDay: PIN_QUOTA } },
 };
 
 registerProfile(chat);
 registerProfile(pinned);
-registerProfile(picker);
-registerProfile(designer);
+registerProfile(selector);
+registerProfile(formatter);
 registerProfile(image);

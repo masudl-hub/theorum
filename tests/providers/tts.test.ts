@@ -19,7 +19,7 @@ function createMockTtsRequest(text: string): ProviderCompleteRequest {
     input: [{ type: 'text', text }],
     structured: null,
     image: null,
-    geminiBucket: 'portfolio',
+    geminiBucket: 'freeA',
   };
 }
 
@@ -74,21 +74,15 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
   assertEquals(view.getUint32(40, true), pcm.length);
 });
 
-Deno.test('streamOpenRouterTts yields error when OPENROUTER_API_KEY is missing', async () => {
-  const prevEnv = Deno.env.get('OPENROUTER_API_KEY');
-  Deno.env.delete('OPENROUTER_API_KEY');
-  try {
-    const req = createMockTtsRequest('Hello world');
-    const events = [];
-    for await (const event of streamOpenRouterTts(req, { apiKey: '' })) {
-      events.push(event);
-    }
-    assertEquals(events.length, 1);
-    assertEquals(events[0]?.type, 'error');
-    assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
-  } finally {
-    if (prevEnv) Deno.env.set('OPENROUTER_API_KEY', prevEnv);
+Deno.test('streamOpenRouterTts yields error when apiKey is missing', async () => {
+  const req = createMockTtsRequest('Hello world');
+  const events = [];
+  for await (const event of streamOpenRouterTts(req, { apiKey: '' })) {
+    events.push(event);
   }
+  assertEquals(events.length, 1);
+  assertEquals(events[0]?.type, 'error');
+  assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
 });
 
 Deno.test('streamOpenRouterTts yields error on empty input text', async () => {
@@ -135,7 +129,7 @@ Deno.test('streamOpenRouterTts yields error when response is empty', async () =>
 });
 
 Deno.test('streamOpenRouterTts yields media, tokens, and done on successful synthesis via OpenRouter', async () => {
-  const req = createMockTtsRequest('Hello, welcome to Orchid!');
+  const req = createMockTtsRequest('Hello, welcome to the demo!');
   const mockPcmBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   let capturedUrl = '';
@@ -172,7 +166,7 @@ Deno.test('streamOpenRouterTts yields media, tokens, and done on successful synt
   assertEquals(capturedUrl, 'https://openrouter.ai/api/v1/audio/speech');
   assertEquals(capturedHeaders.Authorization, 'Bearer mock-openrouter-key');
   assertEquals(capturedBody.model, 'google/gemini-3.1-flash-tts-preview');
-  assertEquals(capturedBody.input, 'Hello, welcome to Orchid!');
+  assertEquals(capturedBody.input, 'Hello, welcome to the demo!');
   assertEquals(capturedBody.voice, 'Orus');
   assertEquals(capturedBody.response_format, 'pcm');
 
@@ -215,6 +209,8 @@ Deno.test('streamOpenRouterTts respects profile voice and response_format mp3', 
 
   const provider = createOpenRouterTtsProvider({
     apiKey: 'mock-key',
+    siteUrl: 'https://theorum.dev',
+    siteName: 'Theorum Test',
     fetch: mockFetch,
   });
 

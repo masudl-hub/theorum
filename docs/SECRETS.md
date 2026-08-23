@@ -1,38 +1,55 @@
-# Theorum Secrets & Keys Guide
+# Theorum Provider Configuration Guide
 
-This document details the environment variables required for running and testing Theorum both locally and in production.
+Theorum does not own secrets and does not read environment variables.
 
----
+Host applications own credentials, runtime configuration, and secret storage. Theorum receives provider configuration as explicit function arguments.
 
-## 1. Local Environment Setup
+## 1. Package Boundary
 
-To prevent accidental git leaks, **keep your active `.env` file outside this repository**:
+- Do not create `.env` files in this repository.
+- Do not commit key templates to this repository.
+- Do not teach Theorum to discover keys from the shell or process environment.
+- Business applications pass credentials into provider constructors or transport objects.
 
-- **Recommended location**: `~/.config/theorum/.env`
-- Alternatively, pass variables directly via your shell or execution environment.
+## 2. OpenRouter
 
-To run scripts with the external env file:
-```bash
-deno run --allow-net --allow-env --allow-read --env-file=~/.config/theorum/.env scripts/verify-live.ts
+```ts
+import { createOpenRouterProvider } from '@theorum/core/openrouter';
+
+const provider = createOpenRouterProvider({
+  apiKey: hostResolvedOpenRouterKey,
+});
 ```
 
----
+## 3. Google Interactions
 
-## 2. Required Secrets
+```ts
+import { createInteractionsProvider } from '@theorum/core/providers';
 
-### `OPENROUTER_API_KEY`
-- **Scope**: Required for the OpenRouter provider (`createOpenRouterProvider`). Unlocks access to all models hosted via OpenRouter (for example `google/gemini-3.5-flash-lite`, `google/gemini-3.1-pro-preview`, `perplexity/sonar`, or another profile-selected provider model).
-- **Where to get it**: [https://openrouter.ai/keys](https://openrouter.ai/keys)
-- **Permissions**: Read/Write API token with sufficient credit balance.
+const provider = createInteractionsProvider({
+  vault: {
+    freeA: hostResolvedFreeAKey,
+    freeB: hostResolvedFreeBKey,
+    freeC: hostResolvedFreeCKey,
+    paid: hostResolvedPaidKey,
+  },
+});
+```
 
----
+## 4. Tracing
 
-## 3. Optional Direct Provider Secrets
+Tracing is silent by default. Hosts opt in by passing a sink to `runTurn`.
 
-### `GEMINI_API_KEY`
-- **Scope**: Used for direct Google Interactions API fallback and native Google SDK calls (`generate_image`, Google Maps grounding in `find_stores`).
-- **Where to get it**: [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+```ts
+import { jsonlSink, runTurn } from '@theorum/core';
 
-### `CONCOURSE_PG_URL`
-- **Scope**: Optional Postgres connection string for sinking agent traces into Postgres via `src/observability/trace-pg.ts`.
-- **Default**: In local dev, traces sink to JSONL files or no-op if unset.
+for await (const event of runTurn(request, provider, jsonlSink(hostTraceDir))) {
+  // stream events
+}
+```
+
+For live verification, pass credentials explicitly:
+
+```bash
+deno run --allow-net scripts/verify-live.ts --api-key "<host-resolved-key>"
+```

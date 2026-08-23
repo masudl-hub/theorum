@@ -1,9 +1,6 @@
-import { vaultFromEnv } from '../../guardrails/keys.ts';
 import { runTurn } from '../../kernel/engine/runner.ts';
 import { getProfile } from '../../kernel/registry/profiles.ts';
-import type { TurnEvent, TurnRequest } from '../../kernel/types.ts';
-import { createOpenRouterProvider } from '../../providers/openrouter.ts';
-import { createInteractionsProvider } from '../../providers/provider.ts';
+import type { ModelProvider, TurnEvent, TurnRequest } from '../../kernel/types.ts';
 
 export interface RunOptions {
   profile: string;
@@ -11,6 +8,7 @@ export interface RunOptions {
   mode?: string;
   search?: boolean;
   map?: boolean;
+  provider?: ModelProvider;
 }
 
 function handleRunEvent(event: TurnEvent): void {
@@ -31,11 +29,14 @@ function handleRunEvent(event: TurnEvent): void {
 }
 
 export async function runCommand(options: RunOptions): Promise<void> {
-  const profile = getProfile(options.profile);
-  const provider =
-    profile.model.protocol === 'openAi' || profile.model.provider === 'openrouter'
-      ? createOpenRouterProvider()
-      : createInteractionsProvider({ vault: vaultFromEnv() });
+  getProfile(options.profile);
+  const provider = options.provider;
+  if (!provider) {
+    console.error(
+      '\n\x1b[31mExecution Failed\x1b[0m: Theorum CLI does not create providers or read keys. Run turns from a host app with an explicit ModelProvider.\n',
+    );
+    return;
+  }
 
   const prompt = options.prompt || 'Hello! Please introduce your capabilities.';
   const tools: Record<string, boolean> = {};

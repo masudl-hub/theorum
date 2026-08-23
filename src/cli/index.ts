@@ -1,40 +1,17 @@
-import { registerBuiltinProfiles } from '../kernel/registry/builtin-profiles.ts';
 import { listProfilesCommand, showProfileCommand } from './commands/profile.ts';
 import { runCommand } from './commands/run.ts';
 import { testProfileCommand } from './commands/test.ts';
-import { vaultPingCommand, vaultStatusCommand } from './commands/vault.ts';
-
-// Register built-in portfolio profiles
-registerBuiltinProfiles();
-
-// Auto-load .env if present
-try {
-  const envContent = await Deno.readTextFile('.env');
-  for (const line of envContent.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const idx = trimmed.indexOf('=');
-      const key = trimmed.slice(0, idx).trim();
-      const val = trimmed.slice(idx + 1).trim();
-      if (!Deno.env.get(key)) {
-        Deno.env.set(key, val);
-      }
-    }
-  }
-} catch {
-  // Ignore missing .env
-}
 
 function printHelp(): void {
   console.log(`
-Theorum CLI - Profile Testing, REPL, and Vault Management
+Theorum CLI - Profile Testing and Profile Inspection
 
 USAGE:
   theorum <command> [options]
 
 COMMANDS:
   test                 Run stress matrix or custom profile tests
-    --profile, -p <id> Target profile ID (e.g. studio, planner, mermaid)
+    --profile, -p <id> Target profile ID registered by your host app
     --all, -a          Test all registered profiles
     --lite             Minimal fast-path connectivity ping
     --matrix           Run all valid permutations for the profile
@@ -52,10 +29,6 @@ COMMANDS:
   profile              Inspect registered profile blueprints
     list               List all registered profiles
     show <id>          Show detailed JSON profile specification
-
-  vault                Inspect and audit API credentials
-    status             List key buckets and environment configuration
-    ping               Probe live Gemini/OpenRouter endpoint connectivity
 
   help, --help, -h     Show this help message
 `);
@@ -141,9 +114,7 @@ async function handleTest(flags: ParsedFlags): Promise<void> {
 async function handleRun(flags: ParsedFlags): Promise<void> {
   const profile = extractProfileId(flags);
   if (!profile) {
-    console.error(
-      'Error: Profile ID required (e.g. `theorum run --profile studio --prompt "Hello"`)',
-    );
+    console.error('Error: Profile ID required (e.g. `theorum run --profile your-profile`)');
     Deno.exit(1);
   }
   const prompt = typeof flags.prompt === 'string' ? flags.prompt : flags._.slice(1).join(' ');
@@ -164,21 +135,10 @@ function handleProfile(flags: ParsedFlags): void {
   }
   const id = sub === 'show' ? flags._[2] || flags.profile : sub;
   if (typeof id !== 'string' || !id) {
-    console.error('Error: Profile ID required (e.g. `theorum profile show studio`)');
+    console.error('Error: Profile ID required (e.g. `theorum profile show your-profile`)');
     Deno.exit(1);
   }
   showProfileCommand(id);
-}
-
-async function handleVault(flags: ParsedFlags): Promise<void> {
-  const sub = flags._[1] || 'status';
-  if (sub === 'status') {
-    vaultStatusCommand();
-  } else if (sub === 'ping') {
-    await vaultPingCommand();
-  } else {
-    console.error(`Unknown vault command: '${sub}'. Use 'status' or 'ping'.`);
-  }
 }
 
 export async function main(cliArgs = Deno.args): Promise<void> {
@@ -191,8 +151,6 @@ export async function main(cliArgs = Deno.args): Promise<void> {
     await handleRun(flags);
   } else if (command === 'profile') {
     handleProfile(flags);
-  } else if (command === 'vault') {
-    await handleVault(flags);
   } else {
     printHelp();
   }

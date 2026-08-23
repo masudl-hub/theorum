@@ -1,15 +1,23 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
+#!/usr/bin/env -S deno run --allow-net
 
 import type { ProviderCompleteRequest } from '../src/kernel/types.ts';
 import { createOpenRouterProvider } from '../src/providers/openrouter.ts';
 
-const apiKey = Deno.env.get('OPENROUTER_API_KEY');
+function valueAfterFlag(flag: string): string | undefined {
+  const idx = Deno.args.indexOf(flag);
+  if (idx < 0) {
+    return undefined;
+  }
+  return Deno.args[idx + 1];
+}
+
+const apiKey = valueAfterFlag('--api-key');
 
 if (!apiKey) {
   Deno.stdout.writeSync(
     new TextEncoder().encode(
-      'Error: OPENROUTER_API_KEY environment variable is not set.\n' +
-        'Pass --env-file=~/.config/theorum/.env or set OPENROUTER_API_KEY.\n',
+      'Error: missing --api-key.\n' +
+        'Theorum does not read environment variables; pass credentials from the host app or local wrapper.\n',
     ),
   );
   Deno.exit(1);
@@ -41,7 +49,7 @@ const req: ProviderCompleteRequest = {
   builtins: [],
   structured: null,
   image: null,
-  geminiBucket: 'planner',
+  geminiBucket: 'freeA',
 };
 
 try {

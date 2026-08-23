@@ -1,3 +1,13 @@
+/**
+ * Trace sink primitives for THEORUM.
+ *
+ * Tracing is host-injected: the kernel can write to a provided sink, a memory
+ * sink, a JSONL directory, or a noop sink. It does not read environment
+ * variables or own a database destination.
+ *
+ * @module
+ */
+
 import type { TraceRecord } from './trace-record.ts';
 
 const RETAIN_DAYS = 14;
@@ -12,10 +22,12 @@ const ROTATE_MIB = 32;
 const ROTATE_BYTES = ROTATE_MIB * MIB;
 const FILE_DAY = /^turns-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.jsonl$/;
 
+/** Minimal async destination for completed turn trace records. */
 interface TraceSink {
   write: (record: TraceRecord) => Promise<void>;
 }
 
+/** Write a trace record without allowing trace failures to fail the turn. */
 async function writeTrace(sink: TraceSink, record: Promise<TraceRecord>): Promise<void> {
   try {
     await sink.write(await record);
@@ -24,10 +36,12 @@ async function writeTrace(sink: TraceSink, record: Promise<TraceRecord>): Promis
   }
 }
 
+/** Trace sink that drops records. */
 function noopSink(): TraceSink {
   return { write: () => Promise.resolve() };
 }
 
+/** Trace sink that appends records to a caller-owned array. */
 function memorySink(into: TraceRecord[]): TraceSink {
   return {
     write: (record) => {
@@ -69,6 +83,7 @@ async function pickFile(dir: string, now: number): Promise<string> {
   return `${dir}/turns-${day}-${now}.jsonl`;
 }
 
+/** Trace sink that writes daily rotating JSONL files under a host-selected directory. */
 function jsonlSink(dir: string, now: () => number = Date.now): TraceSink {
   return {
     write: async (record) => {
@@ -79,14 +94,6 @@ function jsonlSink(dir: string, now: () => number = Date.now): TraceSink {
       await Deno.writeTextFile(path, `${JSON.stringify(record)}\n`, { append: true });
     },
   };
-}
-
-function defaultTraceDir(env: { get: (key: string) => string | undefined }): string {
-  const home = env.get('HOME')?.trim();
-  if (home) {
-    return `${home}/.local/share/model-sculpt-studio/theorum-traces`;
-  }
-  return '/var/lib/theorum-traces';
 }
 
 function insideDir(path: string, root: string): boolean {
@@ -100,46 +107,37 @@ function insideDir(path: string, root: string): boolean {
   return path.startsWith(`${base}/`);
 }
 
+/** Resolve a trace directory while refusing relative paths or paths inside the clone. */
 function resolveTraceDir(args: {
-  env: { get: (key: string) => string | undefined };
+  dir?: string;
+  fallbackDir?: string;
   cwd?: string;
 }): string | undefined {
-  const { env } = args;
   const cwd = args.cwd ?? Deno.cwd();
-  const raw = env.get('THEORUM_TRACE_DIR');
-  if (raw === '') {
+  if (args.dir === '') {
     return undefined;
   }
-  let dir = raw?.trim() || defaultTraceDir(env);
-  if (!dir.startsWith('/') || insideDir(dir, cwd)) {
-    dir = defaultTraceDir(env);
+  let dir = args.dir?.trim() || args.fallbackDir;
+  if (!dir) {
+    return undefined;
   }
-  if (insideDir(dir, cwd)) {
-    return '/var/lib/theorum-traces';
+  if (!dir.startsWith('/') || insideDir(dir, cwd)) {
+    dir = args.fallbackDir;
+  }
+  if (!dir || insideDir(dir, cwd)) {
+    return undefined;
   }
   return dir;
 }
 
-function sinkFromEnv(env: { get: (key: string) => string | undefined } = Deno.env): TraceSink {
-  const pgUrl = env.get('CONCOURSE_PG_URL');
-  if (pgUrl) {
-    let sink: TraceSink | null = null;
-    return {
-      write: async (record) => {
-        if (!sink) {
-          const { pgSink } = await import('./trace-pg.ts');
-          sink = pgSink(pgUrl);
-        }
-        await sink.write(record);
-      },
-    };
-  }
-  const dir = resolveTraceDir({ env });
-  if (!dir) {
+/** Build a JSONL sink from a host-supplied directory or return a noop sink. */
+function sinkFromDir(dir?: string, fallbackDir?: string): TraceSink {
+  const resolved = resolveTraceDir({ dir, fallbackDir });
+  if (!resolved) {
     return noopSink();
   }
-  return jsonlSink(dir);
+  return jsonlSink(resolved);
 }
 
 export type { TraceSink };
-export { defaultTraceDir, jsonlSink, memorySink, resolveTraceDir, sinkFromEnv, writeTrace };
+export { jsonlSink, memorySink, noopSink, resolveTraceDir, sinkFromDir, writeTrace };

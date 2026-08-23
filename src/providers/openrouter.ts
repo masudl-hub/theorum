@@ -1,3 +1,12 @@
+/**
+ * OpenRouter-compatible streaming provider adapter.
+ *
+ * This module maps THEORUM requests to OpenAI-style chat completions, including
+ * reasoning deltas, tool calls, citations, structured output, and token usage.
+ *
+ * @module
+ */
+
 import { publicError, TheorumError } from '../guardrails/error.ts';
 import { tryStructured } from '../kernel/engine/delta.ts';
 import type {
@@ -357,37 +366,51 @@ async function* streamOpenRouter(
     return;
   }
 
-  const res = await postOpenRouter(req, config, apiKey);
-  if (res.status !== HTTP_OK) {
-    yield { type: 'error', error: publicError(`OpenRouter HTTP ${String(res.status)}`) };
-    return;
-  }
-
-  const acc: StreamAccumulator = { text: '', toolCalls: new Map(), evidenceSeen: false };
-  let emittedTokens = false;
-
-  for await (const payload of readSseLines(res)) {
-    req.tapGemini?.(payload);
-    for (const ev of eventsFromPayload(payload, acc)) {
-      yield ev;
+  try {
+    const res = await postOpenRouter(req, config, apiKey);
+    if (res.status !== HTTP_OK) {
+      yield { type: 'error', error: publicError(`OpenRouter HTTP ${String(res.status)}`) };
+      return;
     }
 
-    const usage = parseUsage(payload.usage);
-    if (usage && !emittedTokens) {
-      emittedTokens = true;
-      yield { type: 'tokens', tokens: usage };
-    }
-  }
+    const acc: StreamAccumulator = { text: '', toolCalls: new Map(), evidenceSeen: false };
+    let emittedTokens = false;
+    let sawPayload = false;
 
-  yield* yieldRemainingStreamEvents(req, acc);
+    for await (const payload of readSseLines(res)) {
+      sawPayload = true;
+      req.tapGemini?.(payload);
+      for (const ev of eventsFromPayload(payload, acc)) {
+        yield ev;
+      }
+
+      const usage = parseUsage(payload.usage);
+      if (usage && !emittedTokens) {
+        emittedTokens = true;
+        yield { type: 'tokens', tokens: usage };
+      }
+    }
+
+    if (!sawPayload) {
+      yield { type: 'error', error: publicError('empty OpenRouter stream') };
+      return;
+    }
+
+    yield* yieldRemainingStreamEvents(req, acc);
+  } catch (err) {
+    yield { type: 'error', error: publicError(err) };
+  }
 }
 
+/** Resolve an OpenRouter API key supplied explicitly by the host application. */
 export function resolveOpenRouterApiKey(explicitKey?: string): string | undefined {
-  if (explicitKey) return explicitKey;
-  if (typeof Deno !== 'undefined') return Deno.env.get('OPENROUTER_API_KEY');
+  if (explicitKey?.trim()) {
+    return explicitKey.trim();
+  }
   return undefined;
 }
 
+/** Create a `ModelProvider` backed by OpenRouter-compatible chat completions. */
 function createOpenRouterProvider(config: OpenRouterConfig = {}): ModelProvider {
   return {
     complete: (req: ProviderCompleteRequest) => streamOpenRouter(req, config),

@@ -1,5 +1,5 @@
 import { publicError, UPSTREAM_FAILED } from '../guardrails/error.ts';
-import { sinkFromEnv, type TraceSink, writeTrace } from './trace.ts';
+import { noopSink, type TraceSink, writeTrace } from './trace.ts';
 import type { TraceRecord } from './trace-record.ts';
 
 interface CutoutTape {
@@ -38,7 +38,7 @@ async function flushMintTrace(args: {
     return;
   }
   attachMint(row, args.app, args.cutout);
-  await writeTrace(args.sink ?? sinkFromEnv(), Promise.resolve(row));
+  await writeTrace(args.sink ?? noopSink(), Promise.resolve(row));
 }
 
 export type { CutoutTape };

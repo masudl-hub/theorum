@@ -8,7 +8,7 @@ import {
   takeSlot,
 } from '../../src/guardrails/quota.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { getProfile } from '../../src/kernel/registry/profiles.ts';
+import { defineProfile, getProfile } from '../../src/kernel/registry/profiles.ts';
 
 const now = Date.parse('2026-08-16T12:00:00Z');
 const ip = '203.0.113.10';
@@ -53,34 +53,43 @@ Deno.test('clientIp uses cf-connecting-ip only when the peer is loopback', () =>
 
 Deno.test('takeSlot is one inflight and perDay on that profile', () => {
   resetSlots();
-  const vinylator = getProfile('image');
-  assertEquals(takeSlot(vinylator, ip, now), 'ok');
-  assertEquals(takeSlot(vinylator, ip, now), 'busy');
-  releaseSlot(vinylator, ip);
-  assertEquals(takeSlot(vinylator, ip, now), 'ok');
-  releaseSlot(vinylator, ip);
-  takeSlot(vinylator, ip, now);
-  releaseSlot(vinylator, ip);
-  takeSlot(vinylator, ip, now);
-  releaseSlot(vinylator, ip);
-  assertEquals(takeSlot(vinylator, ip, now), 'quota');
+  const imageProfile = getProfile('image');
+  assertEquals(takeSlot(imageProfile, ip, now), 'ok');
+  assertEquals(takeSlot(imageProfile, ip, now), 'busy');
+  releaseSlot(imageProfile, ip);
+  assertEquals(takeSlot(imageProfile, ip, now), 'ok');
+  releaseSlot(imageProfile, ip);
+  takeSlot(imageProfile, ip, now);
+  releaseSlot(imageProfile, ip);
+  takeSlot(imageProfile, ip, now);
+  releaseSlot(imageProfile, ip);
+  assertEquals(takeSlot(imageProfile, ip, now), 'quota');
+});
+
+Deno.test('takeSlot returns not_configured when profile omits quota', () => {
+  const profile = defineProfile({
+    id: 'unmetered',
+    model: { allow: ['gemini35FlashLite'] },
+  });
+
+  assertEquals(takeSlot(profile, ip, now), 'not_configured');
 });
 
 Deno.test('profile quotas do not share a bucket', () => {
   resetSlots();
-  const vinylator = getProfile('image');
-  const mermaid = getProfile('chat');
-  assertEquals(takeSlot(vinylator, ip, now), 'ok');
-  releaseSlot(vinylator, ip);
-  takeSlot(vinylator, ip, now);
-  releaseSlot(vinylator, ip);
-  takeSlot(vinylator, ip, now);
-  releaseSlot(vinylator, ip);
-  takeSlot(vinylator, ip, now);
-  releaseSlot(vinylator, ip);
-  assertEquals(takeSlot(vinylator, ip, now), 'quota');
-  assertEquals(takeSlot(mermaid, ip, now), 'ok');
-  releaseSlot(mermaid, ip);
+  const imageProfile = getProfile('image');
+  const chatProfile = getProfile('chat');
+  assertEquals(takeSlot(imageProfile, ip, now), 'ok');
+  releaseSlot(imageProfile, ip);
+  takeSlot(imageProfile, ip, now);
+  releaseSlot(imageProfile, ip);
+  takeSlot(imageProfile, ip, now);
+  releaseSlot(imageProfile, ip);
+  takeSlot(imageProfile, ip, now);
+  releaseSlot(imageProfile, ip);
+  assertEquals(takeSlot(imageProfile, ip, now), 'quota');
+  assertEquals(takeSlot(chatProfile, ip, now), 'ok');
+  releaseSlot(chatProfile, ip);
 });
 
 Deno.test('quotaMessage names the profile handle', () => {

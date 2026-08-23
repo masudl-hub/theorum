@@ -1,11 +1,22 @@
+/**
+ * Request sanitization utilities for THEORUM.
+ *
+ * Sanitization removes inbound prompt-injection spans and sensitive-data spans
+ * according to the active profile guardrail flags. The host remains responsible
+ * for domain policy.
+ *
+ * @module
+ */
+
 import { mapStrings } from '../kernel/engine/tree.ts';
 import { getProfile } from '../kernel/registry/profiles.ts';
-import type { TurnRequest } from '../kernel/types.ts';
+import type { NormalizedTurnRequest, TurnRequest } from '../kernel/types.ts';
 import { applySpans } from '../observability/spans.ts';
 import { sanitizeTurnBlobsForProfile } from '../providers/attachments.ts';
 import { injectionSpans } from './injection.ts';
 import { sensitiveSpans } from './sensitive.ts';
 
+/** Sanitize one text value using prompt-injection and sensitive-data detectors. */
 function sanitizeText(
   text: string,
   options?: { sanitizeInput?: boolean; redactSensitive?: boolean },
@@ -47,9 +58,11 @@ function sanitizeArgs(
   return args;
 }
 
+/** Maximum retained length for trace-safe host project ids. */
 const PROJECT_ID_MAX = 128;
 const PROJECT_ID_OK = /^[A-Za-z0-9._-]+$/;
 
+/** Return a trace-safe project id or `undefined` when the input is unsafe. */
 function sanitizeProjectId(id: string | undefined): string | undefined {
   if (!id) {
     return undefined;
@@ -61,17 +74,17 @@ function sanitizeProjectId(id: string | undefined): string | undefined {
   return trimmed;
 }
 
-function sanitizeFix(
-  fix: import('../kernel/types.ts').TurnFixRequest | undefined,
+function sanitizeRepair(
+  repair: import('../kernel/types.ts').TurnRepairRequest | undefined,
   options?: { sanitizeInput?: boolean; redactSensitive?: boolean },
-): import('../kernel/types.ts').TurnFixRequest | undefined {
-  if (!fix) {
-    return fix;
+): import('../kernel/types.ts').TurnRepairRequest | undefined {
+  if (!repair) {
+    return repair;
   }
   return {
-    artifact: sanitizeText(fix.artifact, options),
-    error: sanitizeText(fix.error, options),
-    guidance: fix.guidance ? sanitizeText(fix.guidance, options) : undefined,
+    previousOutput: sanitizeText(repair.previousOutput, options),
+    rejection: sanitizeText(repair.rejection, options),
+    guidance: repair.guidance ? sanitizeText(repair.guidance, options) : undefined,
   };
 }
 
@@ -99,7 +112,8 @@ function sanitizeHistory(
   }));
 }
 
-function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
+/** Sanitize all user-controlled text and blobs in a turn request. */
+function sanitizeTurnRequest(req: TurnRequest): NormalizedTurnRequest {
   let profileGuardrails: { sanitizeInput?: boolean; redactSensitive?: boolean } | undefined;
   try {
     profileGuardrails = getProfile(req.profile)?.guardrails;
@@ -111,7 +125,8 @@ function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
     redactSensitive: profileGuardrails?.redactSensitive ?? true,
   };
 
-  const { input, toolInvoke } = req;
+  const input = req.input ?? {};
+  const { toolInvoke } = req;
   const { text: rawText } = input;
   let invoke = toolInvoke;
   if (toolInvoke) {
@@ -140,7 +155,7 @@ function sanitizeTurnRequest(req: TurnRequest): TurnRequest {
       slots: sanitizeSlots(input.slots, options),
       attachments,
       voice,
-      fix: sanitizeFix(input.fix, options),
+      repair: sanitizeRepair(input.repair, options),
       history: sanitizeHistory(input.history, options),
     },
     toolInvoke: invoke,

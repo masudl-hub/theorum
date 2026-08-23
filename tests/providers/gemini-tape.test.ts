@@ -15,9 +15,9 @@ const OUTPUT_TOKENS = 2;
 const HTTP_OK = 200;
 
 const vault: GeminiVault = {
-  studio: 'studio-key',
-  portfolio: 'portfolio-key',
-  planner: 'planner-key',
+  freeA: 'free-a-key',
+  freeB: 'free-b-key',
+  freeC: 'free-c-key',
   paid: 'paid-key',
 };
 
@@ -142,6 +142,29 @@ Deno.test('runTurn traces wire, usage, and every Interactions SSE row', async ()
     throw new Error('missing trace');
   }
   assertFullTape(row);
+});
+
+Deno.test('tapFetch handles non-Error thrown values and default fetch fallback', async () => {
+  const { tapFetch } = await import('../../src/providers/google-tap.ts');
+  const rows: Record<string, unknown>[] = [];
+  const tap = (row: Record<string, unknown>) => rows.push(row);
+
+  const customSend: typeof fetch = () => Promise.reject('raw string network crash');
+  const tapped = tapFetch(tap, customSend);
+
+  try {
+    await tapped('https://example.com', { headers: { 'X-Secret-Token': 'supersecret' } });
+  } catch {
+    // Expected throw
+  }
+
+  const throwRow = rows.find((r) => r.eventType === 'http_throw');
+  assertEquals(throwRow?.message, 'raw string network crash');
+  assertEquals(throwRow?.name, 'Error');
+
+  const reqRow = rows.find((r) => r.eventType === 'http_request');
+  const headers = reqRow?.headers as Record<string, string>;
+  assertEquals(headers['x-secret-token'], '[redacted]');
 });
 
 Deno.test('runTurn traces Google error response bodies', async () => {

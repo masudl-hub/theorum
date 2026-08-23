@@ -8,6 +8,8 @@ interface Slot {
   busy: boolean;
 }
 
+type QuotaSlotStatus = 'ok' | 'busy' | 'quota' | 'not_configured';
+
 const slots = new Map<string, Slot>();
 
 function utcDay(now: number): string {
@@ -43,7 +45,11 @@ function clientIp(peer: string, req: Request): string {
   return 'unknown';
 }
 
-function takeSlot(profile: Profile, ip: string, now: number): 'ok' | 'busy' | 'quota' {
+function takeSlot(profile: Profile, ip: string, now: number): QuotaSlotStatus {
+  const quota = profile.guardrails.quota;
+  if (!quota) {
+    return 'not_configured';
+  }
   const day = utcDay(now);
   const key = slotKey(profile.id, ip);
   let slot = slots.get(key);
@@ -54,7 +60,7 @@ function takeSlot(profile: Profile, ip: string, now: number): 'ok' | 'busy' | 'q
   if (slot.busy) {
     return 'busy';
   }
-  if (slot.count >= profile.guardrails.quota.perDay) {
+  if (slot.count >= quota.perDay) {
     return 'quota';
   }
   slot.busy = true;
@@ -77,4 +83,5 @@ function resetSlots(): void {
   slots.clear();
 }
 
+export type { QuotaSlotStatus };
 export { clientIp, quotaMessage, releaseSlot, resetSlots, skipQuota, takeSlot };

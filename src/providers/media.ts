@@ -1,6 +1,6 @@
 import { TheorumError } from '../guardrails/error.ts';
 import { wrapUserData } from '../kernel/engine/boundary.ts';
-import { synthesizeFixPrompt } from '../kernel/engine/fix.ts';
+import { synthesizeRepairPrompt } from '../kernel/engine/repair.ts';
 import {
   geminiKindForMime,
   mimeAllowed,
@@ -113,7 +113,7 @@ function mediaParts(
 }
 
 function extractTextPart(profile: Profile, req: TurnRequest): InteractionPart | null {
-  const { text, fix, history } = req.input;
+  const { text, repair, history } = req.input ?? {};
   if (profile.inputs.text === false) {
     if (text) {
       throw new TheorumError(`Profile ${profile.id} does not accept text input`);
@@ -121,8 +121,8 @@ function extractTextPart(profile: Profile, req: TurnRequest): InteractionPart | 
     return null;
   }
   let promptText = text;
-  if (fix) {
-    promptText = synthesizeFixPrompt({ profile, fix, history });
+  if (repair) {
+    promptText = synthesizeRepairPrompt({ profile, repair, history });
   }
   if (!promptText) {
     return null;
@@ -131,7 +131,7 @@ function extractTextPart(profile: Profile, req: TurnRequest): InteractionPart | 
 }
 
 function extractMediaParts(profile: Profile, model: ModelId, req: TurnRequest): InteractionPart[] {
-  const { attachments, voice } = req.input;
+  const { attachments, voice } = req.input ?? {};
   const files = attachments ?? [];
   const clips = voice ?? [];
   if (files.length + clips.length > 0) {

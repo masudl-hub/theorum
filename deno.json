@@ -1,23 +1,52 @@
 {
   "name": "@theorum/core",
-  "version": "0.1.0",
+  "version": "0.1.2",
+  "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
+  "license": "MIT",
+  "keywords": [
+    "agent",
+    "ai",
+    "kernel",
+    "llm",
+    "typescript",
+    "deno",
+    "node",
+    "openrouter",
+    "gemini"
+  ],
   "exports": {
     ".": "./mod.ts",
-    "./kernel": "./src/kernel/types.ts",
-    "./providers": "./src/providers/provider.ts",
+    "./kernel": "./src/kernel/mod.ts",
+    "./providers": "./src/providers/mod.ts",
     "./openrouter": "./src/providers/openrouter.ts",
-    "./guardrails": "./src/guardrails/sanitize.ts",
-    "./observability": "./src/observability/trace.ts"
+    "./guardrails": "./src/guardrails/mod.ts",
+    "./observability": "./src/observability/mod.ts"
+  },
+  "publish": {
+    "exclude": [
+      ".fallow/",
+      ".fallowrc.jsonc",
+      ".github/",
+      "ast-grep-rules/",
+      "biome.json",
+      "coverage/",
+      "node_modules/",
+      "npm/",
+      "package-lock.json",
+      "scripts/",
+      "sgconfig.yml",
+      "src/cli/",
+      "tests/"
+    ]
   },
   "imports": {
-    "@std/assert": "jsr:@std/assert@^1.0.0",
-    "postgres": "https://deno.land/x/postgres@v0.19.3/mod.ts"
+    "@std/assert": "jsr:@std/assert@^1.0.0"
   },
   "tasks": {
-    "theorum": "deno run --allow-all src/cli/index.ts",
-    "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net",
+    "theorum": "deno run --allow-read --allow-write --allow-net src/cli/index.ts",
+    "test": "deno test --allow-read --allow-write --allow-net",
     "check": "deno check mod.ts",
     "lint": "npm run lint",
-    "verify:live": "deno run --allow-net --allow-env --allow-read scripts/verify-live.ts"
+    "verify:live": "deno run --allow-net scripts/verify-live.ts"
   }
 }

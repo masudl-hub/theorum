@@ -10,13 +10,6 @@ interface GeminiTransport {
   fetch?: typeof fetch;
 }
 
-const ENV: Record<GeminiBucket, string> = {
-  studio: 'GEMINI_API_KEY_STUDIO',
-  portfolio: 'GEMINI_API_KEY_PORTFOLIO',
-  planner: 'GEMINI_API_KEY_PLANNER',
-  paid: 'GEMINI_API_KEY',
-};
-
 const ATTEMPTS = 3;
 const LAST_ATTEMPT = ATTEMPTS - 1;
 const BACKOFF_FIRST_MS = 1000;
@@ -48,15 +41,6 @@ function resolveGeminiBucket(
     return 'paid';
   }
   return free;
-}
-
-function vaultFromEnv(): GeminiVault {
-  return {
-    studio: Deno.env.get(ENV.studio)?.trim() || undefined,
-    portfolio: Deno.env.get(ENV.portfolio)?.trim() || undefined,
-    planner: Deno.env.get(ENV.planner)?.trim() || undefined,
-    paid: Deno.env.get(ENV.paid)?.trim() || undefined,
-  };
 }
 
 function waitDefault(ms: number): Promise<void> {
@@ -202,4 +186,4 @@ async function fetchGemini(
 }
 
 export type { GeminiTransport, GeminiVault };
-export { fetchGemini, resolveGeminiBucket, vaultFromEnv, withGeminiKey };
+export { fetchGemini, resolveGeminiBucket, withGeminiKey };

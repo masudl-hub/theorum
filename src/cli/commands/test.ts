@@ -1,21 +1,11 @@
-import { vaultFromEnv } from '../../guardrails/keys.ts';
 import { runTurn } from '../../kernel/engine/runner.ts';
 import { getProfile, listProfiles } from '../../kernel/registry/profiles.ts';
 import type { ModelProvider, Profile, TurnEvent, TurnRequest } from '../../kernel/types.ts';
-import { createOpenRouterProvider } from '../../providers/openrouter.ts';
-import { createInteractionsProvider } from '../../providers/provider.ts';
 import {
   buildCustomTurnRequest,
   type MatrixOptions,
   synthesizeMatrixCombos,
 } from '../matrix/synthesizer.ts';
-
-function createDefaultProvider(profile: Profile): ModelProvider {
-  if (profile.model.protocol === 'openAi' || profile.model.provider === 'openrouter') {
-    return createOpenRouterProvider();
-  }
-  return createInteractionsProvider({ vault: vaultFromEnv() });
-}
 
 export interface TestRunResult {
   passed: boolean;
@@ -41,7 +31,7 @@ function printTestHeader(req: TurnRequest, testName: string): void {
   console.log(`  Profile:     ${req.profile} (Mode: ${req.select ?? 'default'})`);
   console.log(`  Tools:       ${activeTools || 'none'}`);
   console.log(
-    `  Attachments: ${req.input.attachments?.length ?? 0} file(s) | Voice: ${req.input.voice?.length ? 'yes' : 'no'}`,
+    `  Attachments: ${req.input?.attachments?.length ?? 0} file(s) | Voice: ${req.input?.voice?.length ? 'yes' : 'no'}`,
   );
   console.log(`  ${'-'.repeat(60)}`);
 }
@@ -86,8 +76,7 @@ export async function executeSingleTest(
   provider?: ModelProvider,
 ): Promise<TestRunResult> {
   const start = Date.now();
-  const profile = getProfile(req.profile);
-  const activeProvider = provider ?? createDefaultProvider(profile);
+  getProfile(req.profile);
   printTestHeader(req, testName);
 
   const acc: TestExecutionAccumulator = {
@@ -97,7 +86,12 @@ export async function executeSingleTest(
   };
 
   try {
-    for await (const event of runTurn(req, activeProvider)) {
+    if (!provider) {
+      throw new Error(
+        'Theorum CLI does not create providers or read keys. Pass an explicit ModelProvider from the host app.',
+      );
+    }
+    for await (const event of runTurn(req, provider)) {
       processTestEvent(event, acc);
     }
   } catch (err) {
@@ -134,25 +128,32 @@ function resolveTargetProfiles(
     }
   }
   console.error(
-    'Error: Please specify a profile ID (e.g. `theorum test --profile studio`) or `--all`.',
+    'Error: Please specify a profile ID (e.g. `theorum test --profile your-profile`) or `--all`.',
   );
   return null;
 }
 
-async function runProfileMatrix(profile: Profile): Promise<TestRunResult[]> {
+async function runProfileMatrix(
+  profile: Profile,
+  provider?: ModelProvider,
+): Promise<TestRunResult[]> {
   const results: TestRunResult[] = [];
   const combos = synthesizeMatrixCombos(profile);
   for (const combo of combos) {
-    const res = await executeSingleTest(combo.req, `${profile.id} [${combo.name}]`);
+    const res = await executeSingleTest(combo.req, `${profile.id} [${combo.name}]`, provider);
     results.push(res);
   }
   return results;
 }
 
-async function runProfileSingle(profile: Profile, options: MatrixOptions): Promise<TestRunResult> {
+async function runProfileSingle(
+  profile: Profile,
+  options: MatrixOptions,
+  provider?: ModelProvider,
+): Promise<TestRunResult> {
   const req = buildCustomTurnRequest(profile, options);
   const testName = options.lite ? `${profile.id} [Lite]` : `${profile.id} [Stress Combo]`;
-  return await executeSingleTest(req, testName);
+  return await executeSingleTest(req, testName, provider);
 }
 
 function printSummaryReport(results: TestRunResult[]): boolean {
@@ -174,7 +175,7 @@ function printSummaryReport(results: TestRunResult[]): boolean {
 
 export async function testProfileCommand(
   profileId?: string,
-  options: MatrixOptions & { all?: boolean; matrix?: boolean } = {},
+  options: MatrixOptions & { all?: boolean; matrix?: boolean; provider?: ModelProvider } = {},
 ): Promise<boolean> {
   const targetProfiles = resolveTargetProfiles(profileId, options.all);
   if (!targetProfiles || targetProfiles.length === 0) {
@@ -184,9 +185,9 @@ export async function testProfileCommand(
   const results: TestRunResult[] = [];
   for (const profile of targetProfiles) {
     if (options.matrix) {
-      results.push(...(await runProfileMatrix(profile)));
+      results.push(...(await runProfileMatrix(profile, options.provider)));
     } else {
-      results.push(await runProfileSingle(profile, options));
+      results.push(await runProfileSingle(profile, options, options.provider));
     }
   }
 

@@ -1,6 +1,16 @@
+/**
+ * Deterministic turn runner for THEORUM.
+ *
+ * `runTurn` resolves a profile, sanitizes input, binds canary boundaries,
+ * streams provider events, executes allowed tools, applies validation and
+ * egress repair loops, writes traces, and emits one terminal `done` event.
+ *
+ * @module
+ */
+
 import { publicError } from '../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
-import { sinkFromEnv, type TraceSink, writeTrace } from '../../observability/trace.ts';
+import { noopSink, type TraceSink, writeTrace } from '../../observability/trace.ts';
 import { buildRecord } from '../../observability/trace-record.ts';
 import { CATALOG } from '../registry/catalog.ts';
 import { pickSystemRole, resolveTurn } from '../registry/resolve.ts';
@@ -32,7 +42,7 @@ function* invokeFromUi(profile: Profile, req: TurnRequest): Generator<TurnEvent>
       tool: { name: invoke.name, arguments: invoke.arguments, result },
     };
     if (result.status === 'error') {
-      yield { type: 'error', error: publicError(result.finding) };
+      yield { type: 'error', error: publicError(formatToolFinding(result)) };
       return;
     }
     yield { type: 'done' };
@@ -49,9 +59,14 @@ function executeCustomModelTool(
 ): TurnEvent[] {
   try {
     const result = executeTool(profile, name, args);
-    const events: TurnEvent[] = [{ type: 'tool', tool: { name, arguments: args, result } }];
+    const events: TurnEvent[] = [
+      {
+        type: 'tool',
+        tool: { name, arguments: args, result },
+      },
+    ];
     if (result.status === 'error') {
-      events.push({ type: 'error', error: publicError(result.finding) });
+      events.push({ type: 'error', error: publicError(formatToolFinding(result)) });
     }
     return events;
   } catch (err) {
@@ -69,7 +84,12 @@ function dispatchModelTool(profile: Profile, event: TurnEvent, gated: CustomTool
     return [event];
   }
   if (!gated.includes(name as CustomToolId)) {
-    return [{ type: 'error', error: publicError(`Tool '${name}' is not gated on this turn`) }];
+    return [
+      {
+        type: 'error',
+        error: publicError(`Tool '${name}' is not gated on this turn`),
+      },
+    ];
   }
   const args = tool.arguments ?? {};
   return executeCustomModelTool(profile, name as CustomToolId, args);
@@ -208,7 +228,11 @@ async function checkDynamicAuthorization(
     return null;
   }
   try {
-    const decision = await decl.canExecute({ args, profile, sessionPermissions });
+    const decision = await decl.canExecute({
+      args,
+      profile,
+      sessionPermissions,
+    });
     if (typeof decision === 'boolean' && !decision) {
       return {
         status: 'error',
@@ -221,7 +245,10 @@ async function checkDynamicAuthorization(
     return null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { status: 'error', finding: `Authorization error for '${decl.name}': ${msg}` };
+    return {
+      status: 'error',
+      finding: `Authorization error for '${decl.name}': ${msg}`,
+    };
   }
 }
 
@@ -248,7 +275,11 @@ async function runDynamicHandler(
   args: Record<string, unknown>,
 ): Promise<ToolEnvelope> {
   if (!decl.handler) {
-    return { status: 'ok', finding: `${decl.name} accepted (no handler)`, data: args };
+    return {
+      status: 'ok',
+      finding: `${decl.name} accepted (no handler)`,
+      data: args,
+    };
   }
   try {
     return await decl.handler(args);
@@ -339,7 +370,12 @@ async function executeDynamicDeclaration(args: {
   const { decl, toolArgs, profile, generation } = args;
   const res = await executeDynamicTool(decl, toolArgs, profile, generation.sessionPermissions);
   if (res.status === 'ok' && decl.loadsDynamicTools) {
-    return await executeDynamicToolLoader({ decl, toolArgs, profile, generation });
+    return await executeDynamicToolLoader({
+      decl,
+      toolArgs,
+      profile,
+      generation,
+    });
   }
   return res;
 }
@@ -386,6 +422,9 @@ async function* executeAutonomousStep(
     if (event.type === 'structured') {
       latestStructured = event.structured;
     }
+    if (event.type === 'done') {
+      continue;
+    }
     if (event.type === 'tool' && event.tool) {
       pendingTools.push(event);
       continue;
@@ -431,9 +470,10 @@ function appendToolTurnToHistory(
 }
 
 function calculateInputChars(safe: TurnRequest, system: string): number {
+  const input = safe.input ?? {};
   return (
-    (safe.input.text?.length ?? 0) +
-    (safe.input.fix?.artifact?.length ?? 0) +
+    (input.text?.length ?? 0) +
+    (input.repair?.previousOutput?.length ?? 0) +
     (system?.length ?? 800)
   );
 }
@@ -443,7 +483,9 @@ function calculateOutputChars(events: TurnEvent[]): { outputChars: number; think
   let thinkingChars = 0;
   for (const e of events) {
     if (e.type === 'text' && e.text) outputChars += e.text.length;
-    if (e.type === 'structured' && e.structured) outputChars += JSON.stringify(e.structured).length;
+    if (e.type === 'structured' && e.structured) {
+      outputChars += JSON.stringify(e.structured).length;
+    }
     if (e.type === 'thought' && e.text) thinkingChars += e.text.length;
   }
   return { outputChars, thinkingChars };
@@ -555,45 +597,46 @@ async function* executeAttempt(args: {
   return { pendingTools, latestStructured };
 }
 
-function buildFixRequest(
+function buildRepairRequest(
   safe: TurnRequest,
-  artifact: unknown,
-  error: string,
+  previousOutput: unknown,
+  rejection: string,
   repairGuidance?: string,
 ): TurnRequest {
   return {
     ...safe,
     input: {
       ...safe.input,
-      fix: {
-        artifact: typeof artifact === 'string' ? artifact : JSON.stringify(artifact),
-        error,
+      repair: {
+        previousOutput:
+          typeof previousOutput === 'string' ? previousOutput : JSON.stringify(previousOutput),
+        rejection,
         guidance: repairGuidance,
       },
     },
   };
 }
 
-function hasValidatableArtifact(
+function hasValidatableOutput(
   validation: ProfileOutputsSpec['validation'],
   latestStructured: unknown,
 ): boolean {
   if (!validation || latestStructured === undefined) {
     return false;
   }
-  const artifact = validation.extract(latestStructured);
-  return artifact !== undefined && artifact !== null;
+  const candidateOutput = validation.extract?.(latestStructured) ?? latestStructured;
+  return candidateOutput !== undefined && candidateOutput !== null;
 }
 
 async function evaluateValidationAttempt(
   validation: NonNullable<ProfileOutputsSpec['validation']>,
   latestStructured: unknown,
   slots: Record<string, string> | undefined,
-): Promise<{ artifact: unknown; isValid: boolean; error: string }> {
-  const artifact = validation.extract(latestStructured);
-  const check = await validation.validate(artifact, slots);
+): Promise<{ candidateOutput: unknown; isValid: boolean; error: string }> {
+  const candidateOutput = validation.extract?.(latestStructured) ?? latestStructured;
+  const check = await validation.validate(candidateOutput, slots);
   const error = check.error || check.finding || 'Validation failed';
-  return { artifact, isValid: Boolean(check.isValid), error };
+  return { candidateOutput, isValid: Boolean(check.isValid), error };
 }
 
 type EgressOutcome =
@@ -615,9 +658,9 @@ async function evaluateEgressOutcome(args: {
   const result = await egress.enforce({
     text: attemptText,
     canary: generation.canary,
-    slots: request.input.slots,
+    slots: request.input?.slots,
     profile,
-    role: request.input.role,
+    role: request.input?.role,
   });
 
   if (!result.blocked) {
@@ -633,13 +676,16 @@ async function evaluateEgressOutcome(args: {
     const repairGuidance =
       egress.repairGuidance ||
       'Rewrite the message as corrected user-visible prose only. Keep the same helpful substance; scrub all internal tool names, leak phrases, and disclosure markers.';
-    const nextRequest = buildFixRequest(request, attemptText, rejectionMsg, repairGuidance);
+    const nextRequest = buildRepairRequest(request, attemptText, rejectionMsg, repairGuidance);
     return { action: 'retry', nextRequest };
   }
 
   return {
     action: 'withhold',
-    event: { type: 'error', error: publicError('Turn withheld: egress disclosure violation') },
+    event: {
+      type: 'error',
+      error: publicError('Turn withheld: egress disclosure violation'),
+    },
   };
 }
 
@@ -655,14 +701,14 @@ async function evaluateValidationOutcome(args: {
   canRetry: boolean;
 }): Promise<ValidationOutcome> {
   const { validation, latestStructured, request, canRetry } = args;
-  if (!hasValidatableArtifact(validation, latestStructured)) {
+  if (!hasValidatableOutput(validation, latestStructured)) {
     return { action: 'pass' };
   }
 
-  const { artifact, isValid, error } = await evaluateValidationAttempt(
+  const { candidateOutput, isValid, error } = await evaluateValidationAttempt(
     validation,
     latestStructured,
-    request.input.slots,
+    request.input?.slots,
   );
 
   if (isValid) {
@@ -670,11 +716,19 @@ async function evaluateValidationOutcome(args: {
   }
 
   if (canRetry) {
-    const nextRequest = buildFixRequest(request, artifact, error, validation.repairGuidance);
+    const nextRequest = buildRepairRequest(
+      request,
+      candidateOutput,
+      error,
+      validation.repairGuidance,
+    );
     return { action: 'retry', nextRequest };
   }
 
-  return { action: 'accept', event: { type: 'structured', structured: latestStructured } };
+  return {
+    action: 'accept',
+    event: { type: 'structured', structured: latestStructured },
+  };
 }
 
 function* yieldBufferedAttemptEvents(events: TurnEvent[]): Generator<TurnEvent> {
@@ -757,7 +811,12 @@ async function* handleValidationGate(
   return 'pass';
 }
 
-type AttemptStepAction = { status: 'terminal' } | { status: 'continue' } | { status: 'success' };
+type AttemptStepAction =
+  | { status: 'terminal' }
+  | { status: 'continue' }
+  | {
+      status: 'success';
+    };
 
 function gateStatusToAction(
   status: 'continue' | 'terminal' | 'pass',
@@ -891,10 +950,11 @@ async function* emitTurn(args: {
   yield { type: 'done' };
 }
 
+/** Execute one host turn against a provider adapter. */
 async function* runTurn(
   req: TurnRequest,
   provider: ModelProvider,
-  sink: TraceSink = sinkFromEnv(),
+  sink: TraceSink = noopSink(),
 ): AsyncGenerator<TurnEvent> {
   const started = Date.now();
   const seen: TurnEvent[] = [];
@@ -912,7 +972,7 @@ async function* runTurn(
     model = resolvedModel;
     bucket = geminiBucket;
     canary = turnCanary;
-    const role = pickSystemRole(profile, safe.input.role);
+    const role = pickSystemRole(profile, safe.input?.role);
     const profileSys = systemFromProfile(profile, role);
     const combinedSys = [profileSys, safe.system].filter(Boolean).join('\n\n');
     const bound = bindCanary(combinedSys, turnCanary);
@@ -951,7 +1011,17 @@ async function* runTurn(
   }
   await writeTrace(
     sink,
-    buildRecord({ req, events: seen, started, model, bucket, gemini, canary, system, generation }),
+    buildRecord({
+      req,
+      events: seen,
+      started,
+      model,
+      bucket,
+      gemini,
+      canary,
+      system,
+      generation,
+    }),
   );
 }
 

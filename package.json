@@ -1,10 +1,40 @@
 {
   "name": "@theorum/core",
-  "version": "0.1.0",
+  "version": "0.1.2",
+  "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
+  "license": "MIT",
   "type": "module",
+  "keywords": [
+    "agent",
+    "ai",
+    "kernel",
+    "llm",
+    "typescript",
+    "deno",
+    "node",
+    "openrouter",
+    "gemini"
+  ],
+  "exports": {
+    ".": "./mod.ts",
+    "./kernel": "./src/kernel/mod.ts",
+    "./providers": "./src/providers/mod.ts",
+    "./openrouter": "./src/providers/openrouter.ts",
+    "./guardrails": "./src/guardrails/mod.ts",
+    "./observability": "./src/observability/mod.ts"
+  },
+  "files": [
+    "README.md",
+    "deno.json",
+    "deno.lock",
+    "docs/",
+    "mod.ts",
+    "src/"
+  ],
   "scripts": {
-    "test": "THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net",
-    "coverage": "rm -rf coverage && THEORUM_TRACE_DIR= deno test --allow-env --allow-read --allow-write --allow-net --coverage=coverage tests/ && deno coverage coverage --lcov --output=coverage/lcov.info && node scripts/lcov-to-istanbul.mjs",
+    "build:npm": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run=npm scripts/build-npm.ts",
+    "test": "deno test --allow-read --allow-write --allow-net",
+    "coverage": "rm -rf coverage && deno test --allow-read --allow-write --allow-net --coverage=coverage tests/ && deno coverage coverage --lcov --output=coverage/lcov.info && node scripts/lcov-to-istanbul.mjs",
     "lint:biome": "biome check .",
     "lint:ast-grep": "ast-grep scan",
     "lint:fallow": "npm run coverage && fallow audit && fallow health && fallow dupes && fallow dead-code",

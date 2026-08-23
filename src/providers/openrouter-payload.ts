@@ -1,3 +1,12 @@
+/**
+ * OpenRouter payload builder.
+ *
+ * Converts THEORUM provider requests into OpenAI-compatible chat completion
+ * payloads for OpenRouter and compatible gateways.
+ *
+ * @module
+ */
+
 import { CATALOG } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
 import type {
@@ -11,6 +20,7 @@ import type {
   TurnHistoryMessage,
 } from '../kernel/types.ts';
 
+/** Configuration supplied by the host app when creating OpenRouter providers. */
 interface OpenRouterConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -20,6 +30,7 @@ interface OpenRouterConfig {
   modelMap?: Record<string, string>;
 }
 
+/** Resolve a THEORUM model id to an OpenRouter model string. */
 function resolveOpenRouterModel(
   modelId: ModelId | string,
   customMap?: Record<string, string>,
@@ -170,6 +181,7 @@ function resolveResponseFormat(
   };
 }
 
+/** Convert a provider-neutral request into an OpenRouter chat completion payload. */
 function toOpenRouterPayload(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,

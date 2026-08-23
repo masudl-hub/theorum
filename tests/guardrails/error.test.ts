@@ -48,15 +48,6 @@ Deno.test('publicError and errorMessage cover all exact mappings and rules', () 
     publicError(new TheorumError('askUser.prompt is required')),
     'That question needs a prompt.',
   );
-  assertEquals(publicError(new TheorumError('handoff.to is required')), PUBLIC_ACTION);
-  assertEquals(
-    publicError(
-      new TheorumError(
-        'generateMedia is not wired; enable it on the profile when a media backend exists',
-      ),
-    ),
-    PUBLIC_ACTION,
-  );
   assertEquals(
     publicError(new TheorumError('This profile does not accept text input')),
     PUBLIC_ACTION,
@@ -64,12 +55,12 @@ Deno.test('publicError and errorMessage cover all exact mappings and rules', () 
 
   assertEquals(publicError("Tool 'askUser' is not gated on this turn"), PUBLIC_ACTION);
   assertEquals(publicError("Tool 'googleSearch' is not allowed on this profile"), PUBLIC_ACTION);
+  assertEquals(publicError("Tool 'hostTool' has no kernel executor"), PUBLIC_ACTION);
   assertEquals(publicError("Unknown model select 'ultra'"), PUBLIC_ACTION);
   assertEquals(publicError('Grounding tools conflict'), PUBLIC_ACTION);
-  assertEquals(publicError("Handoff target 'unknown'"), PUBLIC_ACTION);
 
   assertEquals(
-    publicError(new TheorumError("MIME 'image/gif' is not accepted on mermaid")),
+    publicError(new TheorumError("MIME 'image/gif' is not accepted on host-profile")),
     PUBLIC_FILE_TYPE,
   );
   assertEquals(
@@ -90,7 +81,7 @@ Deno.test('publicError and errorMessage cover all exact mappings and rules', () 
   assertEquals(publicError(new TheorumError('Profile has no models')), PUBLIC_GENERIC);
 
   const wire = [
-    publicError(new TheorumError('GEMINI_API_KEY_STUDIO not configured')),
+    publicError(new TheorumError('host key slot not configured')),
     publicError('Gemini HTTP 429'),
     publicError(new Error('fetch failed: dns')),
   ].join(' ');

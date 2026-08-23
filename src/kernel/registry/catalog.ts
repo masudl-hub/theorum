@@ -20,7 +20,6 @@ const ASK_USER_SCHEMA = {
 const DEFAULT_TEMPERATURE = 1;
 const FLASH_LITE_MAX_OUTPUT_TOKENS = 8192;
 const PRO_PREVIEW_MAX_OUTPUT_TOKENS = 64_000;
-const FLASH_37_MAX_OUTPUT_TOKENS = 64_000;
 const IMAGE_FLASH_LITE_MAX_OUTPUT_TOKENS = 4096;
 const TTS_FLASH_MAX_OUTPUT_TOKENS = 2048;
 const SONAR_MAX_OUTPUT_TOKENS = 8192;
@@ -30,7 +29,7 @@ const VOICE_INPUT_MIMES = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4']
 
 const KIB = 1024;
 const MIB = KIB * KIB;
-/** Default chat media caps. Profiles copy these; mermaid overrides `maxFiles`. */
+/** Default chat media caps. Host profiles may copy or override these limits. */
 const CHAT_MEDIA_LIMITS = {
   maxFiles: 10,
   maxBytes: 8 * MIB,
@@ -110,7 +109,6 @@ const IMAGE_FLASH_LITE_ASPECT_RATIOS: ImageAspectRatio[] = [
 const IMAGE_FLASH_LITE_SIZES: ImageSize[] = ['1K'];
 
 const FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'low', 'medium', 'high'];
-const FLASH_37_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
 const PRO_PREVIEW_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
 const IMAGE_FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'high'];
 const TTS_THINKING_LEVELS: ThinkingLevel[] = ['minimal'];
@@ -155,16 +153,6 @@ const CATALOG: Catalog = {
       temperature: DEFAULT_TEMPERATURE,
       freeBuiltins: ['googleMaps', 'urlContext'],
     },
-    gemini37Flash: {
-      apiId: 'gemini-3.7-flash',
-      // Default is medium; off cannot be minimal (400).
-      thinking: { on: 'high', off: 'low' },
-      thinkingLevels: FLASH_37_THINKING_LEVELS,
-      summaries: { on: 'auto', off: 'auto' },
-      maxOutputTokens: FLASH_37_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: ['urlContext'],
-    },
     gemini31FlashLiteImage: {
       apiId: 'gemini-3.1-flash-lite-image',
       thinking: { on: 'high', off: 'minimal' },
@@ -208,34 +196,6 @@ const CATALOG: Catalog = {
     googleMaps: { kind: 'builtin', ui: true },
     urlContext: { kind: 'builtin', ui: true },
     askUser: { kind: 'custom', ui: true, schema: ASK_USER_SCHEMA },
-    generateMedia: {
-      kind: 'custom',
-      ui: true,
-      schema: {
-        type: 'object',
-        properties: {
-          prompt: { type: 'string' },
-          kind: { type: 'string', enum: ['image'] },
-        },
-        required: ['prompt'],
-      },
-    },
-    writeArtifact: { kind: 'custom', ui: true, schema: { type: 'object' } },
-    validate: { kind: 'custom', ui: true, schema: { type: 'object' } },
-    analyze: { kind: 'custom', ui: true, schema: { type: 'object' } },
-    commit: { kind: 'custom', ui: true, schema: { type: 'object' } },
-    handoff: {
-      kind: 'custom',
-      ui: true,
-      schema: {
-        type: 'object',
-        properties: {
-          to: { type: 'string' },
-          prompt: { type: 'string' },
-        },
-        required: ['to'],
-      },
-    },
   },
 };
 

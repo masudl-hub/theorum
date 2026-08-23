@@ -1,44 +1,60 @@
-/** Gemini thinking_level — not every model accepts every value. */
+/**
+ * Shared type contracts for THEORUM profiles, turns, provider adapters, tools,
+ * guardrails, and stream events.
+ *
+ * Import from `@theorum/core/kernel` when a host app needs types without
+ * importing provider implementations.
+ *
+ * @module
+ */
+
+/** Model reasoning effort level normalized across provider adapters. */
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
+/** Built-in model aliases included in THEORUM's generic model catalog. */
 export type StandardModelId =
   | 'gemini31FlashLite'
   | 'gemini31ProPreview'
   | 'gemini35FlashLite'
-  | 'gemini37Flash'
   | 'gemini31FlashLiteImage'
   | 'gemini31FlashTts'
   | 'sonar';
 
-export type ModelId = StandardModelId | (string & Record<PropertyKey, never>);
+/** Any model id a host profile may allow, including app-provided custom ids. */
+export type ModelId = StandardModelId | (string & {});
 
+/** Provider-native tools THEORUM can project into supported provider payloads. */
 export type BuiltinToolId = 'googleSearch' | 'googleMaps' | 'urlContext';
-export type StandardCustomToolId =
-  | 'askUser'
-  | 'generateMedia'
-  | 'writeArtifact'
-  | 'validate'
-  | 'analyze'
-  | 'commit'
-  | 'handoff';
-export type CustomToolId = StandardCustomToolId | (string & Record<PropertyKey, never>);
+/** Minimal built-in custom tool available to host apps for user interaction pauses. */
+export type StandardCustomToolId = 'askUser';
+/** Host-owned custom tool id. */
+export type CustomToolId = StandardCustomToolId | (string & {});
+/** Any tool id accepted by profile allowlists and per-turn gates. */
 export type ToolId = BuiltinToolId | CustomToolId;
 
+/** Id of a host-registered structured output schema. */
 export type StructuredSchemaId = string;
 
 /** Interactions inline part types Gemini accepts besides text. */
 export type GeminiInputKind = 'image' | 'audio' | 'video' | 'document';
 
+/** Host-owned profile identifier. */
 export type ProfileId = string;
 
-export type GeminiBucket = 'studio' | 'portfolio' | 'planner' | 'paid';
+/** Named Gemini key bucket used by host-provided transports. */
+export type GeminiBucket = 'freeA' | 'freeB' | 'freeC' | 'paid';
+/** Gemini bucket that may overflow to the paid bucket after quota backoff. */
 export type GeminiFreeBucket = Exclude<GeminiBucket, 'paid'>;
 
+/** Message role accepted by provider history mappers. */
 export type ChatRole = 'system' | 'user' | 'assistant';
+/** Profile-level control a caller may toggle at turn time. */
 export type ControlId = 'thinking';
 
+/** Native image size supported by the generic image response spec. */
 export type ImageSize = '1K';
 
+/** Native image aspect ratio accepted by image-capable model specs. */
 export type ImageAspectRatio =
   | '1:1'
   | '3:2'
@@ -51,6 +67,7 @@ export type ImageAspectRatio =
   | '16:9'
   | '21:9';
 
+/** Public event types emitted by `runTurn` and provider adapters. */
 export type TurnEventType =
   | 'thought'
   | 'text'
@@ -59,16 +76,17 @@ export type TurnEventType =
   | 'media'
   | 'grounding'
   | 'evidence'
-  | 'commit'
   | 'tokens'
   | 'done'
   | 'error';
 
+/** Provider thinking levels used when a boolean thinking control is on or off. */
 export interface ThinkingMap {
   on: ThinkingLevel;
   off: ThinkingLevel;
 }
 
+/** Provider summary behavior used when a boolean thinking control is on or off. */
 export interface SummaryMap {
   on: 'auto' | 'none';
   off: 'auto' | 'none';
@@ -84,6 +102,7 @@ export interface ImageModelSpec {
   allowsGrounding: boolean;
 }
 
+/** Static metadata THEORUM needs to safely call a model id. */
 export interface ModelCatalogEntry {
   apiId: string;
   /** Provider-native id for OpenRouter-compatible gateways. Defaults to `google/${apiId}`. */
@@ -99,22 +118,26 @@ export interface ModelCatalogEntry {
   image?: ImageModelSpec;
 }
 
+/** Static metadata for built-in and generic custom tools. */
 export interface ToolCatalogEntry {
   kind: 'builtin' | 'custom';
   ui: boolean;
   schema?: Record<string, unknown>;
 }
 
+/** Host-registered structured output schema and enforcement mode. */
 export interface StructuredSpec {
   enforced: 'responseFormat' | 'prompt';
   jsonSchema?: Record<string, unknown>;
 }
 
+/** In-memory model and tool catalog shape. */
 export interface Catalog {
   models: Record<ModelId, ModelCatalogEntry>;
   tools: Record<ToolId, ToolCatalogEntry>;
 }
 
+/** Per-turn file, byte, and MIME-specific input limits. */
 export interface MediaLimits {
   maxFiles: number;
   maxBytes: number;
@@ -122,18 +145,21 @@ export interface MediaLimits {
   limitsByMime?: Record<string, number>;
 }
 
+/** Input media declaration used by attachment and voice sanitizers. */
 export interface MimeInputs extends Partial<MediaLimits> {
   text?: boolean;
   attachments?: { accept: string[] };
   voice?: { accept: string[] };
 }
 
+/** Structured schema selector driven by an input slot. */
 export interface StructuredBySlot {
   by: string;
   map: Record<string, string>;
   fallback: string;
 }
 
+/** Legacy-compatible model selection block used by profile builders. */
 export interface ProfileModels {
   allow: ModelId[];
   select?: Record<string, ModelId>;
@@ -151,6 +177,7 @@ export interface ProfileModels {
   >;
 }
 
+/** Result returned by a profile output validator. */
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
@@ -158,20 +185,24 @@ export interface ValidationResult {
   data?: Record<string, unknown>;
 }
 
+/** Host-owned validator for structured output candidates. */
 export type ProfileValidator = (
-  artifact: unknown,
+  candidate: unknown,
   slots?: Record<string, string>,
 ) => ValidationResult | Promise<ValidationResult>;
 
+/** Profile output validation and deterministic repair configuration. */
 export interface ProfileValidationSpec {
-  extract: (structured: unknown) => unknown;
+  extract?: (structured: unknown) => unknown;
   validate: ProfileValidator;
   maxRetries?: number;
   repairGuidance?: string;
 }
 
+/** Audio container emitted by the OpenRouter TTS adapter. */
 export type OpenRouterAudioFormat = 'pcm' | 'mp3';
 
+/** Voice name passed through to OpenRouter-compatible TTS models. */
 export type OpenRouterTtsVoice =
   | 'Zephyr'
   | 'Puck'
@@ -203,19 +234,22 @@ export type OpenRouterTtsVoice =
   | 'Sadachbia'
   | 'Sadaltager'
   | 'Sulafat'
-  | (string & Record<PropertyKey, never>);
+  | (string & {});
 
+/** Voice output configuration owned by the host profile. */
 export interface ProfileVoiceSpec {
   voice?: OpenRouterTtsVoice;
   responseFormat?: OpenRouterAudioFormat;
 }
 
+/** Stream delivery controls enforced by the kernel. */
 export interface ProfileStreamingSpec {
-  mode: 'sse' | 'buffered';
+  mode?: 'sse' | 'buffered';
   streamThoughts?: boolean;
-  gateArtifacts?: boolean;
+  gateMedia?: boolean;
 }
 
+/** Context passed to a host-owned outbound disclosure guard. */
 export interface EgressContext {
   text: string;
   canary?: string;
@@ -224,6 +258,7 @@ export interface EgressContext {
   role?: string;
 }
 
+/** Decision returned by an egress guard. */
 export interface EgressEnforcementResult {
   blocked: boolean;
   text: string;
@@ -231,10 +266,12 @@ export interface EgressEnforcementResult {
   rejectionMessage?: string | null;
 }
 
+/** Function that evaluates candidate user-visible output before release. */
 export type EgressEnforcer = (
   context: EgressContext,
 ) => EgressEnforcementResult | Promise<EgressEnforcementResult>;
 
+/** Profile egress policy for rejection, retry, or refusal behavior. */
 export interface ProfileEgressSpec {
   enforce: EgressEnforcer;
   onBlock?: 'reject_to_agent' | 'refuse_to_user';
@@ -242,14 +279,17 @@ export interface ProfileEgressSpec {
   repairGuidance?: string;
 }
 
+/** Profile guardrail switches enforced by the kernel. */
 export interface ProfileGuardrailsSpec {
-  quota: { perDay: number };
+  /** Optional daily turn quota; omitted means quota enforcement is not configured. */
+  quota?: { perDay: number };
   canary?: boolean;
   sanitizeInput?: boolean;
   redactSensitive?: boolean;
   egress?: ProfileEgressSpec;
 }
 
+/** Model, provider, thinking, and step bounds for a profile. */
 export interface ProfileModelSpec {
   protocol: 'geminiInteractions' | 'openAi';
   provider: 'google' | 'openrouter';
@@ -269,6 +309,7 @@ export interface ProfileModelSpec {
   >;
 }
 
+/** Text, attachment, voice, slot, and size rules for a profile. */
 export interface ProfileInputsSpec {
   text?: boolean;
   attachments?: { accept: string[] };
@@ -280,15 +321,16 @@ export interface ProfileInputsSpec {
   slots?: Record<string, string[]>;
 }
 
+/** Output schema, media, voice, validation, and stream rules for a profile. */
 export interface ProfileOutputsSpec {
   structured?: StructuredSchemaId | StructuredBySlot | null;
   media?: boolean;
   voice?: ProfileVoiceSpec;
   validation?: ProfileValidationSpec;
   streaming?: ProfileStreamingSpec;
-  commit?: 'artifact' | 'state' | string;
 }
 
+/** Complete host-owned agent contract consumed by the kernel. */
 export interface Profile {
   id: ProfileId;
   identity: {
@@ -304,19 +346,23 @@ export interface Profile {
   guardrails: ProfileGuardrailsSpec;
 }
 
+/** Text part sent to provider adapters after input normalization. */
 export interface InteractionTextPart {
   type: 'text';
   text: string;
 }
 
+/** Inline media part sent to provider adapters after MIME validation. */
 export interface InteractionMediaPart {
   type: GeminiInputKind;
   mimeType: string;
   data: string;
 }
 
+/** Any provider input part accepted by THEORUM's provider contract. */
 export type InteractionPart = InteractionTextPart | InteractionMediaPart;
 
+/** Native image response request passed to image-capable providers. */
 export interface ImageResponseFormat {
   type: 'image';
   mimeType: string;
@@ -324,11 +370,13 @@ export interface ImageResponseFormat {
   imageSize: ImageSize;
 }
 
+/** Base64-encoded blob supplied by a host turn request. */
 export interface TurnBlob {
   mimeType: string;
   data: string;
 }
 
+/** Provider-neutral history message preserving text, parts, tools, and metadata. */
 export interface TurnHistoryMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content?: string;
@@ -344,15 +392,19 @@ export interface TurnHistoryMessage {
   metadata?: Record<string, unknown>;
 }
 
+/** Tool visibility tier used by host dynamic-loading strategies. */
 export type ToolLoadTier = 'T0' | 'T1' | 'T2';
+/** Execution authorization tier for dynamic tools. */
 export type ToolPermissionTier = 'auto' | 'session_consent' | 'always_confirm';
 
+/** Context supplied to a dynamic tool authorization hook. */
 export interface DynamicToolExecutionContext {
   args: Record<string, unknown>;
   profile: Profile;
   sessionPermissions?: string[];
 }
 
+/** Context supplied to a host dynamic tool schema loader. */
 export interface DynamicToolLoadContext {
   name: string;
   args: Record<string, unknown>;
@@ -361,10 +413,12 @@ export interface DynamicToolLoadContext {
   sessionPermissions?: string[];
 }
 
+/** Host function that loads more tool declarations during a turn. */
 export type DynamicToolLoader = (
   context: DynamicToolLoadContext,
 ) => DynamicToolDeclaration[] | Promise<DynamicToolDeclaration[]>;
 
+/** Runtime tool schema and execution policy supplied by the host app. */
 export interface DynamicToolDeclaration {
   name: string;
   description?: string;
@@ -380,12 +434,28 @@ export interface DynamicToolDeclaration {
   ) => boolean | Promise<boolean> | ToolEnvelope | Promise<ToolEnvelope>;
 }
 
-export interface TurnFixRequest {
-  artifact: string;
-  error: string;
+/** Generic repair request used for validation and egress retry turns. */
+export interface TurnRepairRequest {
+  previousOutput: string;
+  rejection: string;
   guidance?: string;
 }
 
+/** User, media, history, and repair payload for a turn. */
+export interface TurnInput {
+  text?: string;
+  role?: string;
+  slots?: Record<string, string>;
+  attachments?: TurnBlob[];
+  voice?: TurnBlob[];
+  history?: TurnHistoryMessage[];
+  repair?: TurnRepairRequest;
+}
+
+/** Host request after kernel ingress normalization. */
+export type NormalizedTurnRequest = TurnRequest & { input: TurnInput };
+
+/** Host request for a single deterministic agent turn. */
 export interface TurnRequest {
   profile: ProfileId;
   /** Caller project id when one exists. Omitted on some HTTP hosts. */
@@ -408,18 +478,11 @@ export interface TurnRequest {
   dynamicToolLoader?: DynamicToolLoader;
   /** Host-owned metadata preserved for traces; the kernel does not interpret it. */
   metadata?: Record<string, unknown>;
-  input: {
-    text?: string;
-    role?: string;
-    slots?: Record<string, string>;
-    attachments?: TurnBlob[];
-    voice?: TurnBlob[];
-    history?: TurnHistoryMessage[];
-    fix?: TurnFixRequest;
-  };
+  input?: TurnInput;
   toolInvoke?: { name: CustomToolId; arguments: Record<string, unknown> };
 }
 
+/** Safe profile projection suitable for UI or host inspection. */
 export interface ProjectedProfile {
   id: string;
   handle: string;
@@ -435,6 +498,7 @@ export interface ProjectedProfile {
   image?: ImageModelSpec | null;
 }
 
+/** Fully-resolved provider request state created from a `TurnRequest`. */
 export interface ResolvedGeneration {
   model: ModelId;
   previousInteractionId?: string;
@@ -458,14 +522,17 @@ export interface ResolvedGeneration {
   canary: string;
 }
 
+/** Tool execution status returned to the model and stream. */
 export type ToolStatus = 'ok' | 'error' | 'pause';
 
+/** Structured result envelope returned by deterministic tool handlers. */
 export interface ToolEnvelope {
   status: ToolStatus;
-  finding: string;
+  finding?: string;
   data?: Record<string, unknown>;
 }
 
+/** Token accounting emitted by providers or fallback estimation. */
 export interface TurnTokens {
   input: number;
   output: number;
@@ -474,12 +541,14 @@ export interface TurnTokens {
   total: number;
 }
 
+/** Normalized citation or place source surfaced from a provider. */
 export interface GroundingSource {
   title: string;
   uri: string;
   type: 'maps' | 'web';
 }
 
+/** Google grounding metadata normalized into a stream event. */
 export interface GroundingEvent {
   metadata?: Record<string, unknown>;
   chunks?: unknown[];
@@ -487,6 +556,7 @@ export interface GroundingEvent {
   sources: GroundingSource[];
 }
 
+/** Provider evidence such as OpenRouter citations or annotations. */
 export interface ProviderEvidenceEvent {
   provider: 'openrouter' | 'google' | string;
   raw?: Record<string, unknown>;
@@ -495,6 +565,7 @@ export interface ProviderEvidenceEvent {
   sources?: GroundingSource[];
 }
 
+/** Public event yielded by providers and by `runTurn`. */
 export interface TurnEvent {
   type: TurnEventType;
   text?: string;
@@ -513,6 +584,7 @@ export interface TurnEvent {
   error?: string;
 }
 
+/** Provider-neutral request object sent from the kernel to a model adapter. */
 export interface ProviderCompleteRequest {
   model: ModelId;
   previousInteractionId?: string;
@@ -535,6 +607,7 @@ export interface ProviderCompleteRequest {
   tapGemini?: (row: Record<string, unknown>) => void;
 }
 
+/** Minimal adapter contract every model provider must implement. */
 export interface ModelProvider {
   complete: (req: ProviderCompleteRequest) => AsyncIterable<TurnEvent>;
 }

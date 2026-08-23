@@ -46,7 +46,7 @@ function createMockTurnRequest(profile: string, text: string): ProviderCompleteR
     maxOutputTokens: generation.maxOutputTokens,
     temperature: generation.temperature,
     builtins: generation.builtins,
-    system: 'Orchid system prompt',
+    system: 'Host system prompt',
     input: generation.input,
     structured: generation.structured,
     image: generation.image,
@@ -58,12 +58,11 @@ Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () 
   assertEquals(resolveOpenRouterModel('gemini35FlashLite'), 'google/gemini-3.5-flash-lite');
   assertEquals(resolveOpenRouterModel('gemini31ProPreview'), 'google/gemini-3.1-pro-preview');
   assertEquals(resolveOpenRouterModel('sonar'), 'perplexity/sonar');
-  assertEquals(resolveOpenRouterModel('gemini37Flash'), 'google/gemini-3.7-flash');
   assertEquals(
     resolveOpenRouterModel('gemini35FlashLite', {
-      gemini35FlashLite: 'anthropic/claude-3.7-sonnet',
+      gemini35FlashLite: 'anthropic/claude-sonnet',
     }),
-    'anthropic/claude-3.7-sonnet',
+    'anthropic/claude-sonnet',
   );
   assertEquals(resolveOpenRouterModel('perplexity/sonar'), 'perplexity/sonar');
 });
@@ -92,13 +91,13 @@ Deno.test('toOpenRouterPayload formats system, history, text, and thinking effor
   const req = createMockTurnRequest('pinned', 'Watering schedule?');
   req.history = [
     { role: 'system', content: '[meta] ago=5m speaker=masud' },
-    { role: 'user', content: 'What plants do I have?' },
+    { role: 'user', content: 'What records do I have?' },
     { role: 'assistant', content: 'You have a Monstera deliciosa.' },
   ];
   req.dynamicTools = [
     {
-      name: 'ground_plant_knowledge',
-      description: 'Fetch botanical guidance',
+      name: 'lookup_record',
+      description: 'Fetch record guidance',
       parameters: {
         type: 'object',
         properties: { topic: { type: 'string' } },
@@ -113,21 +112,21 @@ Deno.test('toOpenRouterPayload formats system, history, text, and thinking effor
   assertEquals((payload.reasoning as Record<string, unknown>).effort, 'low');
 
   const messages = payload.messages as Record<string, unknown>[];
-  assertMessage(messages[0], 'system', 'Orchid system prompt');
+  assertMessage(messages[0], 'system', 'Host system prompt');
   assertMessage(messages[1], 'system', '[meta] ago=5m speaker=masud');
-  assertMessage(messages[2], 'user', 'What plants do I have?');
+  assertMessage(messages[2], 'user', 'What records do I have?');
   assertMessage(messages[3], 'assistant', 'You have a Monstera deliciosa.');
   assertMessage(messages[4], 'user');
 
   const tools = payload.tools as Record<string, unknown>[];
   assertEquals(tools.length, 1);
   const fn = tools[0]?.function as Record<string, unknown>;
-  assertEquals(fn?.name, 'ground_plant_knowledge');
+  assertEquals(fn?.name, 'lookup_record');
 });
 
 Deno.test('toOpenRouterPayload formats structured json_schema response_format', () => {
   const { generation } = resolveTurn({
-    profile: 'designer',
+    profile: 'formatter',
     input: { text: 'Design hero card', slots: { language: 'html' } },
   });
 
@@ -170,7 +169,7 @@ function mockStreamChunks(): string[] {
     ],
   });
   const tc2 = JSON.stringify({
-    choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"monstera"}' } }] } }],
+    choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"record"}' } }] } }],
   });
   const u = JSON.stringify({
     usage: {
@@ -226,7 +225,7 @@ Deno.test('createOpenRouterProvider streams reasoning, text, tools, tokens, and 
   const toolEvents = events.filter((e) => e.type === 'tool');
   assertEquals(toolEvents.length, 1);
   assertEquals(toolEvents[0]?.tool?.name, 'lookup');
-  assertEquals(toolEvents[0]?.tool?.arguments, { q: 'monstera' });
+  assertEquals(toolEvents[0]?.tool?.arguments, { q: 'record' });
 
   const tokenEvents = events.filter((e) => e.type === 'tokens');
   assertEquals(tokenEvents.length, 1);
@@ -255,6 +254,102 @@ Deno.test('createOpenRouterProvider preserves citation evidence from provider pa
     events.some((event) => event.type === 'text' && event.text === 'cited answer'),
     true,
   );
+});
+
+Deno.test('createOpenRouterProvider preserves evidence from final choice messages', async () => {
+  const finalMessagePayload = JSON.stringify({
+    choices: [
+      {
+        message: {
+          content: 'final cited answer',
+          providerMetadata: { citations: ['https://example.com/final'] },
+        },
+      },
+    ],
+  });
+  const provider = createOpenRouterProvider({
+    apiKey: 'mock-auth-token',
+    fetch: () =>
+      Promise.resolve(sseResponse([`data: ${finalMessagePayload}\n\n`, 'data: [DONE]\n\n'])),
+  });
+
+  const events = await collect(provider.complete(createMockTurnRequest('pinned', 'cite final')));
+  const evidence = events.find((event) => event.type === 'evidence')?.evidence;
+  assertEquals(evidence?.provider, 'openrouter');
+  assertEquals(evidence?.citations, ['https://example.com/final']);
+  assertEquals(events.filter((event) => event.type === 'evidence').length, 1);
+});
+
+Deno.test('createOpenRouterProvider handles missing API key, empty stream, thinking delta, site headers, and invalid tool args', async () => {
+  // 1. Missing API key
+  const noKeyProvider = createOpenRouterProvider({ apiKey: '' });
+  const noKeyEvents = await collect(noKeyProvider.complete(createMockTurnRequest('pinned', 'x')));
+  assertEquals(noKeyEvents.length, 1);
+  assertEquals(noKeyEvents[0]?.type, 'error');
+
+  // 2. Empty stream
+  const emptyStreamProvider = createOpenRouterProvider({
+    apiKey: 'mock-key',
+    fetch: () => Promise.resolve(new Response(null, { status: 200 })),
+  });
+  const emptyStreamEvents = await collect(
+    emptyStreamProvider.complete(createMockTurnRequest('pinned', 'x')),
+  );
+  assertEquals(emptyStreamEvents.length, 1);
+  assertEquals(emptyStreamEvents[0]?.type, 'error');
+
+  // 3. Thinking delta, site headers, structured parsing, unparseable tool args
+  let capturedHeaders: Headers | undefined;
+  const chunkWithThinking = JSON.stringify({
+    choices: [{ delta: { thinking: 'deep thought' } }],
+  });
+  const chunkWithBadTool = JSON.stringify({
+    choices: [
+      {
+        delta: {
+          tool_calls: [
+            { index: 0, id: 'bad_call', function: { name: 'rawFn', arguments: '{invalid_json' } },
+          ],
+        },
+      },
+    ],
+  });
+  const chunkWithStructured = JSON.stringify({
+    choices: [
+      {
+        delta: { content: '{"answer": "structured output"}' },
+      },
+    ],
+  });
+
+  const fullStreamProvider = createOpenRouterProvider({
+    apiKey: 'mock-key',
+    siteUrl: 'https://theorum.dev',
+    siteName: 'Theorum',
+    fetch: (_url, init) => {
+      capturedHeaders = new Headers(init?.headers as Record<string, string>);
+      return Promise.resolve(
+        sseResponse([
+          `data: ${chunkWithThinking}\n\n`,
+          `data: ${chunkWithBadTool}\n\n`,
+          `data: ${chunkWithStructured}\n\n`,
+          'data: [DONE]\n\n',
+        ]),
+      );
+    },
+  });
+
+  const structuredReq = createMockTurnRequest('formatter', 'x');
+  const fullEvents = await collect(fullStreamProvider.complete(structuredReq));
+  assertEquals(capturedHeaders?.get('HTTP-Referer'), 'https://theorum.dev');
+  assertEquals(capturedHeaders?.get('X-Title'), 'Theorum');
+
+  const thoughtEv = fullEvents.find((e) => e.type === 'thought');
+  assertEquals(thoughtEv?.text, 'deep thought');
+
+  const toolEv = fullEvents.find((e) => e.type === 'tool');
+  assertEquals(toolEv?.tool?.name, 'rawFn');
+  assertEquals(toolEv?.tool?.arguments, { _raw: '{invalid_json' });
 });
 
 Deno.test('createOpenRouterProvider yields error on HTTP non-200', async () => {

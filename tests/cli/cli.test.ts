@@ -1,8 +1,8 @@
+import '../fixtures/test-host.ts';
 import { assertEquals, assertExists } from '@std/assert';
 import { listProfilesCommand, showProfileCommand } from '../../src/cli/commands/profile.ts';
 import { runCommand } from '../../src/cli/commands/run.ts';
 import { executeSingleTest, testProfileCommand } from '../../src/cli/commands/test.ts';
-import { vaultPingCommand, vaultStatusCommand } from '../../src/cli/commands/vault.ts';
 import { main } from '../../src/cli/index.ts';
 import {
   FIXTURE_CSV_BASE64,
@@ -17,13 +17,6 @@ import {
   synthesizeMatrixCombos,
   synthesizeStressCombo,
 } from '../../src/cli/matrix/synthesizer.ts';
-import {
-  dailyProfile,
-  mermaidProfile,
-  plannerProfile,
-  registerBuiltinProfiles,
-  studioProfile,
-} from '../../src/kernel/registry/builtin-profiles.ts';
 import { getProfile } from '../../src/kernel/registry/profiles.ts';
 import type { ModelProvider, Profile, TurnEvent } from '../../src/kernel/types.ts';
 
@@ -33,9 +26,9 @@ const testProfile: Profile = {
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini35FlashLite', 'gemini37Flash'],
-    select: { fast: 'gemini35FlashLite', smart: 'gemini37Flash' },
-    key: 'portfolio',
+    allow: ['gemini35FlashLite', 'gemini31ProPreview'],
+    select: { fast: 'gemini35FlashLite', smart: 'gemini31ProPreview' },
+    key: 'freeA',
   },
   tools: { allow: ['googleSearch', 'googleMaps', 'urlContext'] },
   inputs: {
@@ -80,16 +73,16 @@ Deno.test('synthesizeLiteCombo constructs minimal fast request', () => {
   const req = synthesizeLiteCombo(testProfile);
   assertEquals(req.profile, 'test-agent');
   assertEquals(req.select, 'fast');
-  assertEquals(req.input.attachments, undefined);
-  assertEquals(req.input.voice, undefined);
+  assertEquals(req.input?.attachments, undefined);
+  assertEquals(req.input?.voice, undefined);
 });
 
 Deno.test('synthesizeStressCombo constructs smart mode with multimodal attachments and enforces search XOR maps', () => {
   const req = synthesizeStressCombo(testProfile);
   assertEquals(req.profile, 'test-agent');
   assertEquals(req.select, 'smart');
-  assertEquals(req.input.attachments?.length, 1);
-  assertEquals(req.input.voice?.length, 1);
+  assertEquals(req.input?.attachments?.length, 1);
+  assertEquals(req.input?.voice?.length, 1);
 
   // By default, search is enabled and maps is disabled
   assertEquals(req.tools?.googleSearch, true);
@@ -121,64 +114,73 @@ Deno.test('buildCustomTurnRequest respects explicit CLI flag overrides', () => {
   assertEquals(req.tools?.googleSearch, false);
 });
 
-Deno.test('builtin profiles register and commands render cards', () => {
-  registerBuiltinProfiles();
-  assertEquals(getProfile('mermaid').id, mermaidProfile.id);
-  assertEquals(getProfile('studio').id, studioProfile.id);
-  assertEquals(getProfile('planner').id, plannerProfile.id);
-  assertEquals(getProfile('daily').id, dailyProfile.id);
+Deno.test('synthesizer handles all tool combinations, fallbacks, and reasoning configurations', () => {
+  // 1. Profile with select but without 'smart' key
+  const customSelectProfile: Profile = {
+    ...testProfile,
+    model: {
+      ...testProfile.model,
+      select: { quick: 'gemini35FlashLite', deep: 'gemini31ProPreview' },
+    },
+    tools: { allow: ['googleMaps'] },
+    inputs: {
+      text: true,
+      attachments: { accept: ['unknown/custom-mime'] },
+      voice: { accept: [] },
+    },
+  };
+  const req1 = synthesizeStressCombo(customSelectProfile);
+  assertEquals(req1.select, 'deep');
+  assertEquals(req1.tools?.googleMaps, true);
+  assertEquals(req1.input?.attachments?.length, 1);
+  assertEquals(req1.input?.voice, undefined);
 
-  listProfilesCommand();
-  showProfileCommand('mermaid');
-  showProfileCommand('non_existent');
-  vaultStatusCommand();
+  // 2. Profile without select and only custom tools
+  const noSelectProfile: Profile = {
+    ...testProfile,
+    model: {
+      ...testProfile.model,
+      select: undefined,
+    },
+    tools: { allow: ['askUser'] },
+    inputs: {
+      text: true,
+      attachments: { accept: [] },
+    },
+  };
+  const req2 = synthesizeStressCombo(noSelectProfile);
+  assertEquals(req2.select, undefined);
+  assertEquals(req2.tools?.askUser, true);
+  assertEquals(req2.input?.attachments, undefined);
+
+  // 3. buildCustomTurnRequest with options.lite
+  const liteReq = buildCustomTurnRequest(testProfile, { lite: true });
+  assertEquals(liteReq.select, 'fast');
+
+  // 4. buildCustomTurnRequest with search over map conflict
+  const searchOverrideReq = buildCustomTurnRequest(testProfile, {
+    search: true,
+    map: true,
+  });
+  assertEquals(searchOverrideReq.tools?.googleMaps, true);
+  assertEquals(searchOverrideReq.tools?.googleSearch, false);
+
+  const searchPriorityReq = buildCustomTurnRequest(testProfile, {
+    search: true,
+  });
+  assertEquals(searchPriorityReq.tools?.googleSearch, true);
+  assertEquals(searchPriorityReq.tools?.googleMaps, false);
 });
 
-Deno.test('vaultPingCommand exercises active, failed, error, and skipped paths', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalEnvStudio = Deno.env.get('GEMINI_API_KEY_STUDIO');
-  const originalEnvPlanner = Deno.env.get('GEMINI_API_KEY_PLANNER');
-  const originalEnvPortfolio = Deno.env.get('GEMINI_API_KEY_PORTFOLIO');
-  const originalEnvPaid = Deno.env.get('GEMINI_API_KEY');
-  const originalEnvOpenRouter = Deno.env.get('OPENROUTER_API_KEY');
+Deno.test('registered host profiles render cards', () => {
+  assertEquals(getProfile('chat').id, 'chat');
+  assertEquals(getProfile('formatter').id, 'formatter');
+  assertEquals(getProfile('selector').id, 'selector');
+  assertEquals(getProfile('pinned').id, 'pinned');
 
-  try {
-    Deno.env.set('GEMINI_API_KEY_STUDIO', 'AIzaSyTestStudioKey123456789');
-    Deno.env.set('GEMINI_API_KEY_PLANNER', 'AIzaSyTestPlannerKey123456789');
-    Deno.env.set('GEMINI_API_KEY_PORTFOLIO', 'short');
-    Deno.env.delete('GEMINI_API_KEY');
-    Deno.env.set('OPENROUTER_API_KEY', 'sk-or-test123456789');
-
-    // Mock fetch for Google & OpenRouter endpoints
-    globalThis.fetch = (input: RequestInfo | URL) => {
-      const urlStr = String(input);
-      if (urlStr.includes('StudioKey')) {
-        return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
-      }
-      if (urlStr.includes('PlannerKey')) {
-        return Promise.resolve(new Response(JSON.stringify({}), { status: 403 }));
-      }
-      if (urlStr.includes('openrouter.ai')) {
-        return Promise.reject(new Error('Network offline'));
-      }
-      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
-    };
-
-    vaultStatusCommand();
-    await vaultPingCommand();
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalEnvStudio) Deno.env.set('GEMINI_API_KEY_STUDIO', originalEnvStudio);
-    else Deno.env.delete('GEMINI_API_KEY_STUDIO');
-    if (originalEnvPlanner) Deno.env.set('GEMINI_API_KEY_PLANNER', originalEnvPlanner);
-    else Deno.env.delete('GEMINI_API_KEY_PLANNER');
-    if (originalEnvPortfolio) Deno.env.set('GEMINI_API_KEY_PORTFOLIO', originalEnvPortfolio);
-    else Deno.env.delete('GEMINI_API_KEY_PORTFOLIO');
-    if (originalEnvPaid) Deno.env.set('GEMINI_API_KEY', originalEnvPaid);
-    else Deno.env.delete('GEMINI_API_KEY');
-    if (originalEnvOpenRouter) Deno.env.set('OPENROUTER_API_KEY', originalEnvOpenRouter);
-    else Deno.env.delete('OPENROUTER_API_KEY');
-  }
+  listProfilesCommand();
+  showProfileCommand('chat');
+  showProfileCommand('non_existent');
 });
 
 Deno.test('runCommand exercises all stream event types and failure handling', async () => {
@@ -202,34 +204,59 @@ Deno.test('runCommand exercises all stream event types and failure handling', as
 
   // Run with mock provider via executeSingleTest
   const res = await executeSingleTest(
-    { profile: 'mermaid', input: { text: 'test' } },
-    'Mermaid Event Stream Test',
+    { profile: 'chat', input: { text: 'test' } },
+    'Host Profile Event Stream Test',
     mockProvider,
   );
   assertEquals(res.passed, false); // because error event was yielded
 
-  // Run runCommand directly
+  // Test runCommand on OpenAI/OpenRouter profile
+  const { registerProfile, defineProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'openrouter_run_bot',
+      model: { protocol: 'openAi', provider: 'openrouter', allow: ['sonar'] },
+      inputs: { text: true },
+      outputs: { structured: null, media: false },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+
   await runCommand({
-    profile: 'mermaid',
-    prompt: 'Create diagram',
-    search: true,
-    map: true,
+    profile: 'openrouter_run_bot',
+    prompt: 'test openrouter',
+    provider: {
+      async *complete() {
+        yield { type: 'text', text: 'openrouter response' };
+      },
+    },
+  });
+
+  // Test runCommand when runTurn throws exception (e.g. text input disabled)
+  registerProfile(
+    defineProfile({
+      id: 'no_text_bot',
+      model: { allow: ['gemini35FlashLite'] },
+      inputs: { text: false },
+      outputs: { structured: null, media: false },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  await runCommand({
+    profile: 'no_text_bot',
+    prompt: 'should throw',
+    provider: mockProvider,
   });
 });
 
 Deno.test('testProfileCommand and CLI main router test flag parsing and commands', async () => {
-  registerBuiltinProfiles();
-
   // Test profile commands via main()
   await main(['profile', 'list']);
-  await main(['profile', 'show', 'mermaid']);
-  await main(['profile', 'show', '--profile', 'planner']);
-  await main(['vault', 'status']);
-  await main(['vault', 'unknown']);
+  await main(['profile', 'show', 'chat']);
+  await main(['profile', 'show', '--profile', 'selector']);
   await main(['help']);
   await main(['--help']);
   await main(['-h']);
-  await main(['run', '-p', 'mermaid', 'generate', 'a', 'chart']);
 
   // Invalid profile
   const failedRes = await testProfileCommand('non_existent');

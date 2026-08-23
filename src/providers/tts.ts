@@ -1,3 +1,12 @@
+/**
+ * OpenRouter TTS provider utilities.
+ *
+ * Provides direct text-to-speech streaming and a `ModelProvider` wrapper for
+ * voice output profiles.
+ *
+ * @module
+ */
+
 import { publicError } from '../guardrails/error.ts';
 import type {
   InteractionPart,
@@ -23,6 +32,7 @@ function writeAscii(view: DataView, offset: number, str: string): void {
   for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
 }
 
+/** Wrap raw PCM bytes in a RIFF/WAVE container. */
 export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Array {
   const numChannels = 1;
   const bitsPerSample = 16;
@@ -48,6 +58,7 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Ar
   return new Uint8Array(buf);
 }
 
+/** Host-supplied OpenRouter TTS configuration. */
 export interface OpenRouterTtsConfig {
   apiKey?: string;
   voiceName?: string;
@@ -141,6 +152,7 @@ function* yieldTtsSuccess(
   yield { type: 'done' };
 }
 
+/** Stream one OpenRouter TTS synthesis request as THEORUM events. */
 export async function* streamOpenRouterTts(
   req: ProviderCompleteRequest,
   config: OpenRouterTtsConfig = {},
@@ -176,6 +188,7 @@ export async function* streamOpenRouterTts(
   }
 }
 
+/** Create a `ModelProvider` that emits TTS media events. */
 export function createOpenRouterTtsProvider(config: OpenRouterTtsConfig = {}): ModelProvider {
   return {
     complete: (req: ProviderCompleteRequest) => streamOpenRouterTts(req, config),

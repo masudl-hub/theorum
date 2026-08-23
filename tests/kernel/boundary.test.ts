@@ -44,7 +44,7 @@ Deno.test('mintCanary is a unique theo token', () => {
   assertEquals(a === b, false);
 });
 
-function mermaidCanaryWire() {
+function chatCanaryWire() {
   const { generation } = resolveTurn({ profile: 'chat', input: { text: 'hi' } });
   const body = toInteractionsBody({
     model: generation.model,
@@ -62,8 +62,8 @@ function mermaidCanaryWire() {
   return { generation, body };
 }
 
-function assertMermaidCanaryOffWire(): void {
-  const { generation, body } = mermaidCanaryWire();
+function assertChatCanaryOffWire(): void {
+  const { generation, body } = chatCanaryWire();
   const turns = body.input as { type: string; content: Record<string, string>[] }[];
   const [turn] = turns;
   const [textPart] = turn.content;
@@ -79,7 +79,7 @@ function assertMermaidCanaryOffWire(): void {
 }
 
 Deno.test('resolveTurn wraps user text and binds a canary off the Google body', () => {
-  assertMermaidCanaryOffWire();
+  assertChatCanaryOffWire();
 });
 
 Deno.test('runTurn errors when the model echoes the canary', async () => {

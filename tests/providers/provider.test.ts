@@ -9,9 +9,9 @@ import { createInteractionsProvider } from '../../src/providers/provider.ts';
 import { INTERACTIONS_URL } from '../../src/providers/sse.ts';
 
 const vault: GeminiVault = {
-  studio: 'studio-key',
-  portfolio: 'portfolio-key',
-  planner: 'planner-key',
+  freeA: 'free-a-key',
+  freeB: 'free-b-key',
+  freeC: 'free-c-key',
   paid: 'paid-key',
 };
 
@@ -44,7 +44,7 @@ function headerApiKey(init?: RequestInit): string {
   return new Headers(init?.headers).get('x-goog-api-key') ?? '';
 }
 
-function fromMermaid(): ProviderCompleteRequest {
+function fromChatProfile(): ProviderCompleteRequest {
   const { generation } = resolveTurn({
     profile: 'chat',
     input: { text: 'hi' },
@@ -64,8 +64,8 @@ function fromMermaid(): ProviderCompleteRequest {
   };
 }
 
-Deno.test('mermaid Interactions body streams JSON schema and never ships geminiBucket', () => {
-  const req = fromMermaid();
+Deno.test('host profile Interactions body streams JSON schema and never ships geminiBucket', () => {
+  const req = fromChatProfile();
   const body = toInteractionsBody(req);
   const format = body[camelToSnake('responseFormat')] as unknown[];
   const config = body[camelToSnake('generationConfig')] as Record<string, unknown>;
@@ -80,7 +80,7 @@ Deno.test('mermaid Interactions body streams JSON schema and never ships geminiB
 });
 
 Deno.test('Interactions body passes explicit store and previous interaction id', () => {
-  const req = fromMermaid();
+  const req = fromChatProfile();
   req.store = false;
   req.previousInteractionId = 'v1_prev';
   const body = toInteractionsBody(req);
@@ -118,10 +118,10 @@ Deno.test('chat voice audio wires as Interactions type audio', () => {
 });
 
 Deno.test('Interactions body formats multi-turn history with text and parts', () => {
-  const req = fromMermaid();
+  const req = fromChatProfile();
   req.history = [
-    { role: 'user', content: 'What is plant care?' },
-    { role: 'assistant', content: 'It is nurturing plants.' },
+    { role: 'user', content: 'What is record care?' },
+    { role: 'assistant', content: 'It is maintaining records.' },
     {
       role: 'user',
       parts: [
@@ -134,9 +134,9 @@ Deno.test('Interactions body formats multi-turn history with text and parts', ()
   const input = body.input as Array<{ type: string; content: Array<Record<string, string>> }>;
   assertEquals(input.length, 4);
   assertEquals(input[0]?.type, 'user_input');
-  assertEquals(input[0]?.content[0]?.text, 'What is plant care?');
+  assertEquals(input[0]?.content[0]?.text, 'What is record care?');
   assertEquals(input[1]?.type, 'model_turn');
-  assertEquals(input[1]?.content[0]?.text, 'It is nurturing plants.');
+  assertEquals(input[1]?.content[0]?.text, 'It is maintaining records.');
   assertEquals(input[2]?.type, 'user_input');
   assertEquals(input[2]?.content[0]?.text, 'Check this image');
   assertEquals(input[2]?.content[1]?.mime_type, 'image/png');
@@ -146,7 +146,7 @@ Deno.test('Interactions body formats multi-turn history with text and parts', ()
 
 Deno.test('JSON Schema property names stay camelCase inside response_format.schema', () => {
   const { generation } = resolveTurn({
-    profile: 'designer',
+    profile: 'formatter',
     input: { text: 'x', slots: { language: 'html' } },
   });
   const body = toInteractionsBody({
@@ -168,9 +168,9 @@ Deno.test('JSON Schema property names stay camelCase inside response_format.sche
   assertEquals(Object.hasOwn(schema.properties as Record<string, unknown>, 'html'), true);
 });
 
-Deno.test('planner prompt-enforced schema omits JSON response_format', () => {
+Deno.test('prompt-enforced schema omits JSON response_format', () => {
   const { generation } = resolveTurn({
-    profile: 'picker',
+    profile: 'selector',
     select: 'fast',
     input: { text: 'x' },
   });
@@ -235,9 +235,9 @@ Deno.test('provider POSTs Interactions SSE on the resolved free key', async () =
       );
     },
   });
-  const events = await collect(provider.complete(fromMermaid()));
+  const events = await collect(provider.complete(fromChatProfile()));
   assertEquals(href, INTERACTIONS_URL);
-  assertEquals(used, ['portfolio-key']);
+  assertEquals(used, ['free-a-key']);
   assertEquals(events, [
     { type: 'thought', text: 'hmm' },
     { type: 'text', text: '{"message":"ok"}' },
@@ -282,7 +282,7 @@ Deno.test('provider emits Google grounding metadata as a grounding event', async
         ]),
       ),
   });
-  const events = await collect(provider.complete(fromMermaid()));
+  const events = await collect(provider.complete(fromChatProfile()));
   const grounding = events.find((event) => event.type === 'grounding')?.grounding;
   assertEquals(grounding?.metadata, groundingMetadata);
   assertEquals(grounding?.chunks?.length, 2);
@@ -315,8 +315,8 @@ Deno.test('provider overflows to paid only after 429 backoff', async () => {
       );
     },
   });
-  const events = await collect(provider.complete(fromMermaid()));
-  assertEquals(used, ['portfolio-key', 'portfolio-key', 'portfolio-key', 'paid-key']);
+  const events = await collect(provider.complete(fromChatProfile()));
+  assertEquals(used, ['free-a-key', 'free-a-key', 'free-a-key', 'paid-key']);
   assertEquals(events[0], { type: 'text', text: 'hi' });
 });
 
@@ -326,7 +326,7 @@ Deno.test('non-OK Gemini response becomes an error event', async () => {
     wait: noWait,
     fetch: () => Promise.resolve(new Response('nope', { status: HTTP_SERVER })),
   });
-  const events = await collect(provider.complete(fromMermaid()));
+  const events = await collect(provider.complete(fromChatProfile()));
   assertEquals(events, [{ type: 'error', error: PUBLIC_UNAVAILABLE }]);
 });
 
@@ -336,7 +336,7 @@ Deno.test('thrown fetch errors become upstream failed', async () => {
     wait: noWait,
     fetch: () => Promise.reject(new TypeError('fetch failed: dns')),
   });
-  const events = await collect(provider.complete(fromMermaid()));
+  const events = await collect(provider.complete(fromChatProfile()));
   assertEquals(events, [{ type: 'error', error: PUBLIC_UNAVAILABLE }]);
 });
 
@@ -458,4 +458,70 @@ Deno.test('interaction complete yields outputs image media', async () => {
       media: { mimeType: 'image/png', data: 'out' },
     },
   ]);
+});
+
+Deno.test('provider handles null body, direct event usage/grounding, and structured resolution', async () => {
+  // 1. Null response body
+  const nullBodyProvider = createInteractionsProvider({
+    vault,
+    wait: noWait,
+    fetch: () => Promise.resolve(new Response(null, { status: 200 })),
+  });
+  const { generation } = resolveTurn({ profile: 'pinned', input: { text: 'x' } });
+  const nullEvents = await collect(
+    nullBodyProvider.complete({
+      model: generation.model,
+      thinking: generation.thinking,
+      summaries: generation.summaries,
+      maxOutputTokens: generation.maxOutputTokens,
+      temperature: generation.temperature,
+      builtins: generation.builtins,
+      system: '',
+      input: generation.input,
+      structured: generation.structured,
+      image: generation.image,
+      geminiBucket: generation.geminiBucket,
+    }),
+  );
+  assertEquals(nullEvents.length, 1);
+  assertEquals(nullEvents[0]?.type, 'error');
+
+  // 2. Direct event usage & grounding metadata + structured return
+  const rawEvents = [
+    {
+      event_type: 'content.delta',
+      delta: { type: 'text', text: '{"message": "success"}' },
+      usage_metadata: { prompt_token_count: 10, candidates_token_count: 20 },
+      grounding_metadata: { grounding_chunks: [{ web: { uri: 'https://example.com' } }] },
+    },
+  ];
+  const structProvider = createInteractionsProvider({
+    vault,
+    wait: noWait,
+    fetch: () => Promise.resolve(sseResponse(rawEvents)),
+  });
+  const { generation: chatGen } = resolveTurn({ profile: 'chat', input: { text: 'x' } });
+  const resultEvents = await collect(
+    structProvider.complete({
+      model: chatGen.model,
+      thinking: chatGen.thinking,
+      summaries: chatGen.summaries,
+      maxOutputTokens: chatGen.maxOutputTokens,
+      temperature: chatGen.temperature,
+      builtins: chatGen.builtins,
+      system: '',
+      input: chatGen.input,
+      structured: chatGen.structured,
+      image: chatGen.image,
+      geminiBucket: chatGen.geminiBucket,
+    }),
+  );
+
+  const textEv = resultEvents.find((e) => e.type === 'text');
+  const tokensEv = resultEvents.find((e) => e.type === 'tokens');
+  const structEv = resultEvents.find((e) => e.type === 'structured');
+
+  assertEquals(textEv !== undefined, true);
+  assertEquals(tokensEv !== undefined, true);
+  assertEquals(structEv !== undefined, true);
 });

@@ -1,10 +1,23 @@
+/**
+ * Tool catalog and MIME helpers.
+ *
+ * Model wire metadata is host-owned on `profile.model.config`. This module only
+ * keeps builtin/custom tool descriptors and shared MIME utilities.
+ *
+ * @module
+ */
+
+import { TheorumError } from '../../guardrails/error.ts';
 import type {
+  BuiltinToolId,
   Catalog,
   GeminiInputKind,
-  ImageAspectRatio,
-  ImageSize,
-  ModelCatalogEntry,
+  ModelId,
+  ModelSpec,
+  Profile,
   ThinkingLevel,
+  ToolCatalogEntry,
+  ToolId,
 } from '../types.ts';
 
 const ASK_USER_SCHEMA = {
@@ -17,26 +30,42 @@ const ASK_USER_SCHEMA = {
   required: ['kind', 'prompt'],
 };
 
-const DEFAULT_TEMPERATURE = 1;
-const FLASH_LITE_MAX_OUTPUT_TOKENS = 8192;
-const PRO_PREVIEW_MAX_OUTPUT_TOKENS = 64_000;
-const IMAGE_FLASH_LITE_MAX_OUTPUT_TOKENS = 4096;
-const TTS_FLASH_MAX_OUTPUT_TOKENS = 2048;
-const SONAR_MAX_OUTPUT_TOKENS = 8192;
+/** Harness tools that always ship with THEORUM. */
+const HARNESS_TOOLS: Record<ToolId, ToolCatalogEntry> = {
+  askUser: { kind: 'custom', ui: true, schema: ASK_USER_SCHEMA },
+};
 
-const IMAGE_INPUT_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
-const VOICE_INPUT_MIMES = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4'];
+/** Live tool catalog. Starts with harness tools; presets/hosts register more. */
+const CATALOG: Catalog = {
+  tools: { ...HARNESS_TOOLS },
+};
 
-const KIB = 1024;
-const MIB = KIB * KIB;
-/** Default chat media caps. Host profiles may copy or override these limits. */
-const CHAT_MEDIA_LIMITS = {
-  maxFiles: 10,
-  maxBytes: 8 * MIB,
-  maxTurnBytes: 32 * MIB,
-} as const;
+/** Register or replace tool descriptors (idempotent per id). */
+function registerTools(entries: Record<string, ToolCatalogEntry>): void {
+  Object.assign(CATALOG.tools, entries);
+}
 
-/** Gemini Interactions inline MIME → part type. Profiles allowlist from this set. */
+/** Look up one registered tool descriptor. */
+function getTool(id: ToolId): ToolCatalogEntry | undefined {
+  return CATALOG.tools[id];
+}
+
+/** Ids of all registered provider builtins. */
+function listBuiltinIds(): BuiltinToolId[] {
+  return Object.entries(CATALOG.tools)
+    .filter(([, entry]) => entry.kind === 'builtin')
+    .map(([id]) => id);
+}
+
+/** Restore harness-only tools (tests / host reloads). */
+function resetTools(): void {
+  for (const id of Object.keys(CATALOG.tools)) {
+    delete CATALOG.tools[id];
+  }
+  Object.assign(CATALOG.tools, HARNESS_TOOLS);
+}
+
+/** Gemini Interactions inline MIME → part type (adapter wire map). */
 const GEMINI_INPUT_KINDS: Record<string, GeminiInputKind> = {
   'image/png': 'image',
   'image/jpeg': 'image',
@@ -93,138 +122,16 @@ function geminiKindForMime(mime: string): GeminiInputKind | undefined {
   return GEMINI_INPUT_KINDS[mimeEssence(mime)];
 }
 
-const IMAGE_FLASH_LITE_ASPECT_RATIOS: ImageAspectRatio[] = [
-  '1:1',
-  '3:2',
-  '2:3',
-  '3:4',
-  '4:3',
-  '4:5',
-  '5:4',
-  '9:16',
-  '16:9',
-  '21:9',
-];
-
-const IMAGE_FLASH_LITE_SIZES: ImageSize[] = ['1K'];
-
-const FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'low', 'medium', 'high'];
-const PRO_PREVIEW_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
-const IMAGE_FLASH_LITE_THINKING_LEVELS: ThinkingLevel[] = ['minimal', 'high'];
-const TTS_THINKING_LEVELS: ThinkingLevel[] = ['minimal'];
-const OPENROUTER_SEARCH_THINKING_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high'];
-
-const GENERIC_MODEL_ENTRY: ModelCatalogEntry = {
-  apiId: '',
-  thinking: { on: 'high', off: 'low' },
-  thinkingLevels: ['low', 'medium', 'high'],
-  summaries: { on: 'auto', off: 'none' },
-  maxOutputTokens: FLASH_LITE_MAX_OUTPUT_TOKENS,
-  temperature: DEFAULT_TEMPERATURE,
-  freeBuiltins: [],
-};
-
-const CATALOG: Catalog = {
-  models: {
-    gemini31FlashLite: {
-      apiId: 'gemini-3.1-flash-lite',
-      thinking: { on: 'high', off: 'minimal' },
-      thinkingLevels: FLASH_LITE_THINKING_LEVELS,
-      summaries: { on: 'auto', off: 'none' },
-      maxOutputTokens: FLASH_LITE_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: ['googleMaps', 'urlContext'],
-    },
-    gemini31ProPreview: {
-      apiId: 'gemini-3.1-pro-preview',
-      thinking: { on: 'high', off: 'low' },
-      thinkingLevels: PRO_PREVIEW_THINKING_LEVELS,
-      summaries: { on: 'auto', off: 'none' },
-      maxOutputTokens: PRO_PREVIEW_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: [],
-    },
-    gemini35FlashLite: {
-      apiId: 'gemini-3.5-flash-lite',
-      thinking: { on: 'high', off: 'minimal' },
-      thinkingLevels: FLASH_LITE_THINKING_LEVELS,
-      summaries: { on: 'auto', off: 'none' },
-      maxOutputTokens: FLASH_LITE_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: ['googleMaps', 'urlContext'],
-    },
-    gemini31FlashLiteImage: {
-      apiId: 'gemini-3.1-flash-lite-image',
-      thinking: { on: 'high', off: 'minimal' },
-      thinkingLevels: IMAGE_FLASH_LITE_THINKING_LEVELS,
-      summaries: { on: 'none', off: 'none' },
-      maxOutputTokens: IMAGE_FLASH_LITE_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: [],
-      image: {
-        maxInputImages: 14,
-        inputMimes: IMAGE_INPUT_MIMES,
-        sizes: IMAGE_FLASH_LITE_SIZES,
-        aspectRatios: IMAGE_FLASH_LITE_ASPECT_RATIOS,
-        outputMime: 'image/jpeg',
-        allowsGrounding: false,
-      },
-    },
-    gemini31FlashTts: {
-      apiId: 'gemini-3.1-flash-tts-preview',
-      thinking: { on: 'minimal', off: 'minimal' },
-      thinkingLevels: TTS_THINKING_LEVELS,
-      summaries: { on: 'none', off: 'none' },
-      maxOutputTokens: TTS_FLASH_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: [],
-    },
-    sonar: {
-      apiId: 'sonar',
-      openRouterId: 'perplexity/sonar',
-      thinking: { on: 'high', off: 'low' },
-      thinkingLevels: OPENROUTER_SEARCH_THINKING_LEVELS,
-      summaries: { on: 'none', off: 'none' },
-      maxOutputTokens: SONAR_MAX_OUTPUT_TOKENS,
-      temperature: DEFAULT_TEMPERATURE,
-      freeBuiltins: [],
-    },
-  },
-  // Off until the turn sets tools[id]. Profile allow is only the ceiling.
-  tools: {
-    googleSearch: { kind: 'builtin', ui: true },
-    googleMaps: { kind: 'builtin', ui: true },
-    urlContext: { kind: 'builtin', ui: true },
-    askUser: { kind: 'custom', ui: true, schema: ASK_USER_SCHEMA },
-  },
-};
-
-export {
-  CATALOG,
-  CHAT_MEDIA_LIMITS,
-  GEMINI_INPUT_KINDS,
-  geminiKindForMime,
-  IMAGE_FLASH_LITE_ASPECT_RATIOS,
-  IMAGE_FLASH_LITE_SIZES,
-  IMAGE_INPUT_MIMES,
-  mimeAllowed,
-  mimeEssence,
-  VOICE_INPUT_MIMES,
-};
-
-export const MODEL_CATALOG = CATALOG.models;
-
-export function modelEntry(modelId: string): ModelCatalogEntry {
-  return (
-    MODEL_CATALOG[modelId as keyof typeof MODEL_CATALOG] ?? {
-      ...GENERIC_MODEL_ENTRY,
-      apiId: modelId,
-      openRouterId: modelId,
-    }
-  );
+/** Require a host-declared model spec for an allowed profile model id. */
+function requireModelSpec(profile: Profile, modelId: ModelId): ModelSpec {
+  const spec = profile.model.config[modelId];
+  if (!spec) {
+    throw new TheorumError(`Profile ${profile.id} has no model spec for '${modelId}'`);
+  }
+  return spec;
 }
 
-function clampLevels(entry: ModelCatalogEntry | undefined, level: ThinkingLevel): ThinkingLevel {
+function clampLevels(entry: ModelSpec | undefined, level: ThinkingLevel): ThinkingLevel {
   if (!entry?.thinkingLevels || entry.thinkingLevels.length === 0) {
     return level;
   }
@@ -239,16 +146,36 @@ function clampLevels(entry: ModelCatalogEntry | undefined, level: ThinkingLevel)
   return first ?? level;
 }
 
-/** Clamp a requested thinking level to what the selected model accepts. */
-export function clampThinkingLevel(modelId: string, level: ThinkingLevel): ThinkingLevel {
-  return clampLevels(modelEntry(modelId), level);
+/** Clamp a requested thinking level to what the model spec accepts. */
+function clampThinkingLevel(spec: ModelSpec, level: ThinkingLevel): ThinkingLevel {
+  return clampLevels(spec, level);
 }
 
-export function modelEntryByApiId(apiId: string): ModelCatalogEntry | undefined {
-  return Object.values(MODEL_CATALOG).find((m) => m.apiId === apiId);
+/** Look up a model spec by provider-native API id within a host specs map. */
+function modelEntryByApiId(specs: Record<string, ModelSpec>, apiId: string): ModelSpec | undefined {
+  return Object.values(specs).find((m) => m.apiId === apiId);
 }
 
-export function clampThinkingLevelForApiId(apiId: string, level: ThinkingLevel): ThinkingLevel {
-  const entry = modelEntryByApiId(apiId);
-  return clampLevels(entry, level);
+/** Clamp thinking level using a provider-native API id within a host specs map. */
+function clampThinkingLevelForApiId(
+  specs: Record<string, ModelSpec>,
+  apiId: string,
+  level: ThinkingLevel,
+): ThinkingLevel {
+  return clampLevels(modelEntryByApiId(specs, apiId), level);
 }
+
+export {
+  CATALOG,
+  clampThinkingLevel,
+  clampThinkingLevelForApiId,
+  geminiKindForMime,
+  getTool,
+  listBuiltinIds,
+  mimeAllowed,
+  mimeEssence,
+  modelEntryByApiId,
+  registerTools,
+  requireModelSpec,
+  resetTools,
+};

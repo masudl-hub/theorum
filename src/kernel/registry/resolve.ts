@@ -8,10 +8,11 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
-import { resolveGeminiBucket } from '../../guardrails/keys.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
+import { resolveGeminiBucket } from '../../providers/keys.ts';
 import {
   assertImageGrounding,
+  assertSpeechRole,
   resolveImageFormat,
   resolveInputParts,
 } from '../../providers/media.ts';
@@ -20,6 +21,7 @@ import type {
   BuiltinToolId,
   CustomToolId,
   ModelId,
+  ModelSpec,
   Profile,
   ProjectedProfile,
   ResolvedGeneration,
@@ -28,20 +30,20 @@ import type {
   ToolId,
   TurnRequest,
 } from '../types.ts';
-import { CATALOG, clampThinkingLevel, modelEntry } from './catalog.ts';
+import {
+  CATALOG,
+  clampThinkingLevel,
+  getTool,
+  listBuiltinIds,
+  requireModelSpec,
+} from './catalog.ts';
 import { getProfile } from './profiles.ts';
 
-const BUILTINS: BuiltinToolId[] = ['googleSearch', 'googleMaps', 'urlContext'];
-
 function applyBuiltinMutualExclusions(requested: BuiltinToolId[]): BuiltinToolId[] {
-  const search = requested.includes('googleSearch');
-  const maps = requested.includes('googleMaps');
-  const urlContext = requested.includes('urlContext');
-  // Google Interactions API: google_maps cannot be combined with google_search or url_context
-  if (maps && (search || urlContext)) {
-    return requested.filter((id) => id !== 'googleMaps');
-  }
-  return requested;
+  return requested.filter((id) => {
+    const conflicts = getTool(id)?.conflictsWith ?? [];
+    return !conflicts.some((other) => requested.includes(other));
+  });
 }
 
 function firstSelectKey(selectMap: Record<string, ModelId>): string | undefined {
@@ -83,12 +85,11 @@ function pickModel(profile: Profile, select?: string): ModelId {
   return only;
 }
 
-function thinkingFromControl(modelId: ModelId, thinkingOn: boolean | undefined): ThinkingLevel {
-  const catalog = modelEntry(modelId);
+function thinkingFromControl(spec: ModelSpec, thinkingOn: boolean | undefined): ThinkingLevel {
   if (thinkingOn) {
-    return catalog.thinking.on;
+    return spec.thinking.on;
   }
-  return catalog.thinking.off;
+  return spec.thinking.off;
 }
 
 function pinnedLevel(
@@ -122,33 +123,28 @@ function thinkingFromPin(profile: Profile, select?: string): ThinkingLevel {
 
 function resolveThinking(
   profile: Profile,
-  modelId: ModelId,
+  spec: ModelSpec,
   thinkingOn: boolean | undefined,
   select?: string,
 ): ThinkingLevel {
   const raw = profile.model.controls?.includes('thinking')
-    ? thinkingFromControl(modelId, thinkingOn)
+    ? thinkingFromControl(spec, thinkingOn)
     : thinkingFromPin(profile, select);
-  return clampThinkingLevel(modelId, raw);
+  return clampThinkingLevel(spec, raw);
 }
 
 function resolveSummaries(
   profile: Profile,
-  modelId: ModelId,
+  spec: ModelSpec,
   thinkingOn: boolean | undefined,
 ): 'auto' | 'none' {
-  const override = profile.model.override?.[modelId]?.summaries;
-  if (override) {
-    return override;
-  }
-  const entry = modelEntry(modelId);
   if (profile.model.controls?.includes('thinking')) {
     if (thinkingOn) {
-      return entry.summaries.on;
+      return spec.summaries.on;
     }
-    return entry.summaries.off;
+    return spec.summaries.off;
   }
-  return entry.summaries.on;
+  return spec.summaries.on;
 }
 
 function isGatedOn(requested: Partial<Record<ToolId, boolean>> | undefined, id: ToolId): boolean {
@@ -165,7 +161,7 @@ function resolveBuiltins(
   const allowed = profile.tools.allow.filter(
     (id): id is BuiltinToolId => CATALOG.tools[id]?.kind === 'builtin',
   );
-  const picked = BUILTINS.filter((id) => allowed.includes(id) && isGatedOn(requested, id));
+  const picked = listBuiltinIds().filter((id) => allowed.includes(id) && isGatedOn(requested, id));
   return applyBuiltinMutualExclusions(picked);
 }
 
@@ -205,21 +201,6 @@ function resolveStructured(
   return structured.fallback;
 }
 
-function generationLimits(
-  profile: Profile,
-  model: ModelId,
-): {
-  maxOutputTokens: number;
-  temperature: number;
-} {
-  const catalog = modelEntry(model);
-  const ov = profile.model.override?.[model];
-  return {
-    maxOutputTokens: ov?.maxOutputTokens ?? catalog.maxOutputTokens,
-    temperature: ov?.temperature ?? catalog.temperature,
-  };
-}
-
 /** Resolve a host `TurnRequest` into provider-ready generation state. */
 function resolveTurn(req: TurnRequest): {
   profile: Profile;
@@ -229,20 +210,23 @@ function resolveTurn(req: TurnRequest): {
   const input = safe.input ?? {};
   const profile = getProfile(safe.profile);
   const model = pickModel(profile, safe.select);
+  const spec = requireModelSpec(profile, model);
   const thinkingOn = safe.thinking === true;
-  const limits = generationLimits(profile, model);
   const builtins = resolveBuiltins(profile, safe.tools);
-  assertImageGrounding(model, builtins);
+  assertImageGrounding(profile, model, builtins);
+  assertSpeechRole(profile);
   return {
     profile,
     generation: {
       model,
+      apiId: spec.apiId,
+      openRouterId: spec.openRouterId,
       previousInteractionId: safe.previousInteractionId,
       store: safe.store,
-      thinking: resolveThinking(profile, model, thinkingOn, safe.select),
-      summaries: resolveSummaries(profile, model, thinkingOn),
-      maxOutputTokens: limits.maxOutputTokens,
-      temperature: limits.temperature,
+      thinking: resolveThinking(profile, spec, thinkingOn, safe.select),
+      summaries: resolveSummaries(profile, spec, thinkingOn),
+      maxOutputTokens: spec.maxOutputTokens,
+      temperature: spec.temperature,
       builtins,
       custom: resolveCustom(profile, safe.tools),
       dynamicTools: safe.dynamicTools,
@@ -252,23 +236,18 @@ function resolveTurn(req: TurnRequest): {
       maxSteps: profile.model.maxSteps ?? 1,
       structured: resolveStructured(profile, input.slots),
       image: resolveImageFormat(profile, model, input.slots),
-      voice: profile.outputs.voice,
+      speech: profile.outputs.speech,
       input: resolveInputParts(profile, model, safe),
-      geminiBucket: resolveGeminiBucket(profile.model.key ?? 'freeA', model, builtins),
+      geminiBucket: resolveGeminiBucket(profile.model.key ?? 'freeA', spec, builtins),
       canary: profile.guardrails.canary !== false ? mintCanary() : '',
     },
   };
 }
 
-function primaryImageSpec(allow: ModelId[]) {
-  const [primary] = allow;
-  if (!primary) {
-    return undefined;
-  }
-  return modelEntry(primary).image;
+function primaryImageSpec(profile: Profile) {
+  return profile.outputs.image;
 }
 
-/** UI projection: catalog ∩ profile. Swatches are not included. */
 /** Project a registered profile into a safe host/UI inspection object. */
 function projectProfile(id: Profile['id']): ProjectedProfile {
   const profile = getProfile(id);
@@ -291,7 +270,7 @@ function projectProfile(id: Profile['id']): ProjectedProfile {
     inputs,
     slots: slots ?? {},
     outputs,
-    image: primaryImageSpec(allow),
+    image: primaryImageSpec(profile),
   };
 }
 

@@ -1,4 +1,12 @@
-import { TheorumError } from '../../guardrails/error.ts';
+/**
+ * Optional Deno HTTP reply helpers for host applications.
+ *
+ * Not part of the turn kernel. Prefer importing from `theorum/host`.
+ *
+ * @module
+ */
+
+import { TheorumError } from '../guardrails/error.ts';
 
 const HTTP_BAD = 400;
 const HTTP_BUSY = 429;

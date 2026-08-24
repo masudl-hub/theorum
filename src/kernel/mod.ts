@@ -10,6 +10,19 @@
 
 export { runTurn } from './engine/runner.ts';
 export {
+  CATALOG,
+  clampThinkingLevel,
+  clampThinkingLevelForApiId,
+  getTool,
+  listBuiltinIds,
+  modelEntryByApiId,
+  registerTools,
+  requireModelSpec,
+  resetTools,
+} from './registry/catalog.ts';
+export type { ProfileDefinition } from './registry/profiles.ts';
+export {
+  clearProfiles,
   defineProfile,
   getProfile,
   hasProfile,

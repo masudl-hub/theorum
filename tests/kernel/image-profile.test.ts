@@ -3,10 +3,10 @@ import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals, assertThrows } from '../../src/kernel/engine/assert.ts';
 import { wrapUserData } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
-import { CATALOG, CHAT_MEDIA_LIMITS } from '../../src/kernel/registry/catalog.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
+import { CHAT_MEDIA_LIMITS, modelAllow } from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -46,7 +46,7 @@ Deno.test('image oneshot uses image model and image response format', () => {
     type: 'image',
     mimeType: 'image/jpeg',
     aspectRatio: '1:1',
-    imageSize: '1K',
+    size: '1K',
   });
   assertEquals(generation.input, [
     { type: 'text', text: wrapUserData('sleepy fox') },
@@ -91,6 +91,8 @@ function googleImageBody() {
   });
   return toInteractionsBody({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -142,25 +144,26 @@ Deno.test('chat profile does not attach image response format', () => {
   assertEquals(generation.input, [{ type: 'text', text: wrapUserData('hi') }]);
 });
 
-Deno.test('image projection exposes image spec not tools', () => {
+Deno.test('image projection exposes image pins not tools', () => {
   const ui = projectProfile('image');
-  const spec = CATALOG.models.gemini31FlashLiteImage.image;
   assertEquals(ui.tools, []);
-  assertEquals(ui.outputs.media, true);
-  assertEquals(ui.image?.maxInputImages, spec?.maxInputImages);
+  assertEquals(ui.outputs.image?.mimeType, 'image/jpeg');
+  assertEquals(ui.image?.mimeType, 'image/jpeg');
+  assertEquals(ui.image?.size, '1K');
+  assertEquals(ui.image?.maxInputImages, 14);
   assertEquals(ui.controls, []);
 });
 
-Deno.test('media validations reject non-image model, structured mixing, grounding on image, and invalid mime', async () => {
+Deno.test('media validations reject missing image pins, structured mixing, grounding on image, and invalid mime', async () => {
   const { registerProfile, defineProfile } = await import('../../src/kernel/registry/profiles.ts');
 
-  // Media enabled with non-image model
+  // Image pins without aspect/size
   registerProfile(
     defineProfile({
       id: 'bad_media_profile',
-      model: { allow: ['gemini35FlashLite'] },
+      model: { ...modelAllow('gemini35FlashLite') },
       inputs: { text: true },
-      outputs: { structured: null, media: true },
+      outputs: { structured: null, image: { mimeType: 'image/jpeg' } },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
@@ -169,13 +172,16 @@ Deno.test('media validations reject non-image model, structured mixing, groundin
     TheorumError,
   );
 
-  // Media enabled with structured output
+  // Image pins with structured output
   registerProfile(
     defineProfile({
       id: 'mixed_media_profile',
-      model: { allow: ['gemini31FlashLiteImage'] },
+      model: { ...modelAllow('gemini31FlashLiteImage') },
       inputs: { text: true },
-      outputs: { structured: 'custom', media: true },
+      outputs: {
+        structured: 'custom',
+        image: { aspectRatio: '1:1', size: '1K', mimeType: 'image/jpeg' },
+      },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
@@ -184,14 +190,22 @@ Deno.test('media validations reject non-image model, structured mixing, groundin
     TheorumError,
   );
 
-  // Grounding tool on image model profile
+  // Grounding tool on image profile that disallows grounding
   registerProfile(
     defineProfile({
       id: 'image_with_search',
-      model: { allow: ['gemini31FlashLiteImage'] },
+      model: { ...modelAllow('gemini31FlashLiteImage') },
       tools: { allow: ['googleSearch'] },
       inputs: { text: true },
-      outputs: { structured: null, media: true },
+      outputs: {
+        structured: null,
+        image: {
+          aspectRatio: '1:1',
+          size: '1K',
+          mimeType: 'image/jpeg',
+          allowsGrounding: false,
+        },
+      },
       guardrails: { quota: { perDay: 10 } },
     }),
   );

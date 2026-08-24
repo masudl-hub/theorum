@@ -7,7 +7,7 @@
  * @module
  */
 
-import { CATALOG } from '../kernel/registry/catalog.ts';
+import { getTool } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
 import type {
   DynamicToolDeclaration,
@@ -30,38 +30,42 @@ interface OpenRouterConfig {
   modelMap?: Record<string, string>;
 }
 
-/** Resolve a THEORUM model id to an OpenRouter model string. */
+/** Host-owned wire ids used when resolving an OpenRouter model string. */
+interface OpenRouterWireIds {
+  apiId?: string;
+  openRouterId?: string;
+}
+
+/**
+ * Resolve a THEORUM model id to an OpenRouter model string.
+ * Prefer `openRouterId` / `apiId` from the profile model spec on the request.
+ */
 function resolveOpenRouterModel(
   modelId: ModelId | string,
   customMap?: Record<string, string>,
+  wire?: OpenRouterWireIds,
 ): string {
   if (customMap?.[modelId]) {
     return customMap[modelId];
   }
-  const catalogEntry = CATALOG.models[modelId as keyof typeof CATALOG.models];
-  if (catalogEntry?.openRouterId) {
-    return catalogEntry.openRouterId;
+  if (wire?.openRouterId) {
+    return wire.openRouterId;
   }
-  if (catalogEntry?.apiId.includes('/')) {
-    return catalogEntry.apiId;
+  if (wire?.apiId?.includes('/')) {
+    return wire.apiId;
   }
-  if (catalogEntry?.apiId) {
-    return `google/${catalogEntry.apiId}`;
+  if (wire?.apiId) {
+    return `google/${wire.apiId}`;
+  }
+  if (String(modelId).includes('/')) {
+    return String(modelId);
   }
   return String(modelId);
 }
 
-function mapThinkingEffort(thinking: ThinkingLevel): 'low' | 'medium' | 'high' | null {
-  if (thinking === 'low') {
-    return 'low';
-  }
-  if (thinking === 'medium') {
-    return 'medium';
-  }
-  if (thinking === 'high') {
-    return 'high';
-  }
-  return null;
+/** Map THEORUM thinking level to OpenRouter/OpenAI `reasoning.effort`. */
+function mapThinkingEffort(thinking: ThinkingLevel): ThinkingLevel {
+  return thinking;
 }
 
 function wireAudioPart(part: InteractionMediaPart): Record<string, unknown> {
@@ -186,7 +190,10 @@ function toOpenRouterPayload(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,
 ): Record<string, unknown> {
-  const model = resolveOpenRouterModel(req.model, config.modelMap);
+  const model = resolveOpenRouterModel(req.model, config.modelMap, {
+    apiId: req.apiId,
+    openRouterId: req.openRouterId,
+  });
   const messages = buildMessages(req);
 
   const payload: Record<string, unknown> = {
@@ -198,9 +205,7 @@ function toOpenRouterPayload(
   };
 
   const effort = mapThinkingEffort(req.thinking);
-  if (effort) {
-    payload.reasoning = { effort };
-  }
+  payload.reasoning = { effort };
 
   const responseFormat = resolveResponseFormat(req.structured);
   if (responseFormat) {
@@ -212,12 +217,16 @@ function toOpenRouterPayload(
     payload.tools = tools;
   }
 
-  if (req.builtins.includes('googleSearch')) {
-    payload.plugins = [{ id: 'web' }];
+  const plugins = req.builtins
+    .map((id) => getTool(id)?.openRouterPlugin)
+    .filter((id): id is string => Boolean(id))
+    .map((id) => ({ id }));
+  if (plugins.length > 0) {
+    payload.plugins = plugins;
   }
 
   return payload;
 }
 
-export type { OpenRouterConfig };
+export type { OpenRouterConfig, OpenRouterWireIds };
 export { resolveOpenRouterModel, toOpenRouterPayload };

@@ -8,7 +8,7 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
-import type { Profile } from '../types.ts';
+import type { ModelId, Profile } from '../types.ts';
 
 const profiles = new Map<string, Profile>();
 
@@ -16,15 +16,24 @@ const profiles = new Map<string, Profile>();
 export type ProfileDefinition = {
   id: Profile['id'];
   identity?: Partial<Profile['identity']>;
-  model: Partial<Profile['model']> & Pick<Profile['model'], 'allow'>;
+  model: Partial<Profile['model']> & Pick<Profile['model'], 'allow' | 'config'>;
   tools?: Partial<Profile['tools']>;
   inputs?: Partial<Profile['inputs']>;
   outputs?: Partial<Profile['outputs']>;
   guardrails?: Partial<Profile['guardrails']>;
 };
 
-/** Backwards-compatible alias for callers using the older name. */
-export type DefineProfileInput = ProfileDefinition;
+function assertModelSpecs(
+  profileId: string,
+  allow: ModelId[],
+  config: Profile['model']['config'],
+): void {
+  for (const id of allow) {
+    if (!config[id]) {
+      throw new TheorumError(`Profile ${profileId} allowlists '${id}' without a model spec`);
+    }
+  }
+}
 
 function buildDefaultIdentity(
   id: Profile['id'],
@@ -38,17 +47,18 @@ function buildDefaultIdentity(
   };
 }
 
-function buildDefaultModel(model: DefineProfileInput['model']): Profile['model'] {
+function buildDefaultModel(profileId: string, model: ProfileDefinition['model']): Profile['model'] {
+  assertModelSpecs(profileId, model.allow, model.config);
   return {
     protocol: model.protocol ?? 'geminiInteractions',
     provider: model.provider ?? 'google',
     allow: model.allow,
+    config: model.config,
     thinking: model.thinking ?? 'minimal',
     controls: model.controls ?? [],
     maxSteps: model.maxSteps ?? 1,
     key: model.key ?? 'freeA',
     select: model.select,
-    override: model.override,
   };
 }
 
@@ -68,8 +78,8 @@ function buildDefaultInputs(inputs?: Partial<Profile['inputs']>): Profile['input
 function buildDefaultOutputs(outputs?: Partial<Profile['outputs']>): Profile['outputs'] {
   return {
     structured: outputs?.structured ?? null,
-    media: outputs?.media ?? false,
-    voice: outputs?.voice,
+    image: outputs?.image,
+    speech: outputs?.speech,
     validation: outputs?.validation,
     streaming: outputs?.streaming,
   };
@@ -88,11 +98,11 @@ function buildDefaultGuardrails(
 }
 
 /** Define a typed profile with stable defaults for optional properties. */
-function defineProfile(input: DefineProfileInput): Profile {
+function defineProfile(input: ProfileDefinition): Profile {
   return {
     id: input.id,
     identity: buildDefaultIdentity(input.id, input.identity),
-    model: buildDefaultModel(input.model),
+    model: buildDefaultModel(input.id, input.model),
     tools: { allow: input.tools?.allow ?? [] },
     inputs: buildDefaultInputs(input.inputs),
     outputs: buildDefaultOutputs(input.outputs),
@@ -103,6 +113,7 @@ function defineProfile(input: DefineProfileInput): Profile {
 /** Register one host-owned profile in the process-local registry. */
 function registerProfile(profileInput: Profile | ProfileDefinition): void {
   const profile = defineProfile(profileInput);
+  assertModelSpecs(profile.id, profile.model.allow, profile.model.config);
   const { attachments, voice, maxFiles, maxBytes, maxTurnBytes } = profile.inputs;
   if (attachments || voice) {
     if (!(maxFiles && maxBytes && maxTurnBytes)) {

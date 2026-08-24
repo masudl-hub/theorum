@@ -1,13 +1,7 @@
 import { TheorumError } from '../guardrails/error.ts';
-import { modelEntry } from '../kernel/registry/catalog.ts';
+import { getTool } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
-import type { BuiltinToolId, InteractionPart, ProviderCompleteRequest } from '../kernel/types.ts';
-
-const BUILTIN_API: Record<BuiltinToolId, string> = {
-  googleSearch: 'google_search',
-  googleMaps: 'google_maps',
-  urlContext: 'url_context',
-};
+import type { InteractionPart, ProviderCompleteRequest } from '../kernel/types.ts';
 
 function camelToSnake(key: string): string {
   return key.replaceAll(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
@@ -75,12 +69,22 @@ function jsonResponseFormat(schema: Record<string, unknown>): unknown[] {
 }
 
 function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string, unknown>): void {
+  if (req.speech) {
+    if (req.image) {
+      throw new TheorumError('cannot mix speech and image response formats');
+    }
+    if (req.structured) {
+      throw new TheorumError('cannot mix speech and structured response formats');
+    }
+    camel.responseFormat = { type: 'audio' };
+    return;
+  }
   if (req.image) {
     camel.responseFormat = {
       type: 'image',
       mimeType: req.image.mimeType,
       aspectRatio: req.image.aspectRatio,
-      imageSize: req.image.imageSize,
+      imageSize: req.image.size,
     };
     return;
   }
@@ -92,6 +96,18 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
     return;
   }
   camel.responseFormat = jsonResponseFormat(spec.jsonSchema);
+}
+
+function attachSpeechConfig(
+  req: ProviderCompleteRequest,
+  generationConfig: Record<string, unknown>,
+): void {
+  if (!req.speech) {
+    return;
+  }
+  if (req.speech.voice) {
+    generationConfig.speechConfig = [{ voice: req.speech.voice }];
+  }
 }
 
 function inputStepsFromRequest(req: ProviderCompleteRequest): {
@@ -122,22 +138,33 @@ function applyOptionalRequestFields(
     camel.systemInstruction = req.system;
   }
   if (req.builtins.length > 0) {
-    camel.tools = req.builtins.map((id) => ({ type: BUILTIN_API[id] }));
+    camel.tools = req.builtins.map((id) => {
+      const type = getTool(id)?.interactionsType;
+      if (!type) {
+        throw new TheorumError(`Builtin '${id}' has no Interactions wire type`);
+      }
+      return { type };
+    });
   }
 }
 
 function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
-  const catalog = modelEntry(req.model);
+  const generationConfig: Record<string, unknown> = {
+    temperature: req.temperature,
+    maxOutputTokens: req.maxOutputTokens,
+  };
+  if (req.speech) {
+    // TTS models reject chat thinking knobs; voice lives under speech_config.
+    attachSpeechConfig(req, generationConfig);
+  } else {
+    generationConfig.thinkingLevel = req.thinking;
+    generationConfig.thinkingSummaries = req.summaries;
+  }
   return {
-    model: catalog.apiId,
+    model: req.apiId,
     stream: true,
     input: inputStepsFromRequest(req),
-    generationConfig: {
-      temperature: req.temperature,
-      maxOutputTokens: req.maxOutputTokens,
-      thinkingLevel: req.thinking,
-      thinkingSummaries: req.summaries,
-    },
+    generationConfig,
   };
 }
 

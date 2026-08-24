@@ -1,8 +1,8 @@
 import '../fixtures/test-host.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../src/guardrails/error.ts';
-import { fetchGemini, type GeminiVault, withGeminiKey } from '../../src/guardrails/keys.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
+import { fetchGemini, type GeminiVault, withGeminiKey } from '../../src/providers/keys.ts';
 
 const vault: GeminiVault = {
   freeA: 'free-a-key',

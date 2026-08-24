@@ -53,4 +53,4 @@ function synthesizeRepairPrompt(args: {
   return prompt;
 }
 
-export { MAX_REPAIR_HISTORY_EXCHANGES, scopeHistory, synthesizeRepairPrompt };
+export { synthesizeRepairPrompt };

@@ -360,7 +360,7 @@ async function* streamOpenRouter(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,
 ): AsyncGenerator<TurnEvent> {
-  const apiKey = resolveOpenRouterApiKey(config.apiKey);
+  const apiKey = trimApiKey(config.apiKey);
   if (!apiKey) {
     yield { type: 'error', error: publicError('missing OpenRouter API key') };
     return;
@@ -402,8 +402,7 @@ async function* streamOpenRouter(
   }
 }
 
-/** Resolve an OpenRouter API key supplied explicitly by the host application. */
-export function resolveOpenRouterApiKey(explicitKey?: string): string | undefined {
+function trimApiKey(explicitKey?: string): string | undefined {
   if (explicitKey?.trim()) {
     return explicitKey.trim();
   }

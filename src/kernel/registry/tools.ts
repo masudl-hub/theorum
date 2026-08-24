@@ -8,7 +8,7 @@
  */
 
 import type { CustomToolId, Profile, ToolEnvelope } from '../types.ts';
-import { CATALOG } from './catalog.ts';
+import { getTool } from './catalog.ts';
 import { assertToolAllowed } from './resolve.ts';
 
 function executeAskUser(args: Record<string, unknown>): ToolEnvelope {
@@ -22,7 +22,7 @@ function executeAskUser(args: Record<string, unknown>): ToolEnvelope {
   return {
     status: 'pause',
     finding: prompt,
-    data: { ...args, schema: CATALOG.tools.askUser.schema },
+    data: { ...args, schema: getTool('askUser')?.schema },
   };
 }
 

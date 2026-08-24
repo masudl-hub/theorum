@@ -48,6 +48,8 @@ function chatCanaryWire() {
   const { generation } = resolveTurn({ profile: 'chat', input: { text: 'hi' } });
   const body = toInteractionsBody({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -119,6 +121,8 @@ Deno.test('toInteractionsBody rejects user payload copied into system', () => {
     () =>
       toInteractionsBody({
         model: generation.model,
+        apiId: generation.apiId,
+        openRouterId: generation.openRouterId,
         thinking: generation.thinking,
         summaries: generation.summaries,
         maxOutputTokens: generation.maxOutputTokens,

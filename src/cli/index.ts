@@ -16,8 +16,8 @@ COMMANDS:
     --lite             Minimal fast-path connectivity ping
     --matrix           Run all valid permutations for the profile
     --mode <fast|smart> Reasoning mode override
-    --search           Force Google Search tool ON
-    --map              Force Google Maps tool ON
+    --search           Force googleSearch ON (when allowlisted; Google preset)
+    --map              Force googleMaps ON (when allowlisted; Google preset)
 
   run                  Execute a turn with real-time streaming output
     --profile, -p <id> Target profile ID

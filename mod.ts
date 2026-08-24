@@ -11,7 +11,20 @@
  *
  * const profile = defineProfile({
  *   id: "assistant.basic",
- *   model: { allow: ["gemini35FlashLite"] },
+ *   model: {
+ *     allow: ["gemini35FlashLite"],
+ *     config: {
+ *       gemini35FlashLite: {
+ *         apiId: "gemini-3.5-flash-lite",
+ *         thinking: { on: "high", off: "minimal" },
+ *         thinkingLevels: ["minimal", "low", "medium", "high"],
+ *         summaries: { on: "auto", off: "none" },
+ *         maxOutputTokens: 8192,
+ *         temperature: 1,
+ *         keyBuiltins: [],
+ *       },
+ *     },
+ *   },
  *   tools: { allow: [] },
  *   inputs: { text: true },
  *   outputs: {},
@@ -33,6 +46,19 @@ export {
 } from './src/guardrails/sanitize.ts';
 export { runTurn } from './src/kernel/engine/runner.ts';
 export {
+  CATALOG,
+  clampThinkingLevel,
+  clampThinkingLevelForApiId,
+  getTool,
+  listBuiltinIds,
+  modelEntryByApiId,
+  registerTools,
+  requireModelSpec,
+  resetTools,
+} from './src/kernel/registry/catalog.ts';
+export type { ProfileDefinition } from './src/kernel/registry/profiles.ts';
+export {
+  clearProfiles,
   defineProfile,
   getProfile,
   hasProfile,
@@ -53,13 +79,15 @@ export {
   writeTrace,
 } from './src/observability/trace.ts';
 export type { TraceRecord } from './src/observability/trace-record.ts';
+export type { GeminiTransport, GeminiVault } from './src/providers/keys.ts';
+export type { CreateProviderOptions } from './src/providers/mod.ts';
 export {
   createInteractionsProvider,
   createOpenRouterProvider,
-  createOpenRouterTtsProvider,
-  resolveOpenRouterApiKey,
+  createProvider,
+  createSpeechProvider,
   resolveOpenRouterModel,
-  streamOpenRouterTts,
+  streamSpeech,
   toOpenRouterPayload,
   wrapPcmAsWav,
 } from './src/providers/mod.ts';

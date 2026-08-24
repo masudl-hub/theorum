@@ -1,5 +1,4 @@
 import '../fixtures/test-host.ts';
-import type { GeminiVault } from '../../src/guardrails/keys.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { OMIT_CANARY } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
@@ -8,6 +7,7 @@ import { memorySink } from '../../src/observability/trace.ts';
 import type { TraceRecord } from '../../src/observability/trace-record.ts';
 import { tapeGemini } from '../../src/providers/gemini-tape.ts';
 import { camelToSnake } from '../../src/providers/interactions.ts';
+import type { GeminiVault } from '../../src/providers/keys.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
 
 const INPUT_TOKENS = 11;

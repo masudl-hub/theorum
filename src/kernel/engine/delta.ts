@@ -41,6 +41,19 @@ function eventsFromImage(delta: Record<string, unknown>): TurnEvent[] {
   return [];
 }
 
+function eventsFromAudio(delta: Record<string, unknown>): TurnEvent[] {
+  const media = deltaMedia(delta);
+  if (media) {
+    return [media];
+  }
+  // Google TTS deltas may ship data without a mime; treat as raw PCM.
+  const { data } = delta;
+  if (typeof data === 'string' && data) {
+    return [{ type: 'media', media: { mimeType: 'audio/pcm', data } }];
+  }
+  return [];
+}
+
 function eventsFromDelta(deltaValue: unknown): TurnEvent[] {
   const delta = asRecord(deltaValue);
   if (!delta) {
@@ -55,6 +68,9 @@ function eventsFromDelta(deltaValue: unknown): TurnEvent[] {
   }
   if (deltaType === 'image') {
     return eventsFromImage(delta);
+  }
+  if (deltaType === 'audio' || deltaType === 'output_audio') {
+    return eventsFromAudio(delta);
   }
   return [];
 }
@@ -73,7 +89,7 @@ function mediaFromOutputItem(item: unknown): TurnEvent | undefined {
   if (!rec) {
     return undefined;
   }
-  if (rec.type !== 'image' && rec.type !== 'media') {
+  if (rec.type !== 'image' && rec.type !== 'media' && rec.type !== 'audio') {
     return undefined;
   }
   return mediaFromRecord(rec);
@@ -94,11 +110,23 @@ function mediaFromOutputs(outputs: unknown): TurnEvent | undefined {
 
 function mediaFromComplete(event: Record<string, unknown>): TurnEvent | undefined {
   const interaction = asRecord(event.interaction) ?? event;
-  const direct = asRecord(interaction.output_image);
-  if (direct) {
-    const media = mediaFromRecord(direct);
+  const directImage = asRecord(interaction.output_image);
+  if (directImage) {
+    const media = mediaFromRecord(directImage);
     if (media) {
       return media;
+    }
+  }
+  const directAudio = asRecord(interaction.output_audio);
+  if (directAudio) {
+    const media = mediaFromRecord(directAudio);
+    if (media) {
+      return media;
+    }
+    // Google TTS convenience field: base64 PCM without mime.
+    const { data } = directAudio;
+    if (typeof data === 'string' && data) {
+      return { type: 'media', media: { mimeType: 'audio/pcm', data } };
     }
   }
   return mediaFromOutputs(interaction.outputs);

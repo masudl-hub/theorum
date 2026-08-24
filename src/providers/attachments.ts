@@ -186,7 +186,6 @@ function sanitizeTurnBlobsForProfile(
 export {
   assertAttachmentLimits,
   fileTooLargeMessage,
-  mediaLimits,
   requireMediaLimits,
   sanitizeCsvText,
   sanitizeTurnBlobs,

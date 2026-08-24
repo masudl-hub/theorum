@@ -8,6 +8,7 @@ import {
   resolveOpenRouterModel,
   toOpenRouterPayload,
 } from '../../src/providers/openrouter.ts';
+import { HOST_MODELS } from '../fixtures/models.ts';
 
 const EXPECTED_INPUT_TOKENS = 25;
 const EXPECTED_OUTPUT_TOKENS = 40;
@@ -41,6 +42,8 @@ function createMockTurnRequest(profile: string, text: string): ProviderCompleteR
   const { generation } = resolveTurn({ profile, input: { text } });
   return {
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -55,9 +58,24 @@ function createMockTurnRequest(profile: string, text: string): ProviderCompleteR
 }
 
 Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () => {
-  assertEquals(resolveOpenRouterModel('gemini35FlashLite'), 'google/gemini-3.5-flash-lite');
-  assertEquals(resolveOpenRouterModel('gemini31ProPreview'), 'google/gemini-3.1-pro-preview');
-  assertEquals(resolveOpenRouterModel('sonar'), 'perplexity/sonar');
+  const flashLite = HOST_MODELS.gemini35FlashLite;
+  const proPreview = HOST_MODELS.gemini31ProPreview;
+  const sonar = HOST_MODELS.sonar;
+  assertEquals(
+    resolveOpenRouterModel('gemini35FlashLite', undefined, { apiId: flashLite.apiId }),
+    'google/gemini-3.5-flash-lite',
+  );
+  assertEquals(
+    resolveOpenRouterModel('gemini31ProPreview', undefined, { apiId: proPreview.apiId }),
+    'google/gemini-3.1-pro-preview',
+  );
+  assertEquals(
+    resolveOpenRouterModel('sonar', undefined, {
+      apiId: sonar.apiId,
+      openRouterId: sonar.openRouterId,
+    }),
+    'perplexity/sonar',
+  );
   assertEquals(
     resolveOpenRouterModel('gemini35FlashLite', {
       gemini35FlashLite: 'anthropic/claude-sonnet',
@@ -71,6 +89,7 @@ Deno.test('toOpenRouterPayload passes app-selected provider-native model ids thr
   const req: ProviderCompleteRequest = {
     ...createMockTurnRequest('pinned', 'Research this'),
     model: 'perplexity/sonar:online' as ModelId,
+    apiId: 'perplexity/sonar:online',
   };
   const payload = toOpenRouterPayload(req, {});
   assertEquals(payload.model, 'perplexity/sonar:online');
@@ -132,6 +151,8 @@ Deno.test('toOpenRouterPayload formats structured json_schema response_format', 
 
   const req: ProviderCompleteRequest = {
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,

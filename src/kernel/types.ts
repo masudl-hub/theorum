@@ -9,26 +9,17 @@
  */
 
 /** Model reasoning effort level normalized across provider adapters. */
-export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+export type ThinkingLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-/** Built-in model aliases included in THEORUM's generic model catalog. */
-export type StandardModelId =
-  | 'gemini31FlashLite'
-  | 'gemini31ProPreview'
-  | 'gemini35FlashLite'
-  | 'gemini31FlashLiteImage'
-  | 'gemini31FlashTts'
-  | 'sonar';
+/** Any host-declared model id. */
+export type ModelId = string;
 
-/** Any model id a host profile may allow, including app-provided custom ids. */
-export type ModelId = StandardModelId | (string & {});
-
-/** Provider-native tools THEORUM can project into supported provider payloads. */
-export type BuiltinToolId = 'googleSearch' | 'googleMaps' | 'urlContext';
-/** Minimal built-in custom tool available to host apps for user interaction pauses. */
-export type StandardCustomToolId = 'askUser';
-/** Host-owned custom tool id. */
-export type CustomToolId = StandardCustomToolId | (string & {});
+/** Provider-projected builtin tool id (registered by presets/adapters). */
+export type BuiltinToolId = string;
+/** Harness custom tool that ships with THEORUM. */
+export type HarnessToolId = 'askUser';
+/** Host-owned or harness custom tool id. */
+export type CustomToolId = HarnessToolId | (string & {});
 /** Any tool id accepted by profile allowlists and per-turn gates. */
 export type ToolId = BuiltinToolId | CustomToolId;
 
@@ -51,21 +42,23 @@ export type ChatRole = 'system' | 'user' | 'assistant';
 /** Profile-level control a caller may toggle at turn time. */
 export type ControlId = 'thinking';
 
-/** Native image size supported by the generic image response spec. */
-export type ImageSize = '1K';
-
-/** Native image aspect ratio accepted by image-capable model specs. */
-export type ImageAspectRatio =
-  | '1:1'
-  | '3:2'
-  | '2:3'
-  | '3:4'
-  | '4:3'
-  | '4:5'
-  | '5:4'
-  | '9:16'
-  | '16:9'
-  | '21:9';
+/**
+ * Image-role output pins owned by the host profile.
+ * The image model itself lives in `model.allow` / `model.config`.
+ * Aspect/size/mime values are host strings (presets/apps own the vocabularies).
+ */
+export interface ProfileImageSpec {
+  /** Default aspect ratio when the turn does not set `slots.aspectRatio`. */
+  aspectRatio?: string;
+  /** Default size / resolution when the turn does not set `slots.size`. */
+  size?: string;
+  /** Output MIME for generated images. */
+  mimeType?: string;
+  /** When false, grounding builtins are rejected on this profile. */
+  allowsGrounding?: boolean;
+  /** Cap on reference images in one turn. */
+  maxInputImages?: number;
+}
 
 /** Public event types emitted by `runTurn` and provider adapters. */
 export type TurnEventType =
@@ -92,37 +85,41 @@ export interface SummaryMap {
   off: 'auto' | 'none';
 }
 
-/** Native image generation on Interactions (`response_format.type = image`). */
-export interface ImageModelSpec {
-  maxInputImages: number;
-  inputMimes: string[];
-  sizes: ImageSize[];
-  aspectRatios: ImageAspectRatio[];
-  outputMime: string;
-  allowsGrounding: boolean;
-}
-
-/** Static metadata THEORUM needs to safely call a model id. */
-export interface ModelCatalogEntry {
+/** Host-declared metadata THEORUM needs to call a model safely. */
+export interface ModelSpec {
   apiId: string;
   /** Provider-native id for OpenRouter-compatible gateways. Defaults to `google/${apiId}`. */
   openRouterId?: string;
   thinking: ThinkingMap;
-  /** Levels this model accepts on Interactions. Illegal values → 400. */
+  /** Levels this model accepts. Illegal values are clamped via `thinkingLevels`. */
   thinkingLevels: ThinkingLevel[];
   summaries: SummaryMap;
   maxOutputTokens: number;
   temperature: number;
-  /** Builtins that may run on the profile's free key. Anything else is paid. */
-  freeBuiltins: BuiltinToolId[];
-  image?: ImageModelSpec;
+  /**
+   * Builtins that may use `profile.model.key`.
+   * Any other enabled builtin selects the overflow vault slot (`paid`).
+   * Host-owned policy — THEORUM does not infer tool pricing.
+   */
+  keyBuiltins: BuiltinToolId[];
+  /**
+   * Optional vault slot for this model. When set, overrides `profile.model.key`
+   * (and builtin routing). Host-owned — e.g. pin image models to `paid`.
+   */
+  key?: GeminiBucket;
 }
 
-/** Static metadata for built-in and generic custom tools. */
+/** Static metadata for harness, preset, and host-registered tools. */
 export interface ToolCatalogEntry {
   kind: 'builtin' | 'custom';
   ui: boolean;
   schema?: Record<string, unknown>;
+  /** Interactions API `tools[].type` when this builtin is projected. */
+  interactionsType?: string;
+  /** OpenRouter plugin id enabled when this builtin is on. */
+  openRouterPlugin?: string;
+  /** Drop this builtin when any listed sibling builtin is also requested. */
+  conflictsWith?: ToolId[];
 }
 
 /** Host-registered structured output schema and enforcement mode. */
@@ -131,9 +128,8 @@ export interface StructuredSpec {
   jsonSchema?: Record<string, unknown>;
 }
 
-/** In-memory model and tool catalog shape. */
+/** In-memory tool catalog shape. */
 export interface Catalog {
-  models: Record<ModelId, ModelCatalogEntry>;
   tools: Record<ToolId, ToolCatalogEntry>;
 }
 
@@ -159,24 +155,6 @@ export interface StructuredBySlot {
   fallback: string;
 }
 
-/** Legacy-compatible model selection block used by profile builders. */
-export interface ProfileModels {
-  allow: ModelId[];
-  select?: Record<string, ModelId>;
-  /** Pinned level when `thinking` is not in `controls`. */
-  thinking?: ThinkingLevel | Record<string, ThinkingLevel>;
-  override?: Partial<
-    Record<
-      ModelId,
-      Partial<
-        Pick<ModelCatalogEntry, 'maxOutputTokens' | 'temperature'> & {
-          summaries?: 'auto' | 'none';
-        }
-      >
-    >
-  >;
-}
-
 /** Result returned by a profile output validator. */
 export interface ValidationResult {
   isValid: boolean;
@@ -199,47 +177,22 @@ export interface ProfileValidationSpec {
   repairGuidance?: string;
 }
 
-/** Audio container emitted by the OpenRouter TTS adapter. */
-export type OpenRouterAudioFormat = 'pcm' | 'mp3';
+/**
+ * Audio container for speech generation output.
+ * Wire container formats may live in the kernel; vendor voice catalogs and
+ * image vocabularies live in presets/apps.
+ */
+export type SpeechAudioFormat = 'pcm' | 'mp3';
 
-/** Voice name passed through to OpenRouter-compatible TTS models. */
-export type OpenRouterTtsVoice =
-  | 'Zephyr'
-  | 'Puck'
-  | 'Charon'
-  | 'Kore'
-  | 'Fenrir'
-  | 'Leda'
-  | 'Orus'
-  | 'Aoede'
-  | 'Callirrhoe'
-  | 'Autonoe'
-  | 'Enceladus'
-  | 'Iapetus'
-  | 'Umbriel'
-  | 'Algieba'
-  | 'Despina'
-  | 'Erinome'
-  | 'Algenib'
-  | 'Rasalgethi'
-  | 'Laomedeia'
-  | 'Achernar'
-  | 'Alnilam'
-  | 'Schedar'
-  | 'Gacrux'
-  | 'Pulcherrima'
-  | 'Achird'
-  | 'Zubenelgenubi'
-  | 'Vindemiatrix'
-  | 'Sadachbia'
-  | 'Sadaltager'
-  | 'Sulafat'
-  | (string & {});
-
-/** Voice output configuration owned by the host profile. */
-export interface ProfileVoiceSpec {
-  voice?: OpenRouterTtsVoice;
-  responseFormat?: OpenRouterAudioFormat;
+/**
+ * Speech-role output pins owned by the host profile.
+ * The speech model itself lives in `model.allow` / `model.config`.
+ * Namespaced under `outputs.speech` so `voice` here is the TTS voice id,
+ * not ingress audio (`inputs.voice`).
+ */
+export interface ProfileSpeechSpec {
+  voice?: string;
+  format?: SpeechAudioFormat;
 }
 
 /** Stream delivery controls enforced by the kernel. */
@@ -293,20 +246,15 @@ export interface ProfileGuardrailsSpec {
 export interface ProfileModelSpec {
   protocol: 'geminiInteractions' | 'openAi';
   provider: 'google' | 'openrouter';
+  /** Ids this profile may select. Each id must exist in `config`. */
   allow: ModelId[];
+  /** Host-owned wire config keyed by the same ids used in `allow` / `select`. */
+  config: Record<ModelId, ModelSpec>;
   select?: Record<string, ModelId>;
   thinking?: ThinkingLevel | Record<string, ThinkingLevel>;
   controls?: ControlId[];
   maxSteps?: number;
   key?: GeminiFreeBucket;
-  override?: Record<
-    string,
-    {
-      maxOutputTokens?: number;
-      temperature?: number;
-      summaries?: 'auto' | 'none';
-    }
-  >;
 }
 
 /** Text, attachment, voice, slot, and size rules for a profile. */
@@ -321,11 +269,13 @@ export interface ProfileInputsSpec {
   slots?: Record<string, string[]>;
 }
 
-/** Output schema, media, voice, validation, and stream rules for a profile. */
+/** Output schema, image, speech, validation, and stream rules for a profile. */
 export interface ProfileOutputsSpec {
   structured?: StructuredSchemaId | StructuredBySlot | null;
-  media?: boolean;
-  voice?: ProfileVoiceSpec;
+  /** Pins for an image-role profile. Model id is on `model`. */
+  image?: ProfileImageSpec;
+  /** Pins for a speech-role profile (`voice` / `format`). Model id is on `model`. */
+  speech?: ProfileSpeechSpec;
   validation?: ProfileValidationSpec;
   streaming?: ProfileStreamingSpec;
 }
@@ -366,8 +316,9 @@ export type InteractionPart = InteractionTextPart | InteractionMediaPart;
 export interface ImageResponseFormat {
   type: 'image';
   mimeType: string;
-  aspectRatio: ImageAspectRatio;
-  imageSize: ImageSize;
+  aspectRatio: string;
+  /** Authoring / kernel name; adapters map to provider wire keys (e.g. Google `imageSize`). */
+  size: string;
 }
 
 /** Base64-encoded blob supplied by a host turn request. */
@@ -495,12 +446,15 @@ export interface ProjectedProfile {
   inputs: Profile['inputs'];
   slots: Record<string, string[]>;
   outputs: Profile['outputs'];
-  image?: ImageModelSpec | null;
+  image?: ProfileImageSpec | null;
 }
 
 /** Fully-resolved provider request state created from a `TurnRequest`. */
 export interface ResolvedGeneration {
   model: ModelId;
+  /** Provider-native model id taken from the profile model spec. */
+  apiId: string;
+  openRouterId?: string;
   previousInteractionId?: string;
   store?: boolean;
   thinking: ThinkingLevel;
@@ -516,7 +470,7 @@ export interface ResolvedGeneration {
   maxSteps: number;
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
-  voice?: ProfileVoiceSpec;
+  speech?: ProfileSpeechSpec;
   input: InteractionPart[];
   geminiBucket: GeminiBucket;
   canary: string;
@@ -587,6 +541,8 @@ export interface TurnEvent {
 /** Provider-neutral request object sent from the kernel to a model adapter. */
 export interface ProviderCompleteRequest {
   model: ModelId;
+  apiId: string;
+  openRouterId?: string;
   previousInteractionId?: string;
   store?: boolean;
   thinking: ThinkingLevel;
@@ -601,7 +557,7 @@ export interface ProviderCompleteRequest {
   dynamicToolLoader?: DynamicToolLoader;
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
-  voice?: ProfileVoiceSpec;
+  speech?: ProfileSpeechSpec;
   geminiBucket: GeminiBucket;
   /** Scrubbed SSE / HTTP rows for traces. */
   tapGemini?: (row: Record<string, unknown>) => void;

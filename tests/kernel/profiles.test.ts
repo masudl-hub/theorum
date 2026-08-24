@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from '@std/assert';
 import {
+  clearProfiles,
   defineProfile,
   getProfile,
   hasProfile,
@@ -7,11 +8,12 @@ import {
   registerProfile,
   registerProfiles,
 } from '../../src/kernel/registry/profiles.ts';
+import { modelAllow } from '../fixtures/models.ts';
 
 Deno.test('defineProfile creates valid defaults', () => {
   const profile = defineProfile({
     id: 'host_profile',
-    model: { allow: ['gemini35FlashLite'], thinking: 'low' },
+    model: { ...modelAllow('gemini35FlashLite'), thinking: 'low' },
   });
 
   assertEquals(profile.id, 'host_profile');
@@ -23,7 +25,8 @@ Deno.test('defineProfile creates valid defaults', () => {
   assertEquals(profile.tools.allow, []);
   assertEquals(profile.inputs.text, true);
   assertEquals(profile.outputs.structured, null);
-  assertEquals(profile.outputs.media, false);
+  assertEquals(profile.outputs.image, undefined);
+  assertEquals(profile.outputs.speech, undefined);
   assertEquals(profile.guardrails.canary, true);
   assertEquals(profile.guardrails.quota, undefined);
 });
@@ -31,21 +34,21 @@ Deno.test('defineProfile creates valid defaults', () => {
 Deno.test('defineProfile defaults all optional host-authored sections', () => {
   const profile = defineProfile({
     id: 'bare_host_profile',
-    model: { allow: ['gemini35FlashLite'] },
+    model: { ...modelAllow('gemini35FlashLite') },
   });
 
   assertEquals(profile.identity.handle, 'bare_host_profile');
   assertEquals(profile.model.thinking, 'minimal');
   assertEquals(profile.tools.allow, []);
   assertEquals(profile.inputs.text, true);
-  assertEquals(profile.outputs.media, false);
+  assertEquals(profile.outputs.image, undefined);
   assertEquals(profile.guardrails.sanitizeInput, true);
 });
 
 Deno.test('registerProfile accepts minimal host-authored profile definitions', () => {
   registerProfile({
     id: 'minimal_host_bot',
-    model: { allow: ['gemini35FlashLite'] },
+    model: { ...modelAllow('gemini35FlashLite') },
   });
 
   const profile = getProfile('minimal_host_bot');
@@ -59,7 +62,7 @@ Deno.test('registerProfile accepts minimal host-authored profile definitions', (
 Deno.test('registerProfile and getProfile manage runtime profile lifecycle', () => {
   const profile = defineProfile({
     id: 'custom_bot',
-    model: { allow: ['gemini35FlashLite'] },
+    model: { ...modelAllow('gemini35FlashLite') },
     inputs: { text: true },
     guardrails: { quota: { perDay: 50 } },
   });
@@ -76,13 +79,13 @@ Deno.test('registerProfile and getProfile manage runtime profile lifecycle', () 
 Deno.test('registerProfiles handles batch registration', () => {
   const p1 = defineProfile({
     id: 'bot_alpha',
-    model: { allow: ['gemini35FlashLite'] },
+    model: { ...modelAllow('gemini35FlashLite') },
     inputs: { text: true },
     guardrails: { quota: { perDay: 10 } },
   });
   const p2 = defineProfile({
     id: 'bot_beta',
-    model: { allow: ['gemini35FlashLite'] },
+    model: { ...modelAllow('gemini35FlashLite') },
     inputs: { text: true },
     guardrails: { quota: { perDay: 20 } },
   });
@@ -95,7 +98,7 @@ Deno.test('registerProfiles handles batch registration', () => {
 Deno.test('registerProfile validates media limits if attachments are enabled', () => {
   const invalidProfile = defineProfile({
     id: 'invalid_media_bot',
-    model: { allow: ['gemini35FlashLite'] },
+    model: { ...modelAllow('gemini35FlashLite') },
     inputs: { text: true, attachments: { accept: ['image/png'] } },
     guardrails: { quota: { perDay: 10 } },
   });
@@ -117,4 +120,19 @@ Deno.test('getProfile throws for unknown profile', () => {
     Error,
     "Unknown profile 'non_existent_profile'",
   );
+});
+
+Deno.test('clearProfiles empties the process-local registry', () => {
+  const prior = listProfiles();
+  registerProfile({
+    id: 'temp_clear_bot',
+    model: { ...modelAllow('gemini35FlashLite') },
+  });
+  assertEquals(hasProfile('temp_clear_bot'), true);
+  clearProfiles();
+  assertEquals(listProfiles().length, 0);
+  for (const profile of prior) {
+    registerProfile(profile);
+  }
+  assertEquals(hasProfile('temp_clear_bot'), false);
 });

@@ -56,7 +56,10 @@ interface ErrorRule {
 
 const RULES: ErrorRule[] = [
   {
-    match: (t) => /^(Gemini|OpenRouter|TTS|OpenRouter TTS) HTTP/.test(t) || t.includes('TTS HTTP'),
+    match: (t) =>
+      /^(Gemini|OpenRouter|TTS|OpenRouter TTS|Speech) HTTP/.test(t) ||
+      t.includes('TTS HTTP') ||
+      t.includes('Speech HTTP'),
     resolve: () => PUBLIC_UNAVAILABLE,
   },
   {
@@ -124,13 +127,7 @@ function publicError(err: unknown): string {
   return PUBLIC_UNAVAILABLE;
 }
 
-/** Backwards-compatible alias for `publicError`. */
-function errorMessage(err: unknown): string {
-  return publicError(err);
-}
-
 export {
-  errorMessage,
   PUBLIC_ACTION,
   PUBLIC_CANARY,
   PUBLIC_FILE_COUNT,

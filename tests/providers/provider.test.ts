@@ -1,10 +1,10 @@
 import '../fixtures/test-host.ts';
 import { PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
-import type { GeminiVault } from '../../src/guardrails/keys.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
+import type { GeminiVault } from '../../src/providers/keys.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
 import { INTERACTIONS_URL } from '../../src/providers/sse.ts';
 
@@ -51,6 +51,8 @@ function fromChatProfile(): ProviderCompleteRequest {
   });
   return {
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -98,6 +100,8 @@ Deno.test('chat voice audio wires as Interactions type audio', () => {
   });
   const body = toInteractionsBody({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -151,6 +155,8 @@ Deno.test('JSON Schema property names stay camelCase inside response_format.sche
   });
   const body = toInteractionsBody({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -176,6 +182,8 @@ Deno.test('prompt-enforced schema omits JSON response_format', () => {
   });
   const body = toInteractionsBody({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -199,6 +207,8 @@ Deno.test('pinned profile wires 3.5 minimal through theorum', () => {
   assertEquals(generation.thinking, 'low');
   const body = toInteractionsBody({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -360,6 +370,8 @@ Deno.test('image delta yields media', async () => {
   const events = await collect(
     provider.complete({
       model: generation.model,
+      apiId: generation.apiId,
+      openRouterId: generation.openRouterId,
       thinking: generation.thinking,
       summaries: generation.summaries,
       maxOutputTokens: generation.maxOutputTokens,
@@ -400,6 +412,8 @@ Deno.test('interaction complete yields output_image media', async () => {
   const events = await collect(
     provider.complete({
       model: generation.model,
+      apiId: generation.apiId,
+      openRouterId: generation.openRouterId,
       thinking: generation.thinking,
       summaries: generation.summaries,
       maxOutputTokens: generation.maxOutputTokens,
@@ -440,6 +454,8 @@ Deno.test('interaction complete yields outputs image media', async () => {
   const events = await collect(
     provider.complete({
       model: generation.model,
+      apiId: generation.apiId,
+      openRouterId: generation.openRouterId,
       thinking: generation.thinking,
       summaries: generation.summaries,
       maxOutputTokens: generation.maxOutputTokens,
@@ -471,6 +487,8 @@ Deno.test('provider handles null body, direct event usage/grounding, and structu
   const nullEvents = await collect(
     nullBodyProvider.complete({
       model: generation.model,
+      apiId: generation.apiId,
+      openRouterId: generation.openRouterId,
       thinking: generation.thinking,
       summaries: generation.summaries,
       maxOutputTokens: generation.maxOutputTokens,
@@ -504,6 +522,8 @@ Deno.test('provider handles null body, direct event usage/grounding, and structu
   const resultEvents = await collect(
     structProvider.complete({
       model: chatGen.model,
+      apiId: chatGen.apiId,
+      openRouterId: chatGen.openRouterId,
       thinking: chatGen.thinking,
       summaries: chatGen.summaries,
       maxOutputTokens: chatGen.maxOutputTokens,

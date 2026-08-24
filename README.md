@@ -64,7 +64,7 @@ flowchart TD
     subgraph Providers["Provider adapters"]
         OR["OpenRouter"]
         GI["Google Interactions"]
-        TTS["OpenRouter TTS"]
+        TTS["Speech /audio/speech"]
     end
 
     Profile --> Resolve
@@ -148,6 +148,17 @@ const profile = defineProfile({
     protocol: "openAi",
     provider: "openrouter",
     allow: ["gemini35FlashLite"],
+    config: {
+      gemini35FlashLite: {
+        apiId: "gemini-3.5-flash-lite",
+        thinking: { on: "high", off: "minimal" },
+        thinkingLevels: ["minimal", "low", "medium", "high"],
+        summaries: { on: "auto", off: "none" },
+        maxOutputTokens: 8192,
+        temperature: 1,
+        keyBuiltins: [],
+      },
+    },
     thinking: "minimal",
     maxSteps: 1,
   },
@@ -221,7 +232,20 @@ Inbound and outbound safety are generic kernel hooks.
 ```ts
 const guardedProfile = defineProfile({
   id: "assistant.guarded",
-  model: { allow: ["gemini35FlashLite"] },
+  model: {
+    allow: ["gemini35FlashLite"],
+    config: {
+      gemini35FlashLite: {
+        apiId: "gemini-3.5-flash-lite",
+        thinking: { on: "high", off: "minimal" },
+        thinkingLevels: ["minimal", "low", "medium", "high"],
+        summaries: { on: "auto", off: "none" },
+        maxOutputTokens: 8192,
+        temperature: 1,
+        keyBuiltins: [],
+      },
+    },
+  },
   guardrails: {
     egress: {
       onBlock: "reject_to_agent",
@@ -266,7 +290,7 @@ const provider = createOpenRouterProvider({
 import { createInteractionsProvider } from "jsr:@theorum/core/providers";
 
 const provider = createInteractionsProvider({
-  keys: hostGeminiKeyVault,
+  vault: hostGeminiKeyVault,
   fetch,
 });
 ```
@@ -275,8 +299,8 @@ Provider support is intentionally split by wire protocol:
 
 | Provider | Protocol | Use |
 | :--- | :--- | :--- |
-| OpenRouter | `openAi` | Chat completions, reasoning streams, tool calls, structured output, TTS gateway. |
-| Google Interactions | `geminiInteractions` | Native Google Interactions streaming, image response format, interaction continuity, grounding metadata. |
+| OpenRouter | `openAi` | Chat completions, reasoning streams, tool calls, structured output; speech via `/audio/speech` when the profile is a speech role. |
+| Google Interactions | `geminiInteractions` | Native Google Interactions streaming, image/audio response formats, interaction continuity, grounding metadata. |
 
 ---
 
@@ -285,11 +309,15 @@ Provider support is intentionally split by wire protocol:
 | Entrypoint | Purpose |
 | :--- | :--- |
 | `jsr:@theorum/core` / `theorum` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
-| `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile, turn, event, tool, egress, provider, and schema types. |
-| `jsr:@theorum/core/providers` / `theorum/providers` | Provider constructors and provider utility types. |
+| `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile/turn types, tool catalog, `requireModelSpec`, thinking clamps over host model maps. |
+| `jsr:@theorum/core/providers` / `theorum/providers` | Provider constructors, Gemini vault types, and provider utility types. |
 | `jsr:@theorum/core/openrouter` / `theorum/openrouter` | OpenRouter payload and streaming adapter. |
 | `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
 | `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
+| `jsr:@theorum/core/host` / `theorum/host` | Optional Deno HTTP helpers (`json`, status mapping, cutout mint flush). |
+| `jsr:@theorum/core/cli` / `theorum/cli` | Profile inspection and stress-test CLI (`theorum` binary on npm). |
+| `jsr:@theorum/core/presets` / `theorum/presets` | Optional convenience packs (`registerGooglePreset`, …). |
+| `jsr:@theorum/core/presets/google` / `theorum/presets/google` | Google builtins (search/maps/urlContext) + Interactions/OpenRouter wire metadata. |
 
 Internal files remain present in source for maintainability, but package consumers should use the public entrypoints above.
 
@@ -304,7 +332,15 @@ npm run lint
 deno publish --dry-run --allow-dirty
 ```
 
-Build the npm package from the Deno source:
+Run the packaged CLI locally:
+
+```bash
+deno task theorum --help
+# or after npm install -g / npx:
+# npx theorum --help
+```
+
+Build the npm package from the Deno source (publish only from `npm/`):
 
 ```bash
 npm run build:npm

@@ -48,7 +48,7 @@ theorum test --all [--lite] [--concurrency 4]
 | `--lite` | `boolean` | Minimal single-turn connectivity ping (fast mode, tools off, text only) |
 | `--matrix` | `boolean` | Generate and execute all valid permutations for the profile |
 | `--attachment` | `string[]` | Path(s) to custom attachment files (PNG, PDF, CSV, etc.) |
-| `--voice` | `string` | Path to custom voice audio (WAV, PCM) |
+| `--voice` | `string` | Path to custom voice input audio (WAV, PCM) |
 | `--search` | `boolean` | Force Google Search tool on |
 | `--map` | `boolean` | Force Google Maps tool on |
 | `--mode` | `'fast' \| 'smart'` | Force reasoning / model speed tier |
@@ -112,7 +112,7 @@ interface SynthesizedTurn {
    - If profile supports `smart` mode $\to$ select `smart` (highest pinned thinking tokens).
    - Otherwise $\to$ use default profile model.
 2. **Multimodal Fixtures**:
-   - If `inputs.voice === true` $\to$ inject synthetic 16kHz PCM/WAV speech fixture.
+   - If `inputs.voice` is set $\to$ inject synthetic 16kHz PCM/WAV voice-input fixture.
    - If `inputs.attachments === true` $\to$ inject synthetic test document/image matching allowed MIME types within byte ceilings (`maxBytes`).
 3. **Tool Resolution & Conflict Handling**:
    - Turn on all allowed tools in `profile.tools.allow`.

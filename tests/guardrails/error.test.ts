@@ -1,5 +1,4 @@
 import {
-  errorMessage,
   PUBLIC_ACTION,
   PUBLIC_CANARY,
   PUBLIC_FILE_COUNT,
@@ -14,8 +13,8 @@ import {
 } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 
-Deno.test('publicError and errorMessage cover all exact mappings and rules', () => {
-  assertEquals(errorMessage(new TheorumError(UPSTREAM_FAILED)), PUBLIC_UNAVAILABLE);
+Deno.test('publicError covers all exact mappings and rules', () => {
+  assertEquals(publicError(new TheorumError(UPSTREAM_FAILED)), PUBLIC_UNAVAILABLE);
   assertEquals(publicError(new TheorumError('empty Gemini stream')), PUBLIC_UNAVAILABLE);
   assertEquals(publicError('Gemini HTTP 500'), PUBLIC_UNAVAILABLE);
   assertEquals(publicError('OpenRouter HTTP 401'), PUBLIC_UNAVAILABLE);

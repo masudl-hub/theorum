@@ -1,15 +1,15 @@
 import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC, PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import type { ProviderCompleteRequest } from '../../src/kernel/types.ts';
-import {
-  createOpenRouterTtsProvider,
-  streamOpenRouterTts,
-  wrapPcmAsWav,
-} from '../../src/providers/tts.ts';
+import { createSpeechProvider, streamSpeech, wrapPcmAsWav } from '../../src/providers/speech.ts';
+import { HOST_MODELS } from '../fixtures/models.ts';
 
-function createMockTtsRequest(text: string): ProviderCompleteRequest {
+function createMockSpeechRequest(text: string): ProviderCompleteRequest {
+  const spec = HOST_MODELS.gemini31FlashTts;
   return {
     model: 'gemini31FlashTts',
+    apiId: spec.apiId,
+    openRouterId: spec.openRouterId,
     thinking: 'minimal',
     summaries: 'none',
     maxOutputTokens: 2048,
@@ -30,7 +30,6 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
   assertEquals(wav.length, 44 + pcm.length);
   const view = new DataView(wav.buffer);
 
-  // Check 'RIFF'
   const riff = String.fromCharCode(
     view.getUint8(0),
     view.getUint8(1),
@@ -39,7 +38,6 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
   );
   assertEquals(riff, 'RIFF');
 
-  // Check 'WAVE'
   const wave = String.fromCharCode(
     view.getUint8(8),
     view.getUint8(9),
@@ -48,7 +46,6 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
   );
   assertEquals(wave, 'WAVE');
 
-  // Check 'fmt '
   const fmt = String.fromCharCode(
     view.getUint8(12),
     view.getUint8(13),
@@ -57,13 +54,11 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
   );
   assertEquals(fmt, 'fmt ');
 
-  // Format 1 (PCM), Channels 1, Sample Rate 24000, Bits 16
   assertEquals(view.getUint16(20, true), 1);
   assertEquals(view.getUint16(22, true), 1);
   assertEquals(view.getUint32(24, true), 24000);
   assertEquals(view.getUint16(34, true), 16);
 
-  // Check 'data'
   const dataTag = String.fromCharCode(
     view.getUint8(36),
     view.getUint8(37),
@@ -74,10 +69,10 @@ Deno.test('wrapPcmAsWav creates valid 44-byte RIFF/WAVE header', () => {
   assertEquals(view.getUint32(40, true), pcm.length);
 });
 
-Deno.test('streamOpenRouterTts yields error when apiKey is missing', async () => {
-  const req = createMockTtsRequest('Hello world');
+Deno.test('streamSpeech yields error when apiKey is missing', async () => {
+  const req = createMockSpeechRequest('Hello world');
   const events = [];
-  for await (const event of streamOpenRouterTts(req, { apiKey: '' })) {
+  for await (const event of streamSpeech(req, { apiKey: '' })) {
     events.push(event);
   }
   assertEquals(events.length, 1);
@@ -85,10 +80,10 @@ Deno.test('streamOpenRouterTts yields error when apiKey is missing', async () =>
   assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
 });
 
-Deno.test('streamOpenRouterTts yields error on empty input text', async () => {
-  const req = createMockTtsRequest('');
+Deno.test('streamSpeech yields error on empty input text', async () => {
+  const req = createMockSpeechRequest('');
   const events = [];
-  for await (const event of streamOpenRouterTts(req, { apiKey: 'test-key' })) {
+  for await (const event of streamSpeech(req, { apiKey: 'test-key' })) {
     events.push(event);
   }
   assertEquals(events.length, 1);
@@ -96,12 +91,12 @@ Deno.test('streamOpenRouterTts yields error on empty input text', async () => {
   assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
 });
 
-Deno.test('streamOpenRouterTts handles HTTP error from OpenRouter', async () => {
-  const req = createMockTtsRequest('Hello world');
+Deno.test('streamSpeech handles HTTP error from speech endpoint', async () => {
+  const req = createMockSpeechRequest('Hello world');
   const mockFetch: typeof fetch = () => Promise.resolve(new Response('Forbidden', { status: 403 }));
 
   const events = [];
-  for await (const event of streamOpenRouterTts(req, { apiKey: 'test-key', fetch: mockFetch })) {
+  for await (const event of streamSpeech(req, { apiKey: 'test-key', fetch: mockFetch })) {
     events.push(event);
   }
   assertEquals(events.length, 1);
@@ -109,8 +104,8 @@ Deno.test('streamOpenRouterTts handles HTTP error from OpenRouter', async () => 
   assertEquals((events[0] as { error: string }).error, PUBLIC_UNAVAILABLE);
 });
 
-Deno.test('streamOpenRouterTts yields error when response is empty', async () => {
-  const req = createMockTtsRequest('Hello world');
+Deno.test('streamSpeech yields error when response is empty', async () => {
+  const req = createMockSpeechRequest('Hello world');
   const mockFetch: typeof fetch = () =>
     Promise.resolve(
       new Response(new Uint8Array([]), {
@@ -120,7 +115,7 @@ Deno.test('streamOpenRouterTts yields error when response is empty', async () =>
     );
 
   const events = [];
-  for await (const event of streamOpenRouterTts(req, { apiKey: 'test-key', fetch: mockFetch })) {
+  for await (const event of streamSpeech(req, { apiKey: 'test-key', fetch: mockFetch })) {
     events.push(event);
   }
   assertEquals(events.length, 1);
@@ -128,8 +123,8 @@ Deno.test('streamOpenRouterTts yields error when response is empty', async () =>
   assertEquals((events[0] as { error: string }).error, PUBLIC_GENERIC);
 });
 
-Deno.test('streamOpenRouterTts yields media, tokens, and done on successful synthesis via OpenRouter', async () => {
-  const req = createMockTtsRequest('Hello, welcome to the demo!');
+Deno.test('streamSpeech yields media, tokens, and done on successful synthesis', async () => {
+  const req = createMockSpeechRequest('Hello, welcome to the demo!');
   const mockPcmBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   let capturedUrl = '';
@@ -152,9 +147,9 @@ Deno.test('streamOpenRouterTts yields media, tokens, and done on successful synt
     );
   };
 
-  const provider = createOpenRouterTtsProvider({
+  const provider = createSpeechProvider({
     apiKey: 'mock-openrouter-key',
-    voiceName: 'Orus',
+    voice: 'Orus',
     fetch: mockFetch,
   });
 
@@ -184,15 +179,15 @@ Deno.test('streamOpenRouterTts yields media, tokens, and done on successful synt
   assertEquals(events[2]?.type, 'done');
 });
 
-Deno.test('streamOpenRouterTts respects profile voice and response_format mp3', async () => {
+Deno.test('streamSpeech respects outputs.speech voice and format mp3', async () => {
   const req: ProviderCompleteRequest = {
-    ...createMockTtsRequest('Testing MP3 output'),
-    voice: {
+    ...createMockSpeechRequest('Testing MP3 output'),
+    speech: {
       voice: 'Kore',
-      responseFormat: 'mp3',
+      format: 'mp3',
     },
   };
-  const mockMp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64]); // MP3 frame header start
+  const mockMp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64]);
 
   let capturedBody: Record<string, unknown> = {};
   const mockFetch: typeof fetch = (_input, init) => {
@@ -207,7 +202,7 @@ Deno.test('streamOpenRouterTts respects profile voice and response_format mp3', 
     );
   };
 
-  const provider = createOpenRouterTtsProvider({
+  const provider = createSpeechProvider({
     apiKey: 'mock-key',
     siteUrl: 'https://theorum.dev',
     siteName: 'Theorum Test',

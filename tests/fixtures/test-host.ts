@@ -1,13 +1,19 @@
-import {
-  CHAT_MEDIA_LIMITS,
-  IMAGE_FLASH_LITE_ASPECT_RATIOS,
-  IMAGE_FLASH_LITE_SIZES,
-  IMAGE_INPUT_MIMES,
-  VOICE_INPUT_MIMES,
-} from '../../src/kernel/registry/catalog.ts';
 import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { registerStructured } from '../../src/kernel/registry/schemas.ts';
 import type { Profile } from '../../src/kernel/types.ts';
+import type { GoogleImagePins } from '../../src/presets/google.ts';
+import { registerGooglePreset } from '../../src/presets/google.ts';
+import {
+  CHAT_MEDIA_LIMITS,
+  HOST_MODELS,
+  IMAGE_ASPECT_RATIOS,
+  IMAGE_INPUT_MIMES,
+  IMAGE_SIZES,
+  modelAllow,
+  VOICE_INPUT_MIMES,
+} from './models.ts';
+
+registerGooglePreset();
 
 const CHAT_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/csv', 'text/plain'];
 const FORMATTER_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/plain'];
@@ -47,7 +53,7 @@ const chat: Profile = {
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini35FlashLite'],
+    ...modelAllow('gemini35FlashLite'),
     controls: ['thinking'],
     maxSteps: 1,
     key: 'freeA',
@@ -59,7 +65,7 @@ const chat: Profile = {
     voice: { accept: [...VOICE_INPUT_MIMES] },
     ...CHAT_MEDIA_LIMITS,
   },
-  outputs: { structured: 'chatTurn', media: false },
+  outputs: { structured: 'chatTurn' },
   guardrails: { quota: { perDay: CHAT_QUOTA } },
 };
 
@@ -69,7 +75,7 @@ const pinned: Profile = {
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini35FlashLite'],
+    ...modelAllow('gemini35FlashLite'),
     thinking: 'low',
     controls: [],
     maxSteps: 1,
@@ -77,7 +83,7 @@ const pinned: Profile = {
   },
   tools: { allow: [] },
   inputs: { text: true },
-  outputs: { structured: 'chatTurn', media: false },
+  outputs: { structured: 'chatTurn' },
   guardrails: { quota: { perDay: PIN_QUOTA } },
 };
 
@@ -91,11 +97,15 @@ const selector: Profile = {
     protocol: 'geminiInteractions',
     provider: 'google',
     allow: ['gemini35FlashLite', 'gemini31ProPreview'],
+    config: {
+      gemini35FlashLite: {
+        ...HOST_MODELS.gemini35FlashLite,
+        maxOutputTokens: LONG_FLASH,
+      },
+      gemini31ProPreview: HOST_MODELS.gemini31ProPreview,
+    },
     select: { fast: 'gemini35FlashLite', smart: 'gemini31ProPreview' },
     thinking: { fast: 'low', smart: 'high' },
-    override: {
-      gemini35FlashLite: { maxOutputTokens: LONG_FLASH, summaries: 'auto' },
-    },
     controls: [],
     maxSteps: 1,
     key: 'freeB',
@@ -107,7 +117,7 @@ const selector: Profile = {
     voice: { accept: [...VOICE_INPUT_MIMES] },
     ...CHAT_MEDIA_LIMITS,
   },
-  outputs: { structured: 'promptTurn', media: false },
+  outputs: { structured: 'promptTurn' },
   guardrails: { quota: { perDay: CHAT_QUOTA } },
 };
 
@@ -117,7 +127,7 @@ const formatter: Profile = {
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini35FlashLite'],
+    ...modelAllow('gemini35FlashLite'),
     controls: ['thinking'],
     maxSteps: 1,
     key: 'freeC',
@@ -131,7 +141,6 @@ const formatter: Profile = {
   },
   outputs: {
     structured: { by: 'language', map: { html: 'htmlTurn', tsx: 'tsxTurn' }, fallback: 'htmlTurn' },
-    media: false,
   },
   guardrails: { quota: { perDay: FORMATTER_QUOTA } },
 };
@@ -142,7 +151,7 @@ const image: Profile = {
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini31FlashLiteImage'],
+    ...modelAllow('gemini31FlashLiteImage'),
     thinking: 'minimal',
     controls: [],
     maxSteps: 1,
@@ -153,12 +162,42 @@ const image: Profile = {
     text: true,
     attachments: { accept: IMAGE_INPUT_MIMES },
     slots: {
-      aspectRatio: [...IMAGE_FLASH_LITE_ASPECT_RATIOS],
-      imageSize: [...IMAGE_FLASH_LITE_SIZES],
+      aspectRatio: [...IMAGE_ASPECT_RATIOS],
+      size: [...IMAGE_SIZES],
     },
     ...CHAT_MEDIA_LIMITS,
   },
-  outputs: { structured: null, media: true },
+  outputs: {
+    structured: null,
+    image: {
+      aspectRatio: '1:1',
+      size: '1K',
+      mimeType: 'image/jpeg',
+      allowsGrounding: false,
+      maxInputImages: 14,
+    } satisfies GoogleImagePins,
+  },
+  guardrails: { quota: { perDay: PIN_QUOTA } },
+};
+
+const speech: Profile = {
+  id: 'speech',
+  identity: { handle: 'speech', system: 'Speak the user text clearly.' },
+  model: {
+    protocol: 'geminiInteractions',
+    provider: 'google',
+    ...modelAllow('gemini31FlashTts'),
+    thinking: 'minimal',
+    controls: [],
+    maxSteps: 1,
+    key: 'freeA',
+  },
+  tools: { allow: [] },
+  inputs: { text: true },
+  outputs: {
+    structured: null,
+    speech: { voice: 'Kore', format: 'pcm' },
+  },
   guardrails: { quota: { perDay: PIN_QUOTA } },
 };
 
@@ -167,3 +206,4 @@ registerProfile(pinned);
 registerProfile(selector);
 registerProfile(formatter);
 registerProfile(image);
+registerProfile(speech);

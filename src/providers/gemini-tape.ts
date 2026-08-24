@@ -56,4 +56,4 @@ async function tapeGemini(value: unknown, canary: string): Promise<unknown> {
   return redactCanaryInTree(await scrubGemini(value), canary);
 }
 
-export { sha256, tapeGemini };
+export { tapeGemini };

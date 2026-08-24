@@ -9,7 +9,6 @@
  */
 
 export {
-  errorMessage,
   PUBLIC_ACTION,
   PUBLIC_CANARY,
   PUBLIC_FILE_COUNT,

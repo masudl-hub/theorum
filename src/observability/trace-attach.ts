@@ -1,10 +1,4 @@
-import { modelEntry } from '../kernel/registry/catalog.ts';
-import type {
-  ModelId,
-  ProviderCompleteRequest,
-  ResolvedGeneration,
-  TurnRequest,
-} from '../kernel/types.ts';
+import type { ProviderCompleteRequest, ResolvedGeneration, TurnRequest } from '../kernel/types.ts';
 import { tapeGemini } from '../providers/gemini-tape.ts';
 import { toInteractionsBody } from '../providers/interactions.ts';
 import type { TraceRecord } from './trace-record.ts';
@@ -13,6 +7,8 @@ import { httpStatus } from './trace-usage.ts';
 function completeRequest(generation: ResolvedGeneration, system: string): ProviderCompleteRequest {
   return {
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     previousInteractionId: generation.previousInteractionId,
     store: generation.store,
     thinking: generation.thinking,
@@ -54,7 +50,10 @@ function attachResolved(
     record.metadata = safe.metadata;
   }
   if (model) {
-    record.model = { id: model, apiId: modelEntry(model as ModelId).apiId };
+    record.model = {
+      id: model,
+      apiId: generation?.apiId ?? model,
+    };
   }
   if (bucket) {
     record.bucket = bucket;

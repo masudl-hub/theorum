@@ -19,6 +19,7 @@ import {
 } from '../../src/cli/matrix/synthesizer.ts';
 import { getProfile } from '../../src/kernel/registry/profiles.ts';
 import type { ModelProvider, Profile, TurnEvent } from '../../src/kernel/types.ts';
+import { modelAllow } from '../fixtures/models.ts';
 
 const testProfile: Profile = {
   id: 'test-agent',
@@ -26,7 +27,7 @@ const testProfile: Profile = {
   model: {
     protocol: 'geminiInteractions',
     provider: 'google',
-    allow: ['gemini35FlashLite', 'gemini31ProPreview'],
+    ...modelAllow('gemini35FlashLite', 'gemini31ProPreview'),
     select: { fast: 'gemini35FlashLite', smart: 'gemini31ProPreview' },
     key: 'freeA',
   },
@@ -39,7 +40,7 @@ const testProfile: Profile = {
     maxBytes: 10_000_000,
     maxTurnBytes: 15_000_000,
   },
-  outputs: { structured: null, media: false },
+  outputs: { structured: null },
   guardrails: { quota: { perDay: 50 } },
 };
 
@@ -84,13 +85,13 @@ Deno.test('synthesizeStressCombo constructs smart mode with multimodal attachmen
   assertEquals(req.input?.attachments?.length, 1);
   assertEquals(req.input?.voice?.length, 1);
 
-  // By default, search is enabled and maps is disabled
+  // By default, search is enabled and maps is disabled (maps.conflictsWith)
   assertEquals(req.tools?.googleSearch, true);
   assertEquals(req.tools?.googleMaps, false);
 });
 
-Deno.test('synthesizeStressCombo supports preferMaps override', () => {
-  const req = synthesizeStressCombo(testProfile, { preferMaps: true });
+Deno.test('synthesizeStressCombo supports preferTool override for conflicting builtins', () => {
+  const req = synthesizeStressCombo(testProfile, { preferTool: 'googleMaps' });
   assertEquals(req.tools?.googleSearch, false);
   assertEquals(req.tools?.googleMaps, true);
 });
@@ -100,7 +101,7 @@ Deno.test('synthesizeMatrixCombos generates all key permutations', () => {
   assertEquals(matrix.length, 3);
   assertEquals(matrix[0].name, 'Lite (connectivity)');
   assertEquals(matrix[1].name, 'Stress (all modalities + primary tools)');
-  assertEquals(matrix[2].name, 'Maps Variant (maps enabled, search off)');
+  assertEquals(matrix[2].name, 'Conflict variant (googleMaps preferred)');
 });
 
 Deno.test('buildCustomTurnRequest respects explicit CLI flag overrides', () => {
@@ -215,9 +216,9 @@ Deno.test('runCommand exercises all stream event types and failure handling', as
   registerProfile(
     defineProfile({
       id: 'openrouter_run_bot',
-      model: { protocol: 'openAi', provider: 'openrouter', allow: ['sonar'] },
+      model: { protocol: 'openAi', provider: 'openrouter', ...modelAllow('sonar') },
       inputs: { text: true },
-      outputs: { structured: null, media: false },
+      outputs: { structured: null },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
@@ -236,9 +237,9 @@ Deno.test('runCommand exercises all stream event types and failure handling', as
   registerProfile(
     defineProfile({
       id: 'no_text_bot',
-      model: { allow: ['gemini35FlashLite'] },
+      model: { ...modelAllow('gemini35FlashLite') },
       inputs: { text: false },
-      outputs: { structured: null, media: false },
+      outputs: { structured: null },
       guardrails: { quota: { perDay: 10 } },
     }),
   );

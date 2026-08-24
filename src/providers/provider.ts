@@ -3,12 +3,13 @@
  *
  * This adapter converts THEORUM's provider-neutral request into the Google
  * Interactions wire format and streams normalized `TurnEvent` objects.
+ * Speech-role turns use `response_format: audio` + `speech_config` (same
+ * transport as chat/image).
  *
  * @module
  */
 
 import { publicError, TheorumError } from '../guardrails/error.ts';
-import { fetchGemini, type GeminiTransport } from '../guardrails/keys.ts';
 import {
   eventsFromComplete,
   eventsFromDelta,
@@ -19,9 +20,45 @@ import {
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../kernel/types.ts';
 import { tapFetch } from './google-tap.ts';
 import { toInteractionsBody } from './interactions.ts';
+import { fetchGemini, type GeminiTransport } from './keys.ts';
+import { wrapPcmAsWav } from './speech.ts';
 import { INTERACTIONS_URL, takeSsePayloads } from './sse.ts';
 
 const HTTP_OK = 200;
+
+function base64ToBytes(data: string): Uint8Array {
+  const bin = atob(data);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function isRawPcmMime(mime: string): boolean {
+  const lower = mime.toLowerCase();
+  return lower === 'audio/pcm' || lower === 'audio/l16' || lower === 'audio/raw';
+}
+
+/** Google TTS returns raw PCM; wrap as WAV for hosts (matches OpenRouter pcm path). */
+function normalizeSpeechMedia(event: TurnEvent, speech: boolean): TurnEvent {
+  if (!(speech && event.type === 'media' && event.media)) {
+    return event;
+  }
+  const { mimeType, data } = event.media;
+  if (!isRawPcmMime(mimeType)) {
+    return event;
+  }
+  const wav = wrapPcmAsWav(base64ToBytes(data));
+  return {
+    type: 'media',
+    media: { mimeType: 'audio/wav', data: bytesToBase64(wav) },
+  };
+}
 
 async function* readSseRecords(res: Response): AsyncGenerator<Record<string, unknown>> {
   if (!res.body) {
@@ -125,11 +162,12 @@ async function* streamComplete(
     return;
   }
   const acc = { text: '' };
+  const speech = Boolean(req.speech);
   for await (const payload of readSseRecords(res)) {
     req.tapGemini?.(payload);
     const events = foldPayload(payload, acc);
     for (const event of events) {
-      yield event;
+      yield normalizeSpeechMedia(event, speech);
     }
   }
   if (req.structured && acc.text) {

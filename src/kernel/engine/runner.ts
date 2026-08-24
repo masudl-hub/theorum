@@ -158,6 +158,8 @@ async function* yieldProviderEvents(args: {
   const { canary } = generation;
   for await (const event of provider.complete({
     model: generation.model,
+    apiId: generation.apiId,
+    openRouterId: generation.openRouterId,
     previousInteractionId: generation.previousInteractionId,
     store: generation.store,
     thinking: generation.thinking,
@@ -172,7 +174,7 @@ async function* yieldProviderEvents(args: {
     dynamicToolLoader: generation.dynamicToolLoader,
     structured: generation.structured,
     image: generation.image,
-    voice: generation.voice,
+    speech: generation.speech,
     geminiBucket: generation.geminiBucket,
     tapGemini: (row) => {
       gemini.push(row);

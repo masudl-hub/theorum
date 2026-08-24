@@ -1,6 +1,14 @@
-import { modelEntry } from '../kernel/registry/catalog.ts';
-import type { BuiltinToolId, GeminiBucket, GeminiFreeBucket, ModelId } from '../kernel/types.ts';
-import { TheorumError, UPSTREAM_FAILED } from './error.ts';
+/**
+ * Gemini key vault selection, quota overflow, and fetch retries.
+ *
+ * Host applications supply vault credentials through `GeminiTransport`.
+ * THEORUM does not read environment variables for these keys.
+ *
+ * @module
+ */
+
+import { TheorumError, UPSTREAM_FAILED } from '../guardrails/error.ts';
+import type { BuiltinToolId, GeminiBucket, GeminiFreeBucket, ModelSpec } from '../kernel/types.ts';
 
 type GeminiVault = Record<GeminiBucket, string | undefined>;
 
@@ -29,18 +37,17 @@ const TRANSIENT_THROWN_RE =
   /name resolution|dns|econnreset|econnrefused|etimedout|network|fetch failed|temporarily unavailable|socket|503|502|504/i;
 
 function resolveGeminiBucket(
-  free: GeminiFreeBucket,
-  model: ModelId,
+  profileKey: GeminiFreeBucket,
+  spec: ModelSpec,
   builtins: BuiltinToolId[],
 ): GeminiBucket {
-  const entry = modelEntry(model);
-  if (entry.image) {
+  if (spec.key) {
+    return spec.key;
+  }
+  if (builtins.some((id) => !spec.keyBuiltins.includes(id))) {
     return 'paid';
   }
-  if (builtins.some((id) => !entry.freeBuiltins.includes(id))) {
-    return 'paid';
-  }
-  return free;
+  return profileKey;
 }
 
 function waitDefault(ms: number): Promise<void> {

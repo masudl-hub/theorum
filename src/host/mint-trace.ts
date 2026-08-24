@@ -1,6 +1,15 @@
+/**
+ * Host cutout-trace helpers for apps that mint a final audit row after an
+ * upstream side effect (for example image cutout).
+ *
+ * Prefer importing from `theorum/host`.
+ *
+ * @module
+ */
+
 import { publicError, UPSTREAM_FAILED } from '../guardrails/error.ts';
-import { noopSink, type TraceSink, writeTrace } from './trace.ts';
-import type { TraceRecord } from './trace-record.ts';
+import { noopSink, type TraceSink, writeTrace } from '../observability/trace.ts';
+import type { TraceRecord } from '../observability/trace-record.ts';
 
 interface CutoutTape {
   ok: boolean;

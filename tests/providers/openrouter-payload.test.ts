@@ -1,20 +1,28 @@
 import { assertEquals } from '@std/assert';
 import { registerStructured } from '../../src/kernel/registry/schemas.ts';
 import type { ProviderCompleteRequest } from '../../src/kernel/types.ts';
+import { registerGooglePreset } from '../../src/presets/google.ts';
 import {
   resolveOpenRouterModel,
   toOpenRouterPayload,
 } from '../../src/providers/openrouter-payload.ts';
+import { HOST_MODELS } from '../fixtures/models.ts';
+
+registerGooglePreset();
 
 Deno.test('resolveOpenRouterModel handles custom mapping, catalog models, and fallback', () => {
+  const flashLite = HOST_MODELS.gemini35FlashLite;
   // Custom map
   assertEquals(
     resolveOpenRouterModel('gemini35FlashLite', { gemini35FlashLite: 'anthropic/claude-3-haiku' }),
     'anthropic/claude-3-haiku',
   );
 
-  // Catalog model
-  assertEquals(resolveOpenRouterModel('gemini35FlashLite'), 'google/gemini-3.5-flash-lite');
+  // Wire ids from host model spec
+  assertEquals(
+    resolveOpenRouterModel('gemini35FlashLite', undefined, { apiId: flashLite.apiId }),
+    'google/gemini-3.5-flash-lite',
+  );
 
   // Fallback
   assertEquals(resolveOpenRouterModel('custom-model-id'), 'custom-model-id');
@@ -28,6 +36,7 @@ Deno.test('toOpenRouterPayload tests all modalities, tools, thinking, structured
 
   const baseReq: ProviderCompleteRequest = {
     model: 'gemini35FlashLite',
+    apiId: HOST_MODELS.gemini35FlashLite.apiId,
     system: 'You are an assistant',
     summaries: 'auto',
     image: null,

@@ -1,8 +1,10 @@
 /**
- * OpenRouter TTS provider utilities.
+ * Speech provider utilities (OpenRouter-compatible `/audio/speech`).
  *
- * Provides direct text-to-speech streaming and a `ModelProvider` wrapper for
- * voice output profiles.
+ * Google speech uses Interactions via `createInteractionsProvider` /
+ * `createProvider` when `protocol: 'geminiInteractions'` — not this module.
+ * This module is the openAi/openrouter speech transport: model id + voice +
+ * format → bytes → media events.
  *
  * @module
  */
@@ -11,15 +13,13 @@ import { publicError } from '../guardrails/error.ts';
 import type {
   InteractionPart,
   ModelProvider,
-  OpenRouterAudioFormat,
-  ProfileVoiceSpec,
+  ProfileSpeechSpec,
   ProviderCompleteRequest,
+  SpeechAudioFormat,
   TurnEvent,
 } from '../kernel/types.ts';
-import { resolveOpenRouterApiKey } from './openrouter.ts';
 
 const SAMPLE_RATE = 24000;
-const TTS_MODEL = 'google/gemini-3.1-flash-tts-preview';
 const HTTP_OK = 200;
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -58,10 +58,11 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Ar
   return new Uint8Array(buf);
 }
 
-/** Host-supplied OpenRouter TTS configuration. */
-export interface OpenRouterTtsConfig {
+/** Host-supplied speech transport configuration. */
+export interface SpeechProviderConfig {
   apiKey?: string;
-  voiceName?: string;
+  /** Fallback TTS voice when the profile does not pin `outputs.speech.voice`. */
+  voice?: string;
   baseUrl?: string;
   siteUrl?: string;
   siteName?: string;
@@ -76,7 +77,21 @@ function extractInputText(input: InteractionPart[]): string {
     .trim();
 }
 
-function buildHeaders(apiKey: string, config: OpenRouterTtsConfig): Record<string, string> {
+/** Resolve provider-native speech model id from the complete request. */
+function resolveSpeechWireModel(req: ProviderCompleteRequest): string {
+  if (req.openRouterId) {
+    return req.openRouterId;
+  }
+  if (req.apiId.includes('/')) {
+    return req.apiId;
+  }
+  if (req.apiId) {
+    return `google/${req.apiId}`;
+  }
+  return String(req.model);
+}
+
+function buildHeaders(apiKey: string, config: SpeechProviderConfig): Record<string, string> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
@@ -91,16 +106,17 @@ function buildHeaders(apiKey: string, config: OpenRouterTtsConfig): Record<strin
 }
 
 function buildPayload(
+  req: ProviderCompleteRequest,
   text: string,
-  voiceSpec?: ProfileVoiceSpec,
-  configVoiceName?: string,
+  speech: ProfileSpeechSpec | undefined,
+  configVoice?: string,
 ): Record<string, unknown> {
-  const voice = voiceSpec?.voice ?? configVoiceName;
-  const responseFormat = voiceSpec?.responseFormat ?? 'pcm';
+  const voice = speech?.voice ?? configVoice;
+  const format: SpeechAudioFormat = speech?.format ?? 'pcm';
   const payload: Record<string, unknown> = {
-    model: TTS_MODEL,
+    model: resolveSpeechWireModel(req),
     input: text,
-    response_format: responseFormat,
+    response_format: format,
   };
   if (voice) {
     payload.voice = voice;
@@ -108,11 +124,11 @@ function buildPayload(
   return payload;
 }
 
-async function requestTts(
+async function requestSpeech(
   apiKey: string,
   text: string,
   req: ProviderCompleteRequest,
-  config: OpenRouterTtsConfig,
+  config: SpeechProviderConfig,
 ): Promise<Response> {
   const fetchFn = config.fetch ?? fetch;
   const baseUrl = config.baseUrl?.replace(/\/+$/, '') ?? 'https://openrouter.ai/api/v1';
@@ -120,19 +136,19 @@ async function requestTts(
   return await fetchFn(url, {
     method: 'POST',
     headers: buildHeaders(apiKey, config),
-    body: JSON.stringify(buildPayload(text, req.voice, config.voiceName)),
+    body: JSON.stringify(buildPayload(req, text, req.speech, config.voice)),
   });
 }
 
-function* yieldTtsSuccess(
+function* yieldSpeechSuccess(
   rawBytes: Uint8Array,
   text: string,
-  responseFormat: OpenRouterAudioFormat,
+  format: SpeechAudioFormat,
 ): Generator<TurnEvent> {
   let mediaMime = 'audio/mpeg';
   let mediaBytes = rawBytes;
 
-  if (responseFormat === 'pcm') {
+  if (format === 'pcm') {
     mediaMime = 'audio/wav';
     mediaBytes = wrapPcmAsWav(rawBytes);
   }
@@ -152,45 +168,45 @@ function* yieldTtsSuccess(
   yield { type: 'done' };
 }
 
-/** Stream one OpenRouter TTS synthesis request as THEORUM events. */
-export async function* streamOpenRouterTts(
+/** Stream one speech synthesis request as THEORUM events. */
+export async function* streamSpeech(
   req: ProviderCompleteRequest,
-  config: OpenRouterTtsConfig = {},
+  config: SpeechProviderConfig = {},
 ): AsyncGenerator<TurnEvent> {
-  const apiKey = resolveOpenRouterApiKey(config.apiKey);
+  const apiKey = config.apiKey?.trim() || undefined;
   if (!apiKey) {
-    yield { type: 'error', error: publicError('missing OpenRouter API key for TTS') };
+    yield { type: 'error', error: publicError('missing API key for speech') };
     return;
   }
 
   const text = extractInputText(req.input);
   if (!text) {
-    yield { type: 'error', error: publicError('empty text for TTS') };
+    yield { type: 'error', error: publicError('empty text for speech') };
     return;
   }
 
-  const res = await requestTts(apiKey, text, req, config);
+  const res = await requestSpeech(apiKey, text, req, config);
   if (res.status !== HTTP_OK) {
-    yield { type: 'error', error: publicError(`OpenRouter TTS HTTP ${String(res.status)}`) };
+    yield { type: 'error', error: publicError(`Speech HTTP ${String(res.status)}`) };
     return;
   }
 
   const arrayBuffer = await res.arrayBuffer();
   const rawBytes = new Uint8Array(arrayBuffer);
   if (rawBytes.length === 0) {
-    yield { type: 'error', error: publicError('no audio returned from TTS') };
+    yield { type: 'error', error: publicError('no audio returned from speech') };
     return;
   }
 
-  const responseFormat = req.voice?.responseFormat ?? 'pcm';
-  for (const ev of yieldTtsSuccess(rawBytes, text, responseFormat)) {
+  const format = req.speech?.format ?? 'pcm';
+  for (const ev of yieldSpeechSuccess(rawBytes, text, format)) {
     yield ev;
   }
 }
 
-/** Create a `ModelProvider` that emits TTS media events. */
-export function createOpenRouterTtsProvider(config: OpenRouterTtsConfig = {}): ModelProvider {
+/** Create a `ModelProvider` that emits speech media events. */
+export function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider {
   return {
-    complete: (req: ProviderCompleteRequest) => streamOpenRouterTts(req, config),
+    complete: (req: ProviderCompleteRequest) => streamSpeech(req, config),
   };
 }

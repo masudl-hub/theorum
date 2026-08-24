@@ -20,6 +20,7 @@ function completeRequest(generation: ResolvedGeneration, system: string): Provid
     input: generation.input,
     structured: generation.structured,
     image: generation.image,
+    speech: generation.speech,
     geminiBucket: generation.geminiBucket,
   };
 }

@@ -215,6 +215,10 @@ function resolveTurn(req: TurnRequest): {
   const builtins = resolveBuiltins(profile, safe.tools);
   assertImageGrounding(profile, model, builtins);
   assertSpeechRole(profile);
+  const geminiBucket =
+    profile.model.provider === 'google'
+      ? resolveGeminiBucket(profile.model.key ?? 'freeA', spec, builtins)
+      : undefined;
   return {
     profile,
     generation: {
@@ -238,7 +242,7 @@ function resolveTurn(req: TurnRequest): {
       image: resolveImageFormat(profile, model, input.slots),
       speech: profile.outputs.speech,
       input: resolveInputParts(profile, model, safe),
-      geminiBucket: resolveGeminiBucket(profile.model.key ?? 'freeA', spec, builtins),
+      geminiBucket,
       canary: profile.guardrails.canary !== false ? mintCanary() : '',
     },
   };

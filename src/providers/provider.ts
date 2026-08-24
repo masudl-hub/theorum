@@ -147,6 +147,13 @@ async function* streamComplete(
   req: ProviderCompleteRequest,
   transport: GeminiTransport,
 ): AsyncGenerator<TurnEvent> {
+  if (!req.geminiBucket) {
+    yield {
+      type: 'error',
+      error: publicError('missing Gemini vault bucket for Interactions'),
+    };
+    return;
+  }
   const res = await fetchGemini(
     INTERACTIONS_URL,
     { method: 'POST', body: JSON.stringify(toInteractionsBody(req)) },

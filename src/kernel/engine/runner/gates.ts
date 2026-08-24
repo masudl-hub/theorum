@@ -1,0 +1,338 @@
+import { publicError } from '../../../guardrails/error.ts';
+import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
+import { resolveTurn } from '../../registry/resolve.ts';
+import type {
+  ModelProvider,
+  Profile,
+  ProfileOutputsSpec,
+  ResolvedGeneration,
+  TurnEvent,
+  TurnRequest,
+} from '../../types.ts';
+import type { AttemptFlowState, StepExecutionState } from './state.ts';
+import { executeAttempt } from './steps.ts';
+
+function collectAttemptText(events: TurnEvent[]): string {
+  return events
+    .filter((e) => e.type === 'text' && e.text)
+    .map((e) => e.text)
+    .join('');
+}
+
+function buildRepairRequest(
+  safe: TurnRequest,
+  previousOutput: unknown,
+  rejection: string,
+  repairGuidance?: string,
+): TurnRequest {
+  return {
+    ...safe,
+    input: {
+      ...safe.input,
+      repair: {
+        previousOutput:
+          typeof previousOutput === 'string' ? previousOutput : JSON.stringify(previousOutput),
+        rejection,
+        guidance: repairGuidance,
+      },
+    },
+  };
+}
+
+function hasValidatableOutput(
+  validation: ProfileOutputsSpec['validation'],
+  latestStructured: unknown,
+): boolean {
+  if (!validation || latestStructured === undefined) {
+    return false;
+  }
+  const candidateOutput = validation.extract?.(latestStructured) ?? latestStructured;
+  return candidateOutput !== undefined && candidateOutput !== null;
+}
+
+async function evaluateValidationAttempt(
+  validation: NonNullable<ProfileOutputsSpec['validation']>,
+  latestStructured: unknown,
+  slots: Record<string, string> | undefined,
+): Promise<{ candidateOutput: unknown; isValid: boolean; error: string }> {
+  const candidateOutput = validation.extract?.(latestStructured) ?? latestStructured;
+  const check = await validation.validate(candidateOutput, slots);
+  const error = check.error || check.finding || 'Validation failed';
+  return { candidateOutput, isValid: Boolean(check.isValid), error };
+}
+
+type EgressOutcome =
+  | { action: 'pass' }
+  | { action: 'refusal'; event: TurnEvent }
+  | { action: 'retry'; nextRequest: TurnRequest }
+  | { action: 'withhold'; event: TurnEvent };
+
+async function evaluateEgressOutcome(args: {
+  egress: NonNullable<Profile['guardrails']['egress']>;
+  attemptEvents: TurnEvent[];
+  generation: ResolvedGeneration;
+  request: TurnRequest;
+  profile: Profile;
+  canRetry: boolean;
+}): Promise<EgressOutcome> {
+  const { egress, attemptEvents, generation, request, profile, canRetry } = args;
+  const attemptText = collectAttemptText(attemptEvents);
+  const result = await egress.enforce({
+    text: attemptText,
+    canary: generation.canary,
+    slots: request.input?.slots,
+    profile,
+    role: request.input?.role,
+  });
+
+  if (!result.blocked) {
+    return { action: 'pass' };
+  }
+
+  if (egress.onBlock === 'refuse_to_user') {
+    return { action: 'refusal', event: { type: 'text', text: result.text } };
+  }
+
+  if (canRetry) {
+    const rejectionMsg = result.rejectionMessage || 'Egress disclosure violation detected.';
+    const repairGuidance =
+      egress.repairGuidance ||
+      'Rewrite the message as corrected user-visible prose only. Keep the same helpful substance; scrub all internal tool names, leak phrases, and disclosure markers.';
+    const nextRequest = buildRepairRequest(request, attemptText, rejectionMsg, repairGuidance);
+    return { action: 'retry', nextRequest };
+  }
+
+  return {
+    action: 'withhold',
+    event: {
+      type: 'error',
+      error: publicError('Turn withheld: egress disclosure violation'),
+    },
+  };
+}
+
+type ValidationOutcome =
+  | { action: 'pass' }
+  | { action: 'retry'; nextRequest: TurnRequest }
+  | { action: 'accept'; event: TurnEvent };
+
+async function evaluateValidationOutcome(args: {
+  validation: NonNullable<ProfileOutputsSpec['validation']>;
+  latestStructured: unknown;
+  request: TurnRequest;
+  canRetry: boolean;
+}): Promise<ValidationOutcome> {
+  const { validation, latestStructured, request, canRetry } = args;
+  if (!hasValidatableOutput(validation, latestStructured)) {
+    return { action: 'pass' };
+  }
+
+  const { candidateOutput, isValid, error } = await evaluateValidationAttempt(
+    validation,
+    latestStructured,
+    request.input?.slots,
+  );
+
+  if (isValid) {
+    return { action: 'pass' };
+  }
+
+  if (canRetry) {
+    const nextRequest = buildRepairRequest(
+      request,
+      candidateOutput,
+      error,
+      validation.repairGuidance,
+    );
+    return { action: 'retry', nextRequest };
+  }
+
+  return {
+    action: 'accept',
+    event: { type: 'structured', structured: latestStructured },
+  };
+}
+
+function* yieldBufferedAttemptEvents(events: TurnEvent[]): Generator<TurnEvent> {
+  for (const ev of events) {
+    if (ev.type !== 'tokens') {
+      yield ev;
+    }
+  }
+}
+
+function updateFlowForRetry(flow: AttemptFlowState, nextReq: TurnRequest): void {
+  flow.currentAttempt++;
+  flow.currentReq = nextReq;
+  flow.currentGen = resolveTurn(sanitizeTurnRequest(nextReq)).generation;
+}
+
+async function* handleEgressGate(
+  egress: NonNullable<Profile['guardrails']['egress']>,
+  flow: AttemptFlowState,
+  state: StepExecutionState,
+  profile: Profile,
+  maxRetries: number,
+): AsyncGenerator<TurnEvent, 'continue' | 'terminal' | 'pass'> {
+  const canRetry = flow.currentAttempt < maxRetries;
+  const outcome = await evaluateEgressOutcome({
+    egress,
+    attemptEvents: state.attemptEvents,
+    generation: flow.currentGen,
+    request: flow.currentReq,
+    profile,
+    canRetry,
+  });
+
+  if (outcome.action === 'refusal') {
+    state.allEmittedEvents.push(outcome.event);
+    yield outcome.event;
+    return 'terminal';
+  }
+  if (outcome.action === 'withhold') {
+    yield outcome.event;
+    return 'terminal';
+  }
+  if (outcome.action === 'retry') {
+    updateFlowForRetry(flow, outcome.nextRequest);
+    return 'continue';
+  }
+  return 'pass';
+}
+
+async function* handleValidationGate(
+  validation: NonNullable<ProfileOutputsSpec['validation']>,
+  flow: AttemptFlowState,
+  state: StepExecutionState,
+  latestStructured: unknown,
+  maxRetries: number,
+): AsyncGenerator<TurnEvent, 'continue' | 'terminal' | 'pass'> {
+  const canRetry = flow.currentAttempt < maxRetries;
+  const outcome = await evaluateValidationOutcome({
+    validation,
+    latestStructured,
+    request: flow.currentReq,
+    canRetry,
+  });
+
+  if (outcome.action === 'retry') {
+    updateFlowForRetry(flow, outcome.nextRequest);
+    return 'continue';
+  }
+  if (outcome.action === 'accept') {
+    state.allEmittedEvents.push(outcome.event);
+    yield outcome.event;
+    return 'terminal';
+  }
+  return 'pass';
+}
+
+type AttemptStepAction =
+  | { status: 'terminal' }
+  | { status: 'continue' }
+  | {
+      status: 'success';
+    };
+
+function gateStatusToAction(
+  status: 'continue' | 'terminal' | 'pass',
+  terminalStatus: 'terminal' | 'success' = 'terminal',
+): AttemptStepAction | null {
+  if (status === 'terminal') {
+    return { status: terminalStatus };
+  }
+  if (status === 'continue') {
+    return { status: 'continue' };
+  }
+  return null;
+}
+
+async function* executeSingleAttemptCycle(args: {
+  flow: AttemptFlowState;
+  state: StepExecutionState;
+  profile: Profile;
+  system: string;
+  provider: ModelProvider;
+  gemini: Record<string, unknown>[];
+  maxRetries: number;
+}): AsyncGenerator<TurnEvent, AttemptStepAction> {
+  const { flow, state, profile, system, provider, gemini, maxRetries } = args;
+  const validation = profile.outputs.validation;
+  const egress = profile.guardrails.egress;
+
+  state.attemptEvents = [];
+  const { latestStructured } = yield* executeAttempt({
+    safe: flow.currentReq,
+    profile,
+    generation: flow.currentGen,
+    system,
+    provider,
+    gemini,
+    state,
+  });
+
+  if (egress?.enforce) {
+    const status = yield* handleEgressGate(egress, flow, state, profile, maxRetries);
+    const action = gateStatusToAction(status, 'terminal');
+    if (action) {
+      return action;
+    }
+  }
+
+  if (validation) {
+    const status = yield* handleValidationGate(
+      validation,
+      flow,
+      state,
+      latestStructured,
+      maxRetries,
+    );
+    const action = gateStatusToAction(status, 'success');
+    if (action) {
+      return action;
+    }
+  }
+
+  if (validation || egress?.enforce) {
+    yield* yieldBufferedAttemptEvents(state.attemptEvents);
+  }
+
+  return { status: 'success' };
+}
+
+async function* runAttemptsWithValidation(
+  safe: TurnRequest,
+  profile: Profile,
+  generation: ResolvedGeneration,
+  system: string,
+  provider: ModelProvider,
+  gemini: Record<string, unknown>[],
+  state: StepExecutionState,
+): AsyncGenerator<TurnEvent> {
+  const maxRetries = Math.max(
+    profile.outputs.validation?.maxRetries ?? 0,
+    profile.guardrails.egress?.maxRetries ?? 2,
+  );
+  const flow: AttemptFlowState = {
+    currentAttempt: 0,
+    currentGen: generation,
+    currentReq: safe,
+  };
+
+  while (flow.currentAttempt <= maxRetries) {
+    const step = yield* executeSingleAttemptCycle({
+      flow,
+      state,
+      profile,
+      system,
+      provider,
+      gemini,
+      maxRetries,
+    });
+    if (step.status === 'terminal' || step.status === 'success') {
+      break;
+    }
+  }
+}
+
+export { runAttemptsWithValidation };

@@ -90,6 +90,12 @@ function assertSpeechRole(profile: Profile): void {
       `Profile ${profile.id} cannot mix structured JSON with native speech output`,
     );
   }
+  if (profile.outputs.speech.format === 'mp3' && profile.model.protocol === 'geminiInteractions') {
+    throw new TheorumError(
+      `Profile ${profile.id}: outputs.speech.format 'mp3' requires protocol 'openAi' ` +
+        `(geminiInteractions speech returns PCM and emits WAV)`,
+    );
+  }
 }
 
 function resolveImageFormat(

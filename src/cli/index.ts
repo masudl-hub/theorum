@@ -16,15 +16,15 @@ COMMANDS:
     --lite             Minimal fast-path connectivity ping
     --matrix           Run all valid permutations for the profile
     --mode <fast|smart> Reasoning mode override
-    --search           Force googleSearch ON (when allowlisted; Google preset)
-    --map              Force googleMaps ON (when allowlisted; Google preset)
+    --search           Optional: set tool id googleSearch when allowlisted
+    --map              Optional: set tool id googleMaps when allowlisted
 
   run                  Execute a turn with real-time streaming output
     --profile, -p <id> Target profile ID
     --prompt <text>    User prompt string
     --mode <fast|smart> Reasoning mode
-    --search           Enable Google Search
-    --map              Enable Google Maps
+    --search           Optional: set tool id googleSearch when allowlisted
+    --map              Optional: set tool id googleMaps when allowlisted
 
   profile              Inspect registered profile blueprints
     list               List all registered profiles

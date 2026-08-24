@@ -179,8 +179,9 @@ export interface ProfileValidationSpec {
 
 /**
  * Audio container for speech generation output.
- * Wire container formats may live in the kernel; vendor voice catalogs and
- * image vocabularies live in presets/apps.
+ * - `openAi` speech (`/audio/speech`): sent as wire `response_format`.
+ * - `geminiInteractions`: only `pcm` (or omit). Google returns PCM; THEORUM emits WAV.
+ *   `mp3` is rejected at resolve.
  */
 export type SpeechAudioFormat = 'pcm' | 'mp3';
 
@@ -192,6 +193,10 @@ export type SpeechAudioFormat = 'pcm' | 'mp3';
  */
 export interface ProfileSpeechSpec {
   voice?: string;
+  /**
+   * Output container. `pcm` (default) → WAV media on both transports.
+   * `mp3` requires `protocol: 'openAi'` speech; rejected on Interactions.
+   */
   format?: SpeechAudioFormat;
 }
 
@@ -472,7 +477,11 @@ export interface ResolvedGeneration {
   image: ImageResponseFormat | null;
   speech?: ProfileSpeechSpec;
   input: InteractionPart[];
-  geminiBucket: GeminiBucket;
+  /**
+   * Gemini vault slot for Google Interactions transport only.
+   * Omitted for non-Google providers; never sent on the wire.
+   */
+  geminiBucket?: GeminiBucket;
   canary: string;
 }
 
@@ -558,7 +567,11 @@ export interface ProviderCompleteRequest {
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
   speech?: ProfileSpeechSpec;
-  geminiBucket: GeminiBucket;
+  /**
+   * Gemini vault slot for Google Interactions transport only.
+   * Required when completing via `createInteractionsProvider`.
+   */
+  geminiBucket?: GeminiBucket;
   /** Scrubbed SSE / HTTP rows for traces. */
   tapGemini?: (row: Record<string, unknown>) => void;
 }

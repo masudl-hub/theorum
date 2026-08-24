@@ -62,9 +62,9 @@ flowchart TD
     end
 
     subgraph Providers["Provider adapters"]
-        OR["OpenRouter"]
+        OR["OpenRouter chat"]
         GI["Google Interactions"]
-        TTS["Speech /audio/speech"]
+        Speech["Speech (Interactions or /audio/speech)"]
     end
 
     Profile --> Resolve
@@ -79,6 +79,8 @@ flowchart TD
     Providers --> Runner
     Runner --> TraceSink
 ```
+
+Hosts normally pick a transport with `createProvider(profile, { gemini, openRouter, speech })`, which routes from `profile.model.protocol` / `provider` (and whether the profile is a speech role).
 
 ### Turn Lifecycle
 
@@ -274,7 +276,23 @@ Quota is optional. If a profile omits `guardrails.quota`, the quota helper retur
 
 ## Provider Adapters
 
-THEORUM includes provider adapters but does not own credentials.
+THEORUM includes provider adapters but does not own credentials. Prefer routing from the profile:
+
+```ts
+import { createProvider, runTurn } from "jsr:@theorum/core";
+
+const provider = createProvider(profile, {
+  gemini: { vault: hostGeminiKeyVault, fetch },
+  openRouter: { apiKey: hostSecrets.openRouterApiKey },
+  speech: { apiKey: hostSecrets.openRouterApiKey }, // openAi speech roles only
+});
+
+for await (const event of runTurn({ profile: profile.id, input: { text: "…" } }, provider)) {
+  // …
+}
+```
+
+Or construct a single adapter explicitly:
 
 ```ts
 import { createOpenRouterProvider } from "jsr:@theorum/core/openrouter";
@@ -300,7 +318,7 @@ Provider support is intentionally split by wire protocol:
 | Provider | Protocol | Use |
 | :--- | :--- | :--- |
 | OpenRouter | `openAi` | Chat completions, reasoning streams, tool calls, structured output; speech via `/audio/speech` when the profile is a speech role. |
-| Google Interactions | `geminiInteractions` | Native Google Interactions streaming, image/audio response formats, interaction continuity, grounding metadata. |
+| Google Interactions | `geminiInteractions` | Streaming chat/image/speech on one transport (`response_format` image or audio). |
 
 ---
 

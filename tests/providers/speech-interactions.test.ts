@@ -1,5 +1,6 @@
 import '../fixtures/test-host.ts';
 import { assertEquals, assertThrows } from '@std/assert';
+import { TheorumError } from '../../src/guardrails/error.ts';
 import { eventsFromComplete, eventsFromDelta } from '../../src/kernel/engine/delta.ts';
 import { defineProfile, getProfile, registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
@@ -156,6 +157,25 @@ Deno.test('createProvider routes google speech to Interactions', () => {
   assertEquals(typeof provider.complete, 'function');
 });
 
+Deno.test('Interactions speech rejects format mp3 at resolve', () => {
+  registerProfile(
+    defineProfile({
+      id: 'speech_mp3_bad',
+      model: {
+        protocol: 'geminiInteractions',
+        provider: 'google',
+        allow: ['gemini31FlashTts'],
+        config: { gemini31FlashTts: HOST_MODELS.gemini31FlashTts },
+      },
+      outputs: { speech: { voice: 'Kore', format: 'mp3' } },
+    }),
+  );
+  assertThrows(
+    () => resolveTurn({ profile: 'speech_mp3_bad', input: { text: 'hi' } }),
+    TheorumError,
+  );
+});
+
 Deno.test('createProvider requires gemini transport for Interactions', () => {
   assertThrows(() => createProvider(getProfile('speech'), {}), Error);
 });
@@ -176,4 +196,6 @@ Deno.test('createProvider routes openrouter speech to speech transport', () => {
   const profile = getProfile('or_speech');
   const provider = createProvider(profile, { speech: { apiKey: 'k' } });
   assertEquals(typeof provider.complete, 'function');
+  const { generation } = resolveTurn({ profile: 'or_speech', input: { text: 'hi' } });
+  assertEquals(generation.geminiBucket, undefined);
 });

@@ -27,7 +27,7 @@ await build({
     strict: true,
   },
   package: {
-    name: '@theorum/core',
+    name: 'theorum',
     version,
     description:
       'A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.',

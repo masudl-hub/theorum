@@ -2,7 +2,7 @@
  * Shared type contracts for THEORUM profiles, turns, provider adapters, tools,
  * guardrails, and stream events.
  *
- * Import from `@theorum/core/kernel` when a host app needs types without
+ * Import from `jsr:@theorum/core/kernel` or `theorum/kernel` when a host app needs types without
  * importing provider implementations.
  *
  * @module

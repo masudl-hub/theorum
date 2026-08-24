@@ -14,7 +14,7 @@ Host applications own credentials, runtime configuration, and secret storage. Th
 ## 2. OpenRouter
 
 ```ts
-import { createOpenRouterProvider } from '@theorum/core/openrouter';
+import { createOpenRouterProvider } from 'theorum/openrouter';
 
 const provider = createOpenRouterProvider({
   apiKey: hostResolvedOpenRouterKey,
@@ -24,7 +24,7 @@ const provider = createOpenRouterProvider({
 ## 3. Google Interactions
 
 ```ts
-import { createInteractionsProvider } from '@theorum/core/providers';
+import { createInteractionsProvider } from 'theorum/providers';
 
 const provider = createInteractionsProvider({
   vault: {
@@ -41,7 +41,7 @@ const provider = createInteractionsProvider({
 Tracing is silent by default. Hosts opt in by passing a sink to `runTurn`.
 
 ```ts
-import { jsonlSink, runTurn } from '@theorum/core';
+import { jsonlSink, runTurn } from 'theorum';
 
 for await (const event of runTurn(request, provider, jsonlSink(hostTraceDir))) {
   // stream events

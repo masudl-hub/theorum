@@ -1,5 +1,5 @@
 {
-  "name": "@theorum/core",
+  "name": "theorum",
   "version": "0.1.2",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",

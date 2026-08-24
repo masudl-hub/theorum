@@ -116,11 +116,11 @@ import { defineProfile, registerProfile, runTurn } from "jsr:@theorum/core";
 ### npm
 
 ```bash
-npm install @theorum/core
+npm install theorum
 ```
 
 ```ts
-import { defineProfile, registerProfile, runTurn } from "@theorum/core";
+import { defineProfile, registerProfile, runTurn } from "theorum";
 ```
 
 ---
@@ -284,12 +284,12 @@ Provider support is intentionally split by wire protocol:
 
 | Entrypoint | Purpose |
 | :--- | :--- |
-| `@theorum/core` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
-| `@theorum/core/kernel` | Profile, turn, event, tool, egress, provider, and schema types. |
-| `@theorum/core/providers` | Provider constructors and provider utility types. |
-| `@theorum/core/openrouter` | OpenRouter payload and streaming adapter. |
-| `@theorum/core/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
-| `@theorum/core/observability` | Trace sinks and trace record helpers. |
+| `jsr:@theorum/core` / `theorum` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
+| `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile, turn, event, tool, egress, provider, and schema types. |
+| `jsr:@theorum/core/providers` / `theorum/providers` | Provider constructors and provider utility types. |
+| `jsr:@theorum/core/openrouter` / `theorum/openrouter` | OpenRouter payload and streaming adapter. |
+| `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
+| `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
 
 Internal files remain present in source for maintainability, but package consumers should use the public entrypoints above.
 

@@ -9,7 +9,7 @@
  * @module
  */
 
-import { publicError, TheorumError } from '../guardrails/error.ts';
+import { TheorumError, toErrorEvent } from '../guardrails/error.ts';
 import {
   eventsFromComplete,
   eventsFromDelta,
@@ -148,10 +148,7 @@ async function* streamComplete(
   transport: GeminiTransport,
 ): AsyncGenerator<TurnEvent> {
   if (!req.geminiBucket) {
-    yield {
-      type: 'error',
-      error: publicError('missing Gemini vault bucket for Interactions'),
-    };
+    yield toErrorEvent('missing Gemini vault bucket for Interactions');
     return;
   }
   const res = await fetchGemini(
@@ -162,10 +159,7 @@ async function* streamComplete(
   );
   if (res.status !== HTTP_OK) {
     const errorBody = await res.text().catch(() => '');
-    yield {
-      type: 'error',
-      error: publicError(`Gemini HTTP ${String(res.status)}: ${errorBody}`),
-    };
+    yield toErrorEvent(`Gemini HTTP ${String(res.status)}: ${errorBody}`);
     return;
   }
   const acc = { text: '' };
@@ -192,7 +186,7 @@ async function* streamGuarded(
   try {
     yield* streamComplete(req, transport);
   } catch (err) {
-    yield { type: 'error', error: publicError(err) };
+    yield toErrorEvent(err);
   }
 }
 

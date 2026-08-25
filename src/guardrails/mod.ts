@@ -17,8 +17,10 @@ export {
   PUBLIC_GENERIC,
   PUBLIC_IMAGE_SIZE,
   PUBLIC_UNAVAILABLE,
+  describeError,
   publicError,
   TheorumError,
+  toErrorEvent,
   UPSTREAM_FAILED,
 } from './error.ts';
 export { injectionSpans } from './injection.ts';

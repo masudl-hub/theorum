@@ -1,4 +1,4 @@
-import { publicError } from '../../../guardrails/error.ts';
+import { toErrorEvent } from '../../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { resolveTurn } from '../../registry/resolve.ts';
 import type {
@@ -104,10 +104,7 @@ async function evaluateEgressOutcome(args: {
 
   return {
     action: 'withhold',
-    event: {
-      type: 'error',
-      error: publicError('Turn withheld: egress disclosure violation'),
-    },
+    event: toErrorEvent('Turn withheld: egress disclosure violation'),
   };
 }
 

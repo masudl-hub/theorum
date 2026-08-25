@@ -7,7 +7,7 @@
  * @module
  */
 
-import { publicError } from '../guardrails/error.ts';
+import { toErrorEvent } from '../guardrails/error.ts';
 import type {
   InteractionPart,
   ModelProvider,
@@ -141,26 +141,26 @@ async function* streamSpeech(
 ): AsyncGenerator<TurnEvent> {
   const apiKey = config.apiKey?.trim() || undefined;
   if (!apiKey) {
-    yield { type: 'error', error: publicError('missing API key for speech') };
+    yield toErrorEvent('missing API key for speech');
     return;
   }
 
   const text = extractInputText(req.input);
   if (!text) {
-    yield { type: 'error', error: publicError('empty text for speech') };
+    yield toErrorEvent('empty text for speech');
     return;
   }
 
   const res = await requestSpeech(apiKey, text, req, config);
   if (res.status !== HTTP_OK) {
-    yield { type: 'error', error: publicError(`Speech HTTP ${String(res.status)}`) };
+    yield toErrorEvent(`Speech HTTP ${String(res.status)}`);
     return;
   }
 
   const arrayBuffer = await res.arrayBuffer();
   const rawBytes = new Uint8Array(arrayBuffer);
   if (rawBytes.length === 0) {
-    yield { type: 'error', error: publicError('no audio returned from speech') };
+    yield toErrorEvent('no audio returned from speech');
     return;
   }
 

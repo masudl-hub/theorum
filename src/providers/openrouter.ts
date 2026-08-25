@@ -18,7 +18,7 @@ import {
   type ToolSet,
   tool,
 } from 'ai';
-import { publicError } from '../guardrails/error.ts';
+import { toErrorEvent } from '../guardrails/error.ts';
 import { tryStructured } from '../kernel/engine/delta.ts';
 import { getTool } from '../kernel/registry/catalog.ts';
 import type {
@@ -568,7 +568,7 @@ function primaryEventFromPart(
       return finishEvent(part, acc);
     case 'error':
       acc.errored = true;
-      return { type: 'error', error: publicError(part.error) };
+      return toErrorEvent(part.error);
     default:
       return undefined;
   }
@@ -687,7 +687,7 @@ async function* yieldCapturedRawEventsUnchecked(
 }
 
 function missingOpenRouterKey(): TurnEvent {
-  return { type: 'error', error: publicError('missing OpenRouter API key') };
+  return toErrorEvent('missing OpenRouter API key');
 }
 
 async function* streamOpenRouter(
@@ -708,7 +708,7 @@ async function* streamOpenRouter(
     yield* finalEvents(req, acc);
   } catch (err) {
     yield* yieldCapturedRawEventsUnchecked(context);
-    yield { type: 'error', error: publicError(err) };
+    yield toErrorEvent(err);
   }
 }
 

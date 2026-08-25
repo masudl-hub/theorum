@@ -93,6 +93,12 @@ async function* runTurn(
       gemini,
     })) {
       seen.push(event);
+      if (event.type === 'error') {
+        const detail = event.errorInternal ?? event.error;
+        if (detail) {
+          console.error(`[theorum] turn error (${req.profile}): ${detail}`);
+        }
+      }
       if (shouldSkipStreamEvent(event, profile)) {
         continue;
       }

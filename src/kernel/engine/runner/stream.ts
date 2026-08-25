@@ -1,4 +1,4 @@
-import { publicError } from '../../../guardrails/error.ts';
+import { publicError, toErrorEvent } from '../../../guardrails/error.ts';
 import { providerCompleteRequest } from '../../registry/provider-request.ts';
 import type { ModelProvider, Profile, ResolvedGeneration, TurnEvent } from '../../types.ts';
 import { eventHasCanary, redactCanary } from '../boundary.ts';
@@ -50,7 +50,12 @@ function* processNormalEvent(
   if (event.type === 'tool') {
     yield* interceptProviderTool(event, profile, generation);
   } else if (event.type === 'error') {
-    yield { type: 'error', error: publicError(event.error) };
+    const internal = event.errorInternal ?? event.error ?? '';
+    yield {
+      type: 'error',
+      error: publicError(event.error ?? internal),
+      ...(internal ? { errorInternal: internal } : {}),
+    };
   } else {
     yield event;
   }
@@ -73,7 +78,7 @@ async function* yieldProviderEvents(args: {
   })) {
     if (canary && eventHasCanary(event, canary)) {
       yield redactCanary(event, canary);
-      yield { type: 'error', error: publicError('canary leaked') };
+      yield toErrorEvent('canary leaked');
       return;
     }
     yield* processNormalEvent(event, profile, generation);

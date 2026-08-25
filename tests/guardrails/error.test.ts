@@ -9,6 +9,7 @@ import {
   PUBLIC_UNAVAILABLE,
   publicError,
   TheorumError,
+  toErrorEvent,
   UPSTREAM_FAILED,
 } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
@@ -91,4 +92,10 @@ Deno.test('publicError covers all exact mappings and rules', () => {
     publicError(new TheorumError('Only 5 files per message.')),
     'Only 5 files per message.',
   );
+  assertEquals(publicError(PUBLIC_UNAVAILABLE), PUBLIC_UNAVAILABLE);
+  assertEquals(publicError(PUBLIC_GENERIC), PUBLIC_GENERIC);
+
+  const mapped = toErrorEvent('Gemini HTTP 400: model_turn is not supported');
+  assertEquals(mapped.error, PUBLIC_UNAVAILABLE);
+  assertEquals(mapped.errorInternal, 'Gemini HTTP 400: model_turn is not supported');
 });

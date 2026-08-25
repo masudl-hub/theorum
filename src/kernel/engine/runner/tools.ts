@@ -1,4 +1,4 @@
-import { publicError } from '../../../guardrails/error.ts';
+import { toErrorEvent } from '../../../guardrails/error.ts';
 import { CATALOG } from '../../registry/catalog.ts';
 import { executeTool } from '../../registry/tools.ts';
 import type {
@@ -34,12 +34,12 @@ function* invokeFromUi(profile: Profile, req: TurnRequest): Generator<TurnEvent>
       tool: { name: invoke.name, arguments: invoke.arguments, result },
     };
     if (result.status === 'error') {
-      yield { type: 'error', error: publicError(formatToolFinding(result)) };
+      yield toErrorEvent(formatToolFinding(result));
       return;
     }
     yield { type: 'done' };
   } catch (err) {
-    yield { type: 'error', error: publicError(err) };
+    yield toErrorEvent(err);
     yield { type: 'done' };
   }
 }
@@ -58,11 +58,11 @@ function executeCustomModelTool(
       },
     ];
     if (result.status === 'error') {
-      events.push({ type: 'error', error: publicError(formatToolFinding(result)) });
+      events.push(toErrorEvent(formatToolFinding(result)));
     }
     return events;
   } catch (err) {
-    return [{ type: 'error', error: publicError(err) }];
+    return [toErrorEvent(err)];
   }
 }
 
@@ -76,12 +76,7 @@ function dispatchModelTool(profile: Profile, event: TurnEvent, gated: CustomTool
     return [event];
   }
   if (!gated.includes(name as CustomToolId)) {
-    return [
-      {
-        type: 'error',
-        error: publicError(`Tool '${name}' is not gated on this turn`),
-      },
-    ];
+    return [toErrorEvent(`Tool '${name}' is not gated on this turn`)];
   }
   const args = tool.arguments ?? {};
   return executeCustomModelTool(profile, name as CustomToolId, args);

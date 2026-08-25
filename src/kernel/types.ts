@@ -548,7 +548,10 @@ export interface TurnEvent {
   evidence?: ProviderEvidenceEvent;
   tokens?: TurnTokens;
   interactionId?: string;
+  /** Public-safe failure text for hosts to show users. */
   error?: string;
+  /** Raw diagnostic detail for traces/logs; never surface to end users. */
+  errorInternal?: string;
 }
 
 /** Provider-neutral request object sent from the kernel to a model adapter. */

@@ -139,7 +139,7 @@ Deno.test('Interactions body formats multi-turn history with text and parts', ()
   assertEquals(input.length, 4);
   assertEquals(input[0]?.type, 'user_input');
   assertEquals(input[0]?.content[0]?.text, 'What is record care?');
-  assertEquals(input[1]?.type, 'model_turn');
+  assertEquals(input[1]?.type, 'model_output');
   assertEquals(input[1]?.content[0]?.text, 'It is maintaining records.');
   assertEquals(input[2]?.type, 'user_input');
   assertEquals(input[2]?.content[0]?.text, 'Check this image');
@@ -337,7 +337,13 @@ Deno.test('non-OK Gemini response becomes an error event', async () => {
     fetch: () => Promise.resolve(new Response('nope', { status: HTTP_SERVER })),
   });
   const events = await collect(provider.complete(fromChatProfile()));
-  assertEquals(events, [{ type: 'error', error: PUBLIC_UNAVAILABLE }]);
+  assertEquals(events, [
+    {
+      type: 'error',
+      error: PUBLIC_UNAVAILABLE,
+      errorInternal: 'Gemini HTTP 500: nope',
+    },
+  ]);
 });
 
 Deno.test('thrown fetch errors become upstream failed', async () => {
@@ -347,7 +353,13 @@ Deno.test('thrown fetch errors become upstream failed', async () => {
     fetch: () => Promise.reject(new TypeError('fetch failed: dns')),
   });
   const events = await collect(provider.complete(fromChatProfile()));
-  assertEquals(events, [{ type: 'error', error: PUBLIC_UNAVAILABLE }]);
+  assertEquals(events, [
+    {
+      type: 'error',
+      error: PUBLIC_UNAVAILABLE,
+      errorInternal: 'fetch failed: dns',
+    },
+  ]);
 });
 
 Deno.test('image delta yields media', async () => {

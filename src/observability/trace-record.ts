@@ -38,6 +38,7 @@ export interface TraceEvent {
   grounding?: TurnEvent['grounding'];
   evidence?: TurnEvent['evidence'];
   error?: string;
+  errorInternal?: string;
 }
 
 /** Complete trace-safe record for one attempted turn. */
@@ -123,6 +124,9 @@ async function snapshotEvent(event: TurnEvent): Promise<TraceEvent> {
   if (event.error) {
     row.error = event.error;
   }
+  if (event.errorInternal) {
+    row.errorInternal = sanitizeText(event.errorInternal);
+  }
   if (event.structured !== undefined) {
     row.structured = event.structured;
   }
@@ -189,7 +193,8 @@ function attachFailure(
 ): void {
   if (!record.ok) {
     record.error = publicError(thrown ?? lastErr?.error);
-    const inside = internalError(thrown) ?? lastErr?.error;
+    const inside =
+      internalError(thrown) ?? lastErr?.errorInternal ?? lastErr?.error;
     if (inside) {
       record.errorInternal = inside;
     }

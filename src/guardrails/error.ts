@@ -103,7 +103,21 @@ const RULES: ErrorRule[] = [
   },
 ];
 
+const ALREADY_PUBLIC = new Set([
+  PUBLIC_GENERIC,
+  PUBLIC_UNAVAILABLE,
+  PUBLIC_CANARY,
+  PUBLIC_ACTION,
+  PUBLIC_FILE_TYPE,
+  PUBLIC_FILE_SIZE,
+  PUBLIC_FILE_COUNT,
+  PUBLIC_IMAGE_SIZE,
+]);
+
 function publicText(text: string): string {
+  if (ALREADY_PUBLIC.has(text)) {
+    return text;
+  }
   const exact = EXACT[text];
   if (exact) {
     return exact;
@@ -127,6 +141,34 @@ function publicError(err: unknown): string {
   return PUBLIC_UNAVAILABLE;
 }
 
+/** Raw diagnostic text for hosts, traces, and logs (never shown to end users). */
+function describeError(err: unknown): string {
+  if (typeof err === 'string') {
+    return err;
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return String(err);
+}
+
+/**
+ * Stream error event with a public-safe `error` and a preserved `errorInternal`.
+ * Providers and the runner should emit this instead of public-only error strings
+ * so traces and host logs are never a black box.
+ */
+function toErrorEvent(err: unknown): {
+  type: 'error';
+  error: string;
+  errorInternal: string;
+} {
+  return {
+    type: 'error',
+    error: publicError(err),
+    errorInternal: describeError(err),
+  };
+}
+
 export {
   PUBLIC_ACTION,
   PUBLIC_CANARY,
@@ -136,7 +178,9 @@ export {
   PUBLIC_GENERIC,
   PUBLIC_IMAGE_SIZE,
   PUBLIC_UNAVAILABLE,
+  describeError,
   publicError,
   TheorumError,
+  toErrorEvent,
   UPSTREAM_FAILED,
 };

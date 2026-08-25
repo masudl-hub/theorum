@@ -48,7 +48,8 @@ function historyStep(msg: import('../kernel/types.ts').TurnHistoryMessage): {
   content: Record<string, string>[];
 } {
   const isAssistant = msg.role === 'assistant';
-  const type = isAssistant ? 'model_turn' : 'user_input';
+  // Google Interactions input steps: assistant history is `model_output` (not `model_turn`).
+  const type = isAssistant ? 'model_output' : 'user_input';
   if (msg.parts && msg.parts.length > 0) {
     return { type, content: msg.parts.map(wirePart) };
   }

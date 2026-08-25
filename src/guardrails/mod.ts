@@ -22,6 +22,15 @@ export {
   UPSTREAM_FAILED,
 } from './error.ts';
 export { injectionSpans } from './injection.ts';
+export type { QuotaSlotStatus } from './quota.ts';
+export {
+  clientIp,
+  quotaMessage,
+  releaseSlot,
+  resetSlots,
+  skipQuota,
+  takeSlot,
+} from './quota.ts';
 export {
   PROJECT_ID_MAX,
   sanitizeProjectId,

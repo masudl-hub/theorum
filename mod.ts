@@ -38,6 +38,15 @@
  */
 
 export { publicError, TheorumError } from './src/guardrails/error.ts';
+export type { QuotaSlotStatus } from './src/guardrails/quota.ts';
+export {
+  clientIp,
+  quotaMessage,
+  releaseSlot,
+  resetSlots,
+  skipQuota,
+  takeSlot,
+} from './src/guardrails/quota.ts';
 export {
   PROJECT_ID_MAX,
   sanitizeProjectId,
@@ -49,8 +58,11 @@ export {
   CATALOG,
   clampThinkingLevel,
   clampThinkingLevelForApiId,
+  geminiKindForMime,
   getTool,
   listBuiltinIds,
+  mimeAllowed,
+  mimeEssence,
   modelEntryByApiId,
   registerTools,
   requireModelSpec,

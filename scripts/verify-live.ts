@@ -12,6 +12,8 @@ function valueAfterFlag(flag: string): string | undefined {
 }
 
 const apiKey = valueAfterFlag('--api-key');
+const model = valueAfterFlag('--model') ?? 'sonar';
+const apiId = valueAfterFlag('--api-id') ?? 'perplexity/sonar';
 
 if (!apiKey) {
   Deno.stdout.writeSync(
@@ -34,7 +36,8 @@ const provider = createOpenRouterProvider({
 });
 
 const req: ProviderCompleteRequest = {
-  model: 'gemini35FlashLite',
+  model,
+  apiId,
   thinking: 'low',
   summaries: 'none',
   maxOutputTokens: 200,

@@ -16,6 +16,8 @@ THEORUM is a compact TypeScript agent kernel for apps that need deterministic ag
 
 The package is intentionally **not** an agent product. It ships no app profiles, no prompts, no secrets, no database policy, no business rules, and no channel-specific UX. Those belong in the host application.
 
+OpenRouter chat transport is powered by Vercel AI SDK Core under the adapter. THEORUM keeps the runner contract, guardrails, tool permissions, egress, media buffering, and trace event shape; AI SDK handles the OpenRouter request/stream/tool-call normalization layer.
+
 ---
 
 ## Core Principles
@@ -62,7 +64,7 @@ flowchart TD
     end
 
     subgraph Providers["Provider adapters"]
-        OR["OpenRouter chat"]
+        OR["OpenRouter chat via Vercel AI SDK Core"]
         GI["Google Interactions"]
         Speech["Speech (Interactions or /audio/speech)"]
     end
@@ -149,10 +151,11 @@ const profile = defineProfile({
   model: {
     protocol: "openAi",
     provider: "openrouter",
-    allow: ["gemini35FlashLite"],
+    allow: ["hostFastModel"],
     config: {
-      gemini35FlashLite: {
-        apiId: "gemini-3.5-flash-lite",
+      hostFastModel: {
+        apiId: "perplexity/sonar",
+        openRouterId: "perplexity/sonar",
         thinking: { on: "high", off: "minimal" },
         thinkingLevels: ["minimal", "low", "medium", "high"],
         summaries: { on: "auto", off: "none" },
@@ -235,10 +238,11 @@ Inbound and outbound safety are generic kernel hooks.
 const guardedProfile = defineProfile({
   id: "assistant.guarded",
   model: {
-    allow: ["gemini35FlashLite"],
+    allow: ["hostFastModel"],
     config: {
-      gemini35FlashLite: {
-        apiId: "gemini-3.5-flash-lite",
+      hostFastModel: {
+        apiId: "perplexity/sonar",
+        openRouterId: "perplexity/sonar",
         thinking: { on: "high", off: "minimal" },
         thinkingLevels: ["minimal", "low", "medium", "high"],
         summaries: { on: "auto", off: "none" },
@@ -299,7 +303,9 @@ for await (const event of runTurn({ profile: profile.id, input: { text: "…" } 
 | `openAi` + `openrouter` (chat) | OpenRouter chat completions |
 | `openAi` + `openrouter` (speech role) | OpenRouter `/audio/speech` |
 
-Advanced payload helpers live under `theorum/openrouter` (`toOpenRouterPayload`, …). Prefer `createProvider` for turns.
+OpenRouter uses Vercel AI SDK Core inside THEORUM's provider adapter. The adapter still emits THEORUM `TurnEvent` values and preserves raw provider evidence for citations/provenance where the normalized SDK stream does not expose enough detail.
+
+Advanced OpenRouter exports live under `theorum/openrouter` (`createOpenRouterProvider`, `toOpenRouterPayload`, …). Prefer `createProvider` for turns unless the host needs to wire the OpenRouter adapter directly.
 
 ---
 
@@ -310,7 +316,7 @@ Advanced payload helpers live under `theorum/openrouter` (`toOpenRouterPayload`,
 | `jsr:@theorum/core` / `theorum` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
 | `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile/turn types, tool catalog, `requireModelSpec`, thinking clamps over host model maps. |
 | `jsr:@theorum/core/providers` / `theorum/providers` | `createProvider` + Gemini vault types. |
-| `jsr:@theorum/core/openrouter` / `theorum/openrouter` | OpenRouter payload helpers (advanced). |
+| `jsr:@theorum/core/openrouter` / `theorum/openrouter` | Direct OpenRouter provider adapter and payload helpers (advanced). |
 | `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
 | `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
 | `jsr:@theorum/core/host` / `theorum/host` | Optional Deno HTTP helpers (`json`, status mapping, cutout mint flush). |
@@ -345,6 +351,21 @@ Build the npm package from the Deno source (publish only from `npm/`):
 npm run build:npm
 cd npm
 npm pack
+```
+
+Run a live OpenRouter smoke test with a host-resolved key. The key is passed as an argument and is never read from a Theorum `.env` file.
+
+```bash
+deno run --allow-net scripts/verify-live.ts --api-key "$OPENROUTER_API_KEY"
+```
+
+The default live verifier uses `perplexity/sonar` because it is broadly available on OpenRouter. Hosts can override both the profile-facing model id and provider-native id:
+
+```bash
+deno run --allow-net scripts/verify-live.ts \
+  --api-key "$OPENROUTER_API_KEY" \
+  --model hostFastModel \
+  --api-id perplexity/sonar
 ```
 
 ---

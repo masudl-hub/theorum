@@ -454,8 +454,8 @@ export interface ProjectedProfile {
   image?: ProfileImageSpec | null;
 }
 
-/** Fully-resolved provider request state created from a `TurnRequest`. */
-export interface ResolvedGeneration {
+/** Provider selection and generation knobs shared before and after resolution. */
+export interface ProviderGenerationConfig {
   model: ModelId;
   /** Provider-native model id taken from the profile model spec. */
   apiId: string;
@@ -467,6 +467,10 @@ export interface ResolvedGeneration {
   maxOutputTokens: number;
   temperature: number;
   builtins: BuiltinToolId[];
+}
+
+/** Fully-resolved provider request state created from a `TurnRequest`. */
+export interface ResolvedGeneration extends ProviderGenerationConfig {
   custom: CustomToolId[];
   dynamicTools?: DynamicToolDeclaration[];
   dynamicToolLoader?: DynamicToolLoader;
@@ -548,17 +552,7 @@ export interface TurnEvent {
 }
 
 /** Provider-neutral request object sent from the kernel to a model adapter. */
-export interface ProviderCompleteRequest {
-  model: ModelId;
-  apiId: string;
-  openRouterId?: string;
-  previousInteractionId?: string;
-  store?: boolean;
-  thinking: ThinkingLevel;
-  summaries: 'auto' | 'none';
-  maxOutputTokens: number;
-  temperature: number;
-  builtins: BuiltinToolId[];
+export interface ProviderCompleteRequest extends ProviderGenerationConfig {
   system: string;
   input: InteractionPart[];
   history?: TurnHistoryMessage[];
@@ -569,7 +563,7 @@ export interface ProviderCompleteRequest {
   speech?: ProfileSpeechSpec;
   /**
    * Gemini vault slot for Google Interactions transport only.
-   * Required when completing via `createInteractionsProvider`.
+   * Required when completing via Google Interactions.
    */
   geminiBucket?: GeminiBucket;
   /** Scrubbed SSE / HTTP rows for traces. */

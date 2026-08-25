@@ -7,10 +7,10 @@ import {
   sanitizeTurnRequest,
 } from '../../src/guardrails/sanitize.ts';
 import { assertEquals, assertThrows } from '../../src/kernel/engine/assert.ts';
+import { sanitizeCsvText } from '../../src/kernel/registry/attachments.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { Profile, TurnRequest } from '../../src/kernel/types.ts';
 import { OMIT_INJECTION, OMIT_SENSITIVE } from '../../src/observability/spans.ts';
-import { sanitizeCsvText } from '../../src/providers/attachments.ts';
 import { CHAT_MEDIA_LIMITS, modelAllow } from '../fixtures/models.ts';
 
 Deno.test('redacts instruction override as injection', () => {
@@ -318,7 +318,7 @@ Deno.test('attachments.ts edge cases: formatting, 1-file message, latin1 decodin
     turnTooLargeMessage,
     requireMediaLimits,
     sanitizeTurnBlobs,
-  } = await import('../../src/providers/attachments.ts');
+  } = await import('../../src/kernel/registry/attachments.ts');
 
   assertEquals(tooManyFilesMessage(1), 'Only 1 file per message.');
   assertEquals(fileTooLargeMessage(1_572_864), 'Each file must be 1.5 MB or smaller.');

@@ -62,11 +62,15 @@ Deno.test('resolveOpenRouterModel maps known models and accepts custom map', () 
   const proPreview = HOST_MODELS.gemini31ProPreview;
   const sonar = HOST_MODELS.sonar;
   assertEquals(
-    resolveOpenRouterModel('gemini35FlashLite', undefined, { apiId: flashLite.apiId }),
+    resolveOpenRouterModel('gemini35FlashLite', undefined, {
+      apiId: flashLite.apiId,
+    }),
     'google/gemini-3.5-flash-lite',
   );
   assertEquals(
-    resolveOpenRouterModel('gemini31ProPreview', undefined, { apiId: proPreview.apiId }),
+    resolveOpenRouterModel('gemini31ProPreview', undefined, {
+      apiId: proPreview.apiId,
+    }),
     'google/gemini-3.1-pro-preview',
   );
   assertEquals(
@@ -174,8 +178,12 @@ Deno.test('toOpenRouterPayload formats structured json_schema response_format', 
 });
 
 function mockStreamChunks(): string[] {
-  const t1 = JSON.stringify({ choices: [{ delta: { reasoning: 'checking ' } }] });
-  const t2 = JSON.stringify({ choices: [{ delta: { reasoning: 'database.' } }] });
+  const t1 = JSON.stringify({
+    choices: [{ delta: { reasoning: 'checking ' } }],
+  });
+  const t2 = JSON.stringify({
+    choices: [{ delta: { reasoning: 'database.' } }],
+  });
   const c1 = JSON.stringify({ choices: [{ delta: { content: 'hello ' } }] });
   const c2 = JSON.stringify({ choices: [{ delta: { content: 'world.' } }] });
   const tc1 = JSON.stringify({
@@ -183,16 +191,19 @@ function mockStreamChunks(): string[] {
       {
         delta: {
           tool_calls: [
-            { index: 0, id: 'call_1', function: { name: 'lookup', arguments: '{"q":' } },
+            {
+              index: 0,
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'lookup', arguments: '{"q":"record"}' },
+            },
           ],
         },
       },
     ],
   });
-  const tc2 = JSON.stringify({
-    choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"record"}' } }] } }],
-  });
   const u = JSON.stringify({
+    choices: [{ delta: {}, finish_reason: 'tool_calls' }],
     usage: {
       prompt_tokens: EXPECTED_INPUT_TOKENS,
       completion_tokens: EXPECTED_OUTPUT_TOKENS,
@@ -205,7 +216,6 @@ function mockStreamChunks(): string[] {
     `data: ${c1}\n\n`,
     `data: ${c2}\n\n`,
     `data: ${tc1}\n\n`,
-    `data: ${tc2}\n\n`,
     `data: ${u}\n\n`,
     'data: [DONE]\n\n',
   ];
@@ -227,6 +237,17 @@ Deno.test('createOpenRouterProvider streams reasoning, text, tools, tokens, and 
   });
 
   const req = createMockTurnRequest('pinned', 'How often to water?');
+  req.dynamicTools = [
+    {
+      name: 'lookup',
+      description: 'Lookup a plant record',
+      parameters: {
+        type: 'object',
+        properties: { q: { type: 'string' } },
+        required: ['q'],
+      },
+    },
+  ];
   const events = await collect(provider.complete(req));
 
   assertEquals(fetchCalledWith, 'https://openrouter.ai/api/v1/chat/completions');
@@ -329,7 +350,11 @@ Deno.test('createOpenRouterProvider handles missing API key, empty stream, think
       {
         delta: {
           tool_calls: [
-            { index: 0, id: 'bad_call', function: { name: 'rawFn', arguments: '{invalid_json' } },
+            {
+              index: 0,
+              id: 'bad_call',
+              function: { name: 'rawFn', arguments: '{invalid_json' },
+            },
           ],
         },
       },
@@ -361,6 +386,17 @@ Deno.test('createOpenRouterProvider handles missing API key, empty stream, think
   });
 
   const structuredReq = createMockTurnRequest('formatter', 'x');
+  structuredReq.dynamicTools = [
+    {
+      name: 'rawFn',
+      description: 'Raw function probe',
+      parameters: {
+        type: 'object',
+        properties: {},
+        additionalProperties: true,
+      },
+    },
+  ];
   const fullEvents = await collect(fullStreamProvider.complete(structuredReq));
   assertEquals(capturedHeaders?.get('HTTP-Referer'), 'https://theorum.dev');
   assertEquals(capturedHeaders?.get('X-Title'), 'Theorum');
@@ -369,8 +405,11 @@ Deno.test('createOpenRouterProvider handles missing API key, empty stream, think
   assertEquals(thoughtEv?.text, 'deep thought');
 
   const toolEv = fullEvents.find((e) => e.type === 'tool');
-  assertEquals(toolEv?.tool?.name, 'rawFn');
-  assertEquals(toolEv?.tool?.arguments, { _raw: '{invalid_json' });
+  assertEquals(toolEv, undefined);
+  assertEquals(
+    fullEvents.some((e) => e.type === 'error'),
+    true,
+  );
 });
 
 Deno.test('createOpenRouterProvider yields error on HTTP non-200', async () => {

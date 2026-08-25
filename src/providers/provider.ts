@@ -21,7 +21,7 @@ import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../kerne
 import { tapFetch } from './google-tap.ts';
 import { toInteractionsBody } from './interactions.ts';
 import { fetchGemini, type GeminiTransport } from './keys.ts';
-import { wrapPcmAsWav } from './speech.ts';
+import { wrapPcmAsWav } from './pcm.ts';
 import { INTERACTIONS_URL, takeSsePayloads } from './sse.ts';
 
 const HTTP_OK = 200;

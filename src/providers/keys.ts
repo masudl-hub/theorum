@@ -8,7 +8,7 @@
  */
 
 import { TheorumError, UPSTREAM_FAILED } from '../guardrails/error.ts';
-import type { BuiltinToolId, GeminiBucket, GeminiFreeBucket, ModelSpec } from '../kernel/types.ts';
+import type { GeminiBucket } from '../kernel/types.ts';
 
 type GeminiVault = Record<GeminiBucket, string | undefined>;
 
@@ -35,20 +35,6 @@ const HTTP_GATEWAY_TIMEOUT = 504;
 const QUOTA_RE = /quota/i;
 const TRANSIENT_THROWN_RE =
   /name resolution|dns|econnreset|econnrefused|etimedout|network|fetch failed|temporarily unavailable|socket|503|502|504/i;
-
-function resolveGeminiBucket(
-  profileKey: GeminiFreeBucket,
-  spec: ModelSpec,
-  builtins: BuiltinToolId[],
-): GeminiBucket {
-  if (spec.key) {
-    return spec.key;
-  }
-  if (builtins.some((id) => !spec.keyBuiltins.includes(id))) {
-    return 'paid';
-  }
-  return profileKey;
-}
 
 function waitDefault(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -193,4 +179,4 @@ async function fetchGemini(
 }
 
 export type { GeminiTransport, GeminiVault };
-export { fetchGemini, resolveGeminiBucket, withGeminiKey };
+export { fetchGemini, withGeminiKey };

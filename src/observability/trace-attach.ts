@@ -1,29 +1,9 @@
-import type { ProviderCompleteRequest, ResolvedGeneration, TurnRequest } from '../kernel/types.ts';
+import { providerCompleteRequest } from '../kernel/registry/provider-request.ts';
+import type { ResolvedGeneration, TurnRequest } from '../kernel/types.ts';
 import { tapeGemini } from '../providers/gemini-tape.ts';
 import { toInteractionsBody } from '../providers/interactions.ts';
 import type { TraceRecord } from './trace-record.ts';
 import { httpStatus } from './trace-usage.ts';
-
-function completeRequest(generation: ResolvedGeneration, system: string): ProviderCompleteRequest {
-  return {
-    model: generation.model,
-    apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
-    previousInteractionId: generation.previousInteractionId,
-    store: generation.store,
-    thinking: generation.thinking,
-    summaries: generation.summaries,
-    maxOutputTokens: generation.maxOutputTokens,
-    temperature: generation.temperature,
-    builtins: generation.builtins,
-    system,
-    input: generation.input,
-    structured: generation.structured,
-    image: generation.image,
-    speech: generation.speech,
-    geminiBucket: generation.geminiBucket,
-  };
-}
 
 function attachResolved(
   record: TraceRecord,
@@ -88,7 +68,7 @@ async function attachTape(
   }
   if (generation && system !== undefined) {
     record.wire = await tapeGemini(
-      toInteractionsBody(completeRequest(generation, system)),
+      toInteractionsBody(providerCompleteRequest(generation, system)),
       canary ?? '',
     );
   }

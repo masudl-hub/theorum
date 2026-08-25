@@ -1,9 +1,9 @@
-import { TheorumError } from '../guardrails/error.ts';
-import { injectionSpans } from '../guardrails/injection.ts';
-import { sensitiveSpans } from '../guardrails/sensitive.ts';
-import { getProfile } from '../kernel/registry/profiles.ts';
-import type { MediaLimits, MimeInputs, Profile, TurnBlob } from '../kernel/types.ts';
-import { applySpans } from '../observability/spans.ts';
+import { TheorumError } from '../../guardrails/error.ts';
+import { injectionSpans } from '../../guardrails/injection.ts';
+import { sensitiveSpans } from '../../guardrails/sensitive.ts';
+import { applySpans } from '../../observability/spans.ts';
+import type { MediaLimits, MimeInputs, Profile, TurnBlob } from '../types.ts';
+import { getProfile } from './profiles.ts';
 
 const B64_PAD = 2;
 const B64_WORD = 4;

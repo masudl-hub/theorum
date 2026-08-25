@@ -9,13 +9,6 @@
 
 import { TheorumError } from '../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
-import { resolveGeminiBucket } from '../../providers/keys.ts';
-import {
-  assertImageGrounding,
-  assertSpeechRole,
-  resolveImageFormat,
-  resolveInputParts,
-} from '../../providers/media.ts';
 import { mintCanary } from '../engine/boundary.ts';
 import type {
   BuiltinToolId,
@@ -37,7 +30,14 @@ import {
   listBuiltinIds,
   requireModelSpec,
 } from './catalog.ts';
+import {
+  assertImageGrounding,
+  assertSpeechRole,
+  resolveImageFormat,
+  resolveInputParts,
+} from './ingress.ts';
 import { getProfile } from './profiles.ts';
+import { resolveGeminiBucket } from './vault.ts';
 
 function applyBuiltinMutualExclusions(requested: BuiltinToolId[]): BuiltinToolId[] {
   return requested.filter((id) => {

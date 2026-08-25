@@ -1,4 +1,5 @@
 import { publicError } from '../../../guardrails/error.ts';
+import { providerCompleteRequest } from '../../registry/provider-request.ts';
 import type { ModelProvider, Profile, ResolvedGeneration, TurnEvent } from '../../types.ts';
 import { eventHasCanary, redactCanary } from '../boundary.ts';
 import { dispatchModelTool } from './tools.ts';
@@ -65,25 +66,7 @@ async function* yieldProviderEvents(args: {
   const { profile, generation, system, provider, gemini } = args;
   const { canary } = generation;
   for await (const event of provider.complete({
-    model: generation.model,
-    apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
-    previousInteractionId: generation.previousInteractionId,
-    store: generation.store,
-    thinking: generation.thinking,
-    summaries: generation.summaries,
-    maxOutputTokens: generation.maxOutputTokens,
-    temperature: generation.temperature,
-    builtins: generation.builtins,
-    system,
-    input: generation.input,
-    history: generation.history,
-    dynamicTools: generation.dynamicTools,
-    dynamicToolLoader: generation.dynamicToolLoader,
-    structured: generation.structured,
-    image: generation.image,
-    speech: generation.speech,
-    geminiBucket: generation.geminiBucket,
+    ...providerCompleteRequest(generation, system),
     tapGemini: (row) => {
       gemini.push(row);
     },

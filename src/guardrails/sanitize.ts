@@ -9,10 +9,10 @@
  */
 
 import { mapStrings } from '../kernel/engine/tree.ts';
+import { sanitizeTurnBlobsForProfile } from '../kernel/registry/attachments.ts';
 import { getProfile } from '../kernel/registry/profiles.ts';
 import type { NormalizedTurnRequest, TurnRequest } from '../kernel/types.ts';
 import { applySpans } from '../observability/spans.ts';
-import { sanitizeTurnBlobsForProfile } from '../providers/attachments.ts';
 import { injectionSpans } from './injection.ts';
 import { sensitiveSpans } from './sensitive.ts';
 

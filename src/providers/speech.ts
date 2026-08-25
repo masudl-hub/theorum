@@ -1,10 +1,8 @@
 /**
- * Speech provider utilities (OpenRouter-compatible `/audio/speech`).
+ * OpenAI-compatible `/audio/speech` transport (internal).
  *
- * Google speech uses Interactions via `createInteractionsProvider` /
- * `createProvider` when `protocol: 'geminiInteractions'` — not this module.
- * This module is the openAi/openrouter speech transport: model id + voice +
- * format → bytes → media events.
+ * Hosts use `createProvider(profile, { openRouter })` — this module is selected
+ * when the profile is an openAi speech role. Not a separate public door.
  *
  * @module
  */
@@ -18,8 +16,8 @@ import type {
   SpeechAudioFormat,
   TurnEvent,
 } from '../kernel/types.ts';
+import { wrapPcmAsWav } from './pcm.ts';
 
-const SAMPLE_RATE = 24000;
 const HTTP_OK = 200;
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -28,37 +26,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-function writeAscii(view: DataView, offset: number, str: string): void {
-  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-}
-
-/** Wrap raw PCM bytes in a RIFF/WAVE container. */
-export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Array {
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-  const blockAlign = (numChannels * bitsPerSample) / 8;
-  const dataSize = pcm.length;
-  const buf = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buf);
-  writeAscii(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeAscii(view, 8, 'WAVE');
-  writeAscii(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-  writeAscii(view, 36, 'data');
-  view.setUint32(40, dataSize, true);
-  new Uint8Array(buf, 44).set(pcm);
-  return new Uint8Array(buf);
-}
-
-/** Host-supplied speech transport configuration. */
+/** Credentials for the openAi speech path (same shape as OpenRouter chat config + voice). */
 export interface SpeechProviderConfig {
   apiKey?: string;
   /** Fallback TTS voice when the profile does not pin `outputs.speech.voice`. */
@@ -77,7 +45,6 @@ function extractInputText(input: InteractionPart[]): string {
     .trim();
 }
 
-/** Resolve provider-native speech model id from the complete request. */
 function resolveSpeechWireModel(req: ProviderCompleteRequest): string {
   if (req.openRouterId) {
     return req.openRouterId;
@@ -168,8 +135,7 @@ function* yieldSpeechSuccess(
   yield { type: 'done' };
 }
 
-/** Stream one speech synthesis request as THEORUM events. */
-export async function* streamSpeech(
+async function* streamSpeech(
   req: ProviderCompleteRequest,
   config: SpeechProviderConfig = {},
 ): AsyncGenerator<TurnEvent> {
@@ -204,9 +170,11 @@ export async function* streamSpeech(
   }
 }
 
-/** Create a `ModelProvider` that emits speech media events. */
-export function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider {
+/** Internal ModelProvider for openAi speech roles. */
+function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider {
   return {
     complete: (req: ProviderCompleteRequest) => streamSpeech(req, config),
   };
 }
+
+export { createSpeechProvider, streamSpeech };

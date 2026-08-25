@@ -24,7 +24,7 @@ The package is intentionally **not** an agent product. It ships no app profiles,
 [kernel_contract]
 profiles = "Host-owned declarations for model, inputs, outputs, tools, and guardrails"
 runner = "Single deterministic execution path for one agent turn"
-providers = "Adapters for OpenRouter-compatible chat and Google Interactions"
+providers = "createProvider routes protocol/provider; adapters stay internal"
 tools = "Profile allowlist ceiling plus per-turn dynamic declarations"
 egress = "Typed host hook for outbound disclosure checks and repair loops"
 traces = "Host-injected sinks; no environment variables or bundled destinations"
@@ -80,7 +80,7 @@ flowchart TD
     Runner --> TraceSink
 ```
 
-Hosts normally pick a transport with `createProvider(profile, { gemini, openRouter, speech })`, which routes from `profile.model.protocol` / `provider` (and whether the profile is a speech role).
+Hosts bind transports with `createProvider(profile, { gemini, openRouter })`. One door; protocol/provider (and speech role) pick the adapter.
 
 ### Turn Lifecycle
 
@@ -276,7 +276,7 @@ Quota is optional. If a profile omits `guardrails.quota`, the quota helper retur
 
 ## Provider Adapters
 
-THEORUM includes provider adapters but does not own credentials. Prefer routing from the profile:
+THEORUM includes provider adapters but does not own credentials. Bind them with one door:
 
 ```ts
 import { createProvider, runTurn } from "jsr:@theorum/core";
@@ -284,7 +284,6 @@ import { createProvider, runTurn } from "jsr:@theorum/core";
 const provider = createProvider(profile, {
   gemini: { vault: hostGeminiKeyVault, fetch },
   openRouter: { apiKey: hostSecrets.openRouterApiKey },
-  speech: { apiKey: hostSecrets.openRouterApiKey }, // openAi speech roles only
 });
 
 for await (const event of runTurn({ profile: profile.id, input: { text: "…" } }, provider)) {
@@ -292,33 +291,15 @@ for await (const event of runTurn({ profile: profile.id, input: { text: "…" } 
 }
 ```
 
-Or construct a single adapter explicitly:
+`createProvider` routes from `profile.model.protocol` / `provider`. Speech roles use the same call — Interactions when Google, `/audio/speech` when openAi/openrouter (same `openRouter` credentials).
 
-```ts
-import { createOpenRouterProvider } from "jsr:@theorum/core/openrouter";
+| Profile | Transport |
+| :--- | :--- |
+| `geminiInteractions` + `google` | Google Interactions (chat, image, speech) |
+| `openAi` + `openrouter` (chat) | OpenRouter chat completions |
+| `openAi` + `openrouter` (speech role) | OpenRouter `/audio/speech` |
 
-const provider = createOpenRouterProvider({
-  apiKey: hostSecrets.openRouterApiKey,
-  siteName: "Your app",
-  siteUrl: "https://example.com",
-});
-```
-
-```ts
-import { createInteractionsProvider } from "jsr:@theorum/core/providers";
-
-const provider = createInteractionsProvider({
-  vault: hostGeminiKeyVault,
-  fetch,
-});
-```
-
-Provider support is intentionally split by wire protocol:
-
-| Provider | Protocol | Use |
-| :--- | :--- | :--- |
-| OpenRouter | `openAi` | Chat completions, reasoning streams, tool calls, structured output; speech via `/audio/speech` when the profile is a speech role. |
-| Google Interactions | `geminiInteractions` | Streaming chat/image/speech on one transport (`response_format` image or audio). |
+Advanced payload helpers live under `theorum/openrouter` (`toOpenRouterPayload`, …). Prefer `createProvider` for turns.
 
 ---
 
@@ -328,8 +309,8 @@ Provider support is intentionally split by wire protocol:
 | :--- | :--- |
 | `jsr:@theorum/core` / `theorum` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
 | `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile/turn types, tool catalog, `requireModelSpec`, thinking clamps over host model maps. |
-| `jsr:@theorum/core/providers` / `theorum/providers` | Provider constructors, Gemini vault types, and provider utility types. |
-| `jsr:@theorum/core/openrouter` / `theorum/openrouter` | OpenRouter payload and streaming adapter. |
+| `jsr:@theorum/core/providers` / `theorum/providers` | `createProvider` + Gemini vault types. |
+| `jsr:@theorum/core/openrouter` / `theorum/openrouter` | OpenRouter payload helpers (advanced). |
 | `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
 | `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
 | `jsr:@theorum/core/host` / `theorum/host` | Optional Deno HTTP helpers (`json`, status mapping, cutout mint flush). |

@@ -1,16 +1,14 @@
 /**
- * Input part normalization and image output resolution.
+ * Kernel ingress: input parts, image pins, and speech-role checks.
  *
- * Image-role profiles pin generation via `outputs.image`. The image model is
- * selected through `model.allow` / `model.config` like any other role.
+ * Owned by the kernel so `resolveTurn` does not import provider adapters.
  *
  * @module
  */
 
-import { TheorumError } from '../guardrails/error.ts';
-import { wrapUserData } from '../kernel/engine/boundary.ts';
-import { synthesizeRepairPrompt } from '../kernel/engine/repair.ts';
-import { geminiKindForMime, mimeAllowed, mimeEssence } from '../kernel/registry/catalog.ts';
+import { TheorumError } from '../../guardrails/error.ts';
+import { wrapUserData } from '../engine/boundary.ts';
+import { synthesizeRepairPrompt } from '../engine/repair.ts';
 import type {
   BuiltinToolId,
   GeminiInputKind,
@@ -20,8 +18,9 @@ import type {
   Profile,
   TurnBlob,
   TurnRequest,
-} from '../kernel/types.ts';
+} from '../types.ts';
 import { assertAttachmentLimits, requireMediaLimits } from './attachments.ts';
+import { geminiKindForMime, mimeAllowed, mimeEssence } from './catalog.ts';
 
 function listedValue(allowed: string[] | undefined, value: string | undefined): string | undefined {
   if (!value) {
@@ -67,14 +66,7 @@ function assertImageRole(profile: Profile): NonNullable<Profile['outputs']['imag
       `Profile ${profile.id} requests image output but does not set outputs.image`,
     );
   }
-  if (profile.outputs.speech) {
-    throw new TheorumError(`Profile ${profile.id} cannot mix outputs.image with outputs.speech`);
-  }
-  if (profile.outputs.structured !== null && profile.outputs.structured !== undefined) {
-    throw new TheorumError(
-      `Profile ${profile.id} cannot mix structured JSON with native image output`,
-    );
-  }
+  assertExclusiveNativeOutput(profile, 'image');
   return pins;
 }
 
@@ -82,18 +74,25 @@ function assertSpeechRole(profile: Profile): void {
   if (!profile.outputs.speech) {
     return;
   }
-  if (profile.outputs.image) {
-    throw new TheorumError(`Profile ${profile.id} cannot mix outputs.speech with outputs.image`);
-  }
-  if (profile.outputs.structured !== null && profile.outputs.structured !== undefined) {
-    throw new TheorumError(
-      `Profile ${profile.id} cannot mix structured JSON with native speech output`,
-    );
-  }
+  assertExclusiveNativeOutput(profile, 'speech');
   if (profile.outputs.speech.format === 'mp3' && profile.model.protocol === 'geminiInteractions') {
     throw new TheorumError(
       `Profile ${profile.id}: outputs.speech.format 'mp3' requires protocol 'openAi' ` +
         `(geminiInteractions speech returns PCM and emits WAV)`,
+    );
+  }
+}
+
+function assertExclusiveNativeOutput(profile: Profile, kind: 'image' | 'speech'): void {
+  const other = kind === 'image' ? 'speech' : 'image';
+  if (profile.outputs[other]) {
+    throw new TheorumError(
+      `Profile ${profile.id} cannot mix outputs.${kind} with outputs.${other}`,
+    );
+  }
+  if (profile.outputs.structured !== null && profile.outputs.structured !== undefined) {
+    throw new TheorumError(
+      `Profile ${profile.id} cannot mix structured JSON with native ${kind} output`,
     );
   }
 }

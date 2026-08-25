@@ -1,9 +1,8 @@
 /**
- * Host provider factory: route by profile `protocol` / `provider`.
+ * Host provider factory — the single public door for binding a profile to a transport.
  *
- * - `geminiInteractions` + `google` → Interactions (chat, image, and speech)
- * - `openAi` + `openrouter` + speech role → `/audio/speech`
- * - `openAi` + `openrouter` → chat completions
+ * Routes from `profile.model.protocol` / `provider` (and whether the profile is
+ * a speech role). Adapters under this folder are internal implementation.
  *
  * @module
  */
@@ -14,14 +13,18 @@ import type { GeminiTransport } from './keys.ts';
 import { createOpenRouterProvider } from './openrouter.ts';
 import type { OpenRouterConfig } from './openrouter-payload.ts';
 import { createInteractionsProvider } from './provider.ts';
-import { createSpeechProvider, type SpeechProviderConfig } from './speech.ts';
+import { createSpeechProvider } from './speech.ts';
 
-/** Credentials and transports supplied by the host when creating a provider. */
+/** Credentials supplied by the host when creating a provider. */
 export interface CreateProviderOptions {
+  /** Google Interactions (chat, image, and speech when protocol is geminiInteractions). */
   gemini?: GeminiTransport;
-  openRouter?: OpenRouterConfig;
-  /** OpenRouter-compatible `/audio/speech` config (speech-role + openAi). */
-  speech?: SpeechProviderConfig;
+  /**
+   * OpenRouter-compatible credentials for `openAi` profiles.
+   * Used for chat completions or `/audio/speech` when the profile is a speech role.
+   * Optional `voice` is a fallback when `outputs.speech.voice` is omitted.
+   */
+  openRouter?: OpenRouterConfig & { voice?: string };
 }
 
 function isSpeechRole(profile: Profile): boolean {
@@ -29,8 +32,8 @@ function isSpeechRole(profile: Profile): boolean {
 }
 
 /**
- * Create a `ModelProvider` for a profile's protocol/provider.
- * Speech on Google uses Interactions; speech on OpenRouter uses `/audio/speech`.
+ * Create a `ModelProvider` for a profile.
+ * One call: protocol/provider (and speech role) pick the transport.
  */
 export function createProvider(
   profile: Profile,
@@ -46,11 +49,11 @@ export function createProvider(
   }
 
   if (protocol === 'openAi' && provider === 'openrouter') {
-    if (isSpeechRole(profile)) {
-      return createSpeechProvider(options.speech ?? options.openRouter ?? {});
-    }
     if (!options.openRouter) {
       throw new TheorumError('createProvider requires openRouter config for openAi/openrouter');
+    }
+    if (isSpeechRole(profile)) {
+      return createSpeechProvider(options.openRouter);
     }
     return createOpenRouterProvider(options.openRouter);
   }

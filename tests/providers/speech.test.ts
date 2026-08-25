@@ -1,7 +1,8 @@
 import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC, PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import type { ProviderCompleteRequest } from '../../src/kernel/types.ts';
-import { createSpeechProvider, streamSpeech, wrapPcmAsWav } from '../../src/providers/speech.ts';
+import { wrapPcmAsWav } from '../../src/providers/pcm.ts';
+import { createSpeechProvider, streamSpeech } from '../../src/providers/speech.ts';
 import { HOST_MODELS } from '../fixtures/models.ts';
 
 function createMockSpeechRequest(text: string): ProviderCompleteRequest {

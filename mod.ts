@@ -79,15 +79,5 @@ export {
   writeTrace,
 } from './src/observability/trace.ts';
 export type { TraceRecord } from './src/observability/trace-record.ts';
-export type { GeminiTransport, GeminiVault } from './src/providers/keys.ts';
-export type { CreateProviderOptions } from './src/providers/mod.ts';
-export {
-  createInteractionsProvider,
-  createOpenRouterProvider,
-  createProvider,
-  createSpeechProvider,
-  resolveOpenRouterModel,
-  streamSpeech,
-  toOpenRouterPayload,
-  wrapPcmAsWav,
-} from './src/providers/mod.ts';
+export type { CreateProviderOptions, GeminiTransport, GeminiVault } from './src/providers/mod.ts';
+export { createProvider } from './src/providers/mod.ts';

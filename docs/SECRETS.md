@@ -9,39 +9,44 @@ Host applications own credentials, runtime configuration, and secret storage. Th
 - Do not create `.env` files in this repository.
 - Do not commit key templates to this repository.
 - Do not teach Theorum to discover keys from the shell or process environment.
-- Business applications pass credentials into provider constructors or transport objects.
+- Business applications pass credentials into `createProvider`.
 
-## 2. OpenRouter
-
-```ts
-import { createOpenRouterProvider } from 'theorum/openrouter';
-
-const provider = createOpenRouterProvider({
-  apiKey: hostResolvedOpenRouterKey,
-});
-```
-
-## 3. Google Interactions
+## 2. Single door: `createProvider`
 
 ```ts
-import { createInteractionsProvider } from 'theorum/providers';
+import { createProvider, runTurn } from 'theorum';
 
-const provider = createInteractionsProvider({
-  vault: {
-    freeA: hostResolvedFreeAKey,
-    freeB: hostResolvedFreeBKey,
-    freeC: hostResolvedFreeCKey,
-    paid: hostResolvedPaidKey,
+const provider = createProvider(profile, {
+  // geminiInteractions / google
+  gemini: {
+    vault: {
+      freeA: hostResolvedFreeAKey,
+      freeB: hostResolvedFreeBKey,
+      freeC: hostResolvedFreeCKey,
+      paid: hostResolvedPaidKey,
+    },
+  },
+  // openAi / openrouter (chat or speech role — same credentials)
+  openRouter: {
+    apiKey: hostResolvedOpenRouterKey,
   },
 });
+
+for await (const event of runTurn({ profile: profile.id, input: { text: '…' } }, provider)) {
+  // …
+}
 ```
 
-## 4. Tracing
+`createProvider` picks the transport from `profile.model.protocol` / `provider` (and whether the profile is a speech role). Hosts do not choose a separate speech constructor.
+
+## 3. Tracing
 
 Tracing is silent by default. Hosts opt in by passing a sink to `runTurn`.
 
 ```ts
-import { jsonlSink, runTurn } from 'theorum';
+import { createProvider, jsonlSink, runTurn } from 'theorum';
+
+const provider = createProvider(profile, { openRouter: { apiKey: hostResolvedOpenRouterKey } });
 
 for await (const event of runTurn(request, provider, jsonlSink(hostTraceDir))) {
   // stream events

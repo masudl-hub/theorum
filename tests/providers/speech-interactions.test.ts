@@ -8,8 +8,8 @@ import type { TurnEvent } from '../../src/kernel/types.ts';
 import { createProvider } from '../../src/providers/create-provider.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
 import type { GeminiVault } from '../../src/providers/keys.ts';
+import { wrapPcmAsWav } from '../../src/providers/pcm.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
-import { wrapPcmAsWav } from '../../src/providers/speech.ts';
 import { HOST_MODELS } from '../fixtures/models.ts';
 
 const vault: GeminiVault = {
@@ -194,7 +194,7 @@ Deno.test('createProvider routes openrouter speech to speech transport', () => {
     }),
   );
   const profile = getProfile('or_speech');
-  const provider = createProvider(profile, { speech: { apiKey: 'k' } });
+  const provider = createProvider(profile, { openRouter: { apiKey: 'k' } });
   assertEquals(typeof provider.complete, 'function');
   const { generation } = resolveTurn({ profile: 'or_speech', input: { text: 'hi' } });
   assertEquals(generation.geminiBucket, undefined);

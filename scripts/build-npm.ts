@@ -10,7 +10,7 @@ await build({
     { name: '.', path: './mod.ts' },
     { name: './kernel', path: './src/kernel/mod.ts' },
     { name: './providers', path: './src/providers/mod.ts' },
-    { name: './openrouter', path: './src/providers/openrouter.ts' },
+    { name: './openrouter', path: './src/providers/openrouter-mod.ts' },
     { name: './guardrails', path: './src/guardrails/mod.ts' },
     { name: './observability', path: './src/observability/mod.ts' },
     { name: './host', path: './src/host/mod.ts' },

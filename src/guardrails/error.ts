@@ -33,11 +33,36 @@ const PUBLIC_FILE_SIZE = 'That file is too large.';
 const PUBLIC_FILE_COUNT = 'Too many files for one message.';
 /** Safe copy for unsupported generated image dimensions. */
 const PUBLIC_IMAGE_SIZE = "That image size isn't supported.";
+/** Safe copy when the host aborts a turn. */
+const PUBLIC_CANCELLED = 'Cancelled.';
+
+/** True when `err` is an abort (DOMException or Error named AbortError). */
+function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+  const name = (err as { name?: unknown }).name;
+  return name === 'AbortError';
+}
+
+/** Throw if `signal` is already aborted. */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  const { reason } = signal;
+  if (isAbortError(reason)) {
+    throw reason;
+  }
+  throw new DOMException('The operation was aborted.', 'AbortError');
+}
 
 const EXACT: Record<string, string> = {
   [UPSTREAM_FAILED]: PUBLIC_UNAVAILABLE,
   'empty Gemini stream': PUBLIC_UNAVAILABLE,
   'canary leaked': PUBLIC_CANARY,
+  'The operation was aborted.': PUBLIC_CANCELLED,
+  'This operation was aborted': PUBLIC_CANCELLED,
   'Turn withheld: egress disclosure violation': PUBLIC_CANARY,
   'expected JSON object': 'Something was wrong with that request.',
   'user input cannot be placed in the system block': PUBLIC_GENERIC,
@@ -112,9 +137,13 @@ const ALREADY_PUBLIC = new Set([
   PUBLIC_FILE_SIZE,
   PUBLIC_FILE_COUNT,
   PUBLIC_IMAGE_SIZE,
+  PUBLIC_CANCELLED,
 ]);
 
 function publicText(text: string): string {
+  if (/aborted/i.test(text)) {
+    return PUBLIC_CANCELLED;
+  }
   if (ALREADY_PUBLIC.has(text)) {
     return text;
   }
@@ -132,6 +161,9 @@ function publicText(text: string): string {
 
 /** Convert an unknown thrown value or internal message to user-safe text. */
 function publicError(err: unknown): string {
+  if (isAbortError(err)) {
+    return PUBLIC_CANCELLED;
+  }
   if (typeof err === 'string') {
     return publicText(err);
   }
@@ -170,17 +202,20 @@ function toErrorEvent(err: unknown): {
 }
 
 export {
+  describeError,
+  isAbortError,
   PUBLIC_ACTION,
   PUBLIC_CANARY,
+  PUBLIC_CANCELLED,
   PUBLIC_FILE_COUNT,
   PUBLIC_FILE_SIZE,
   PUBLIC_FILE_TYPE,
   PUBLIC_GENERIC,
   PUBLIC_IMAGE_SIZE,
   PUBLIC_UNAVAILABLE,
-  describeError,
   publicError,
   TheorumError,
+  throwIfAborted,
   toErrorEvent,
   UPSTREAM_FAILED,
 };

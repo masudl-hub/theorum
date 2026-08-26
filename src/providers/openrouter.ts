@@ -18,7 +18,7 @@ import {
   type ToolSet,
   tool,
 } from 'ai';
-import { toErrorEvent } from '../guardrails/error.ts';
+import { isAbortError, toErrorEvent } from '../guardrails/error.ts';
 import { tryStructured } from '../kernel/engine/delta.ts';
 import { getTool } from '../kernel/registry/catalog.ts';
 import type {
@@ -645,6 +645,7 @@ function streamTextOptions(
     tools: buildTools(req.dynamicTools),
     providerOptions: providerOptionsFor(req),
     includeRawChunks: true,
+    abortSignal: req.signal,
     onError: () => undefined,
   };
 }
@@ -707,6 +708,9 @@ async function* streamOpenRouter(
     yield* yieldCapturedRawEvents(context, acc);
     yield* finalEvents(req, acc);
   } catch (err) {
+    if (isAbortError(err)) {
+      throw err;
+    }
     yield* yieldCapturedRawEventsUnchecked(context);
     yield toErrorEvent(err);
   }

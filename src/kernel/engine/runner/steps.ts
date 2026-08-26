@@ -1,3 +1,4 @@
+import { throwIfAborted } from '../../../guardrails/error.ts';
 import type {
   ModelProvider,
   Profile,
@@ -30,11 +31,15 @@ async function* executeAutonomousStep(
     system: string;
     provider: ModelProvider;
     gemini: Record<string, unknown>[];
+    signal?: AbortSignal;
   },
   state: StepExecutionState,
-  bufferOutputs = false,
+  buffer: { holdLate: boolean; holdUserVisible: boolean } = {
+    holdLate: false,
+    holdUserVisible: false,
+  },
 ): AsyncGenerator<TurnEvent, { pendingTools: TurnEvent[]; latestStructured?: unknown }> {
-  const { profile, generation, system, provider, gemini } = args;
+  const { profile, generation, system, provider, gemini, signal } = args;
   const genForStep = { ...generation, history: state.currentHistory };
   const pendingTools: TurnEvent[] = [];
   let latestStructured: unknown;
@@ -45,6 +50,7 @@ async function* executeAutonomousStep(
     system,
     provider,
     gemini,
+    signal,
   })) {
     if (event.type === 'structured') {
       latestStructured = event.structured;
@@ -57,7 +63,12 @@ async function* executeAutonomousStep(
       continue;
     }
     recordStepEvent(event, state);
-    if (!bufferOutputs || event.type === 'tokens') {
+    const isUserVisible = event.type === 'thought' || event.type === 'text';
+    // Egress must not stream user-visible text before the gate runs.
+    // Validation-only may stream thought/text live and only hold structured.
+    const streamNow =
+      !buffer.holdLate || event.type === 'tokens' || (isUserVisible && !buffer.holdUserVisible);
+    if (streamNow) {
       yield event;
     }
   }
@@ -146,16 +157,17 @@ async function* executeAttempt(args: {
   let latestStructured: unknown;
   let pendingTools: TurnEvent[] = [];
   let stepInAttempt = 0;
-  const shouldBuffer =
-    Boolean(profile.outputs.validation) || Boolean(profile.guardrails.egress?.enforce);
+  const holdUserVisible = Boolean(profile.guardrails.egress?.enforce);
+  const holdLate = Boolean(profile.outputs.validation) || holdUserVisible;
 
   while (!isStepLimitReached(stepInAttempt, generation.maxSteps)) {
+    throwIfAborted(args.safe.signal);
     stepInAttempt++;
     state.stepCount++;
     const stepResult = yield* executeAutonomousStep(
-      { profile, generation, system, provider, gemini },
+      { profile, generation, system, provider, gemini, signal: args.safe.signal },
       state,
-      shouldBuffer,
+      { holdLate, holdUserVisible },
     );
     if (stepResult.latestStructured !== undefined) {
       latestStructured = stepResult.latestStructured;

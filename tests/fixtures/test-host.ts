@@ -46,6 +46,35 @@ registerStructured('tsxTurn', {
   },
 });
 registerStructured('promptTurn', { enforced: 'prompt' });
+registerStructured('validTurn', {
+  enforced: 'responseFormat',
+  jsonSchema: {
+    type: 'object',
+    properties: {
+      code: { type: 'string' },
+      message: { type: 'string' },
+    },
+    required: ['code'],
+  },
+});
+registerStructured('optionalCodeTurn', {
+  enforced: 'responseFormat',
+  jsonSchema: {
+    type: 'object',
+    properties: {
+      message: { type: 'string' },
+      code: { type: 'string' },
+      diagram: {
+        type: 'object',
+        properties: {
+          mermaid: { type: 'string' },
+        },
+        required: ['mermaid'],
+      },
+    },
+    required: ['message'],
+  },
+});
 
 const chat: Profile = {
   id: 'chat',

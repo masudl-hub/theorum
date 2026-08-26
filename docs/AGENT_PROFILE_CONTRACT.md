@@ -169,8 +169,8 @@ export interface Profile {
 - `outputs.structured`: Structured JSON schema specification (or slot-based schema routing).
 - `outputs.image`: Pins for an image-role profile (`aspectRatio`, `size`, `mimeType`, optional `allowsGrounding`, `maxInputImages`). The image model itself is selected via `model.allow` / `model.config`. Slot overrides use `slots.aspectRatio` / `slots.size` when the profile lists allowlists under `inputs.slots`. Adapters map `size` to provider wire keys (e.g. Google Interactions `imageSize`).
 - `outputs.speech`: Pins for a speech-role profile (`voice`, optional `format: 'pcm' | 'mp3'`). The speech model itself is selected via `model.allow` / `model.config`. Bind with `createProvider(profile, …)` — same door as chat/image. `geminiInteractions` uses Interactions (`response_format: audio` + `speech_config`); `openAi`/`openrouter` speech roles use `/audio/speech` with the same `openRouter` credentials. `format: 'pcm'` (default) yields WAV media on both. `format: 'mp3'` is only valid on `openAi` speech — Interactions rejects it at resolve.
-- `outputs.validation`: In-harness auto-correction validator (`validate`, optional `extract`, `maxRetries`, `repairGuidance`). If `extract` is omitted, the structured output itself is validated.
-- `outputs.streaming`: SSE streaming behaviors (`streamThoughts`, `gateMedia`). `gateMedia` controls whether stream `media` events are held until validation/egress — unrelated to a profile output flag.
+- `outputs.validation`: Schema-driven in-harness auto-correction. Required vs optional comes only from the structured JSON Schema. Host `fields` validators (dotted paths such as `diagram.mermaid`) run for required paths and for optional paths that are present. Omitted optional paths are skipped. Setting `validation` without a structured `jsonSchema` is an error.
+- `outputs.streaming`: SSE streaming behaviors (`streamThoughts`, `gateMedia`). `gateMedia` holds stream `media` events until validation/egress. With validation only, thought and text still stream live (structured is held until accepted). With egress enforcement, user-visible thought/text stay buffered until the egress gate passes.
 
 ### `guardrails`
 - `guardrails.quota.perDay`: Optional daily turn quota enforced per client IP. If omitted, quota enforcement is explicitly `not_configured`.
@@ -181,6 +181,7 @@ export interface Profile {
 
 ### Per-turn Interactions state
 - `TurnRequest.input`: Optional turn input object. If omitted, Theorum normalizes it to an empty input and still runs the profile/provider turn.
+- `TurnRequest.signal`: Optional `AbortSignal`. When aborted, THEORUM stops the turn and cancels in-flight provider HTTP (Gemini fetch, OpenRouter `abortSignal`, speech fetch). Traces mark `cancelled: true`.
 - `TurnRequest.previousInteractionId`: Optional Google Interactions server-side conversation pointer. Theorum passes it through as `previous_interaction_id` for profiles using `geminiInteractions`.
 - `TurnRequest.store`: Optional Google Interactions storage override. If omitted, Theorum does not send `store`; provider/project policy remains the authority. If supplied, Theorum serializes the explicit boolean.
 

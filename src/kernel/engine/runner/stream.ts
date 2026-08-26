@@ -1,4 +1,4 @@
-import { publicError, toErrorEvent } from '../../../guardrails/error.ts';
+import { publicError, throwIfAborted, toErrorEvent } from '../../../guardrails/error.ts';
 import { providerCompleteRequest } from '../../registry/provider-request.ts';
 import type { ModelProvider, Profile, ResolvedGeneration, TurnEvent } from '../../types.ts';
 import { eventHasCanary, redactCanary } from '../boundary.ts';
@@ -67,15 +67,19 @@ async function* yieldProviderEvents(args: {
   system: string;
   provider: ModelProvider;
   gemini: Record<string, unknown>[];
+  signal?: AbortSignal;
 }): AsyncGenerator<TurnEvent> {
-  const { profile, generation, system, provider, gemini } = args;
+  const { profile, generation, system, provider, gemini, signal } = args;
   const { canary } = generation;
+  throwIfAborted(signal);
   for await (const event of provider.complete({
     ...providerCompleteRequest(generation, system),
+    signal,
     tapGemini: (row) => {
       gemini.push(row);
     },
   })) {
+    throwIfAborted(signal);
     if (canary && eventHasCanary(event, canary)) {
       yield redactCanary(event, canary);
       yield toErrorEvent('canary leaked');

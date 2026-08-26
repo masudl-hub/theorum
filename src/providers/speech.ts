@@ -104,6 +104,7 @@ async function requestSpeech(
     method: 'POST',
     headers: buildHeaders(apiKey, config),
     body: JSON.stringify(buildPayload(req, text, req.speech, config.voice)),
+    signal: req.signal,
   });
 }
 

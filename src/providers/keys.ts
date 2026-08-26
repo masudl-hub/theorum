@@ -7,7 +7,7 @@
  * @module
  */
 
-import { TheorumError, UPSTREAM_FAILED } from '../guardrails/error.ts';
+import { isAbortError, TheorumError, UPSTREAM_FAILED } from '../guardrails/error.ts';
 import type { GeminiBucket } from '../kernel/types.ts';
 
 type GeminiVault = Record<GeminiBucket, string | undefined>;
@@ -59,6 +59,9 @@ function isTransientHttp(status: number): boolean {
 }
 
 function isTransientThrown(err: unknown): boolean {
+  if (isAbortError(err)) {
+    return false;
+  }
   return TRANSIENT_THROWN_RE.test(String(err));
 }
 
@@ -83,7 +86,11 @@ async function runWithBackoff<T>(
   try {
     return await run(apiKey);
   } catch (err) {
-    if (!(isQuota(err) || isTransientThrown(err)) || attempt === LAST_ATTEMPT) {
+    if (
+      isAbortError(err) ||
+      !(isQuota(err) || isTransientThrown(err)) ||
+      attempt === LAST_ATTEMPT
+    ) {
       throw err;
     }
     await wait(backoffMs(attempt));
@@ -149,10 +156,15 @@ async function fetchWithBackoff(args: FetchAttempt): Promise<Response> {
     if (!isTransientHttp(last.status) || args.attempt === LAST_ATTEMPT) {
       return last;
     }
+    if (args.init.signal?.aborted) {
+      throw args.init.signal.reason instanceof Error
+        ? args.init.signal.reason
+        : new DOMException('The operation was aborted.', 'AbortError');
+    }
     await wait(backoffMs(args.attempt));
     return fetchWithBackoff({ ...args, attempt: args.attempt + 1 });
   } catch (err) {
-    if (!isTransientThrown(err) || args.attempt === LAST_ATTEMPT) {
+    if (isAbortError(err) || !isTransientThrown(err) || args.attempt === LAST_ATTEMPT) {
       throw err;
     }
     await wait(backoffMs(args.attempt));

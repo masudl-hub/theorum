@@ -7,7 +7,7 @@
  * @module
  */
 
-import { publicError } from '../guardrails/error.ts';
+import { isAbortError, publicError } from '../guardrails/error.ts';
 import { sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
 import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
 import { sha256 } from '../kernel/engine/hash.ts';
@@ -193,8 +193,7 @@ function attachFailure(
 ): void {
   if (!record.ok) {
     record.error = publicError(thrown ?? lastErr?.error);
-    const inside =
-      internalError(thrown) ?? lastErr?.errorInternal ?? lastErr?.error;
+    const inside = internalError(thrown) ?? lastErr?.errorInternal ?? lastErr?.error;
     if (inside) {
       record.errorInternal = inside;
     }
@@ -223,14 +222,15 @@ async function buildRecord(args: {
   const lastErr = [...snapped].reverse().find((row) => row.type === 'error');
   const done = completedInteraction(gemini);
   const status = done?.status;
-  const ok = !(thrown || lastErr) && status !== 'cancelled';
+  const aborted = isAbortError(thrown);
+  const ok = !(thrown || lastErr) && status !== 'cancelled' && !aborted;
   const record: TraceRecord = {
     v: TRACE_VERSION,
     id: crypto.randomUUID(),
     ts: started,
     ms: Date.now() - started,
     streamed: true,
-    cancelled: status === 'cancelled',
+    cancelled: status === 'cancelled' || aborted,
     previousInteractionId: safe.previousInteractionId ?? null,
     store: safe.store ?? null,
     profile: safe.profile,

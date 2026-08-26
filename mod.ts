@@ -37,7 +37,14 @@
  * @module
  */
 
-export { publicError, describeError, TheorumError, toErrorEvent } from './src/guardrails/error.ts';
+export {
+  describeError,
+  isAbortError,
+  publicError,
+  TheorumError,
+  throwIfAborted,
+  toErrorEvent,
+} from './src/guardrails/error.ts';
 export type { QuotaSlotStatus } from './src/guardrails/quota.ts';
 export {
   clientIp,

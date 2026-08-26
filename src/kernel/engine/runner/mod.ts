@@ -8,6 +8,7 @@
  * @module
  */
 
+import { throwIfAborted } from '../../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { noopSink, type TraceSink, writeTrace } from '../../../observability/trace.ts';
 import { buildRecord } from '../../../observability/trace-record.ts';
@@ -73,6 +74,7 @@ async function* runTurn(
   let generation: ResolvedGeneration | undefined;
   try {
     const safe = sanitizeTurnRequest(req);
+    throwIfAborted(safe.signal);
     const { profile, generation: gen } = resolveTurn(safe);
     generation = gen;
     const { model: resolvedModel, geminiBucket, canary: turnCanary } = gen;
@@ -93,12 +95,6 @@ async function* runTurn(
       gemini,
     })) {
       seen.push(event);
-      if (event.type === 'error') {
-        const detail = event.errorInternal ?? event.error;
-        if (detail) {
-          console.error(`[theorum] turn error (${req.profile}): ${detail}`);
-        }
-      }
       if (shouldSkipStreamEvent(event, profile)) {
         continue;
       }

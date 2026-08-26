@@ -9,7 +9,7 @@
  * @module
  */
 
-import { TheorumError, toErrorEvent } from '../guardrails/error.ts';
+import { isAbortError, TheorumError, toErrorEvent } from '../guardrails/error.ts';
 import {
   eventsFromComplete,
   eventsFromDelta,
@@ -153,7 +153,7 @@ async function* streamComplete(
   }
   const res = await fetchGemini(
     INTERACTIONS_URL,
-    { method: 'POST', body: JSON.stringify(toInteractionsBody(req)) },
+    { method: 'POST', body: JSON.stringify(toInteractionsBody(req)), signal: req.signal },
     req.geminiBucket,
     withTap(req, transport),
   );
@@ -186,6 +186,9 @@ async function* streamGuarded(
   try {
     yield* streamComplete(req, transport);
   } catch (err) {
+    if (isAbortError(err)) {
+      throw err;
+    }
     yield toErrorEvent(err);
   }
 }

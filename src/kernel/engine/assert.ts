@@ -25,5 +25,26 @@ function assertThrows(fn: () => unknown, ctor: ErrorConstructor): void {
   throw new Error(`assertThrows failed: expected ${ctor.name}`);
 }
 
+async function assertRejects(
+  fn: () => Promise<unknown>,
+  ctor: ErrorConstructor,
+  messageIncludes?: string,
+): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    if (!(err instanceof ctor)) {
+      throw err;
+    }
+    if (messageIncludes && !String(err.message).includes(messageIncludes)) {
+      throw new Error(
+        `assertRejects failed: message "${err.message}" does not include "${messageIncludes}"`,
+      );
+    }
+    return;
+  }
+  throw new Error(`assertRejects failed: expected ${ctor.name}`);
+}
+
 export type { ErrorConstructor };
-export { assertEquals, assertStringIncludes, assertThrows };
+export { assertEquals, assertRejects, assertStringIncludes, assertThrows };

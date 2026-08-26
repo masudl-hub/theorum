@@ -171,8 +171,12 @@ export type ProfileValidator = (
 
 /** Profile output validation and deterministic repair configuration. */
 export interface ProfileValidationSpec {
-  extract?: (structured: unknown) => unknown;
-  validate: ProfileValidator;
+  /**
+   * Host domain validators keyed by dotted paths into structured output
+   * (e.g. `diagram.mermaid`). Presence/required is owned by the JSON Schema;
+   * these run only for required paths and for optional paths that are present.
+   */
+  fields?: Record<string, ProfileValidator>;
   maxRetries?: number;
   repairGuidance?: string;
 }
@@ -434,6 +438,11 @@ export interface TurnRequest {
   dynamicToolLoader?: DynamicToolLoader;
   /** Host-owned metadata preserved for traces; the kernel does not interpret it. */
   metadata?: Record<string, unknown>;
+  /**
+   * Optional abort signal. When aborted, THEORUM stops the turn and cancels
+   * in-flight provider HTTP where the adapter supports it.
+   */
+  signal?: AbortSignal;
   input?: TurnInput;
   toolInvoke?: { name: CustomToolId; arguments: Record<string, unknown> };
 }
@@ -571,6 +580,8 @@ export interface ProviderCompleteRequest extends ProviderGenerationConfig {
   geminiBucket?: GeminiBucket;
   /** Scrubbed SSE / HTTP rows for traces. */
   tapGemini?: (row: Record<string, unknown>) => void;
+  /** Host abort signal — adapters should pass this into fetch / SDK calls. */
+  signal?: AbortSignal;
 }
 
 /** Minimal adapter contract every model provider must implement. */

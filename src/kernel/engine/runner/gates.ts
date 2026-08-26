@@ -1,6 +1,7 @@
-import { toErrorEvent } from '../../../guardrails/error.ts';
+import { TheorumError, throwIfAborted, toErrorEvent } from '../../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { resolveTurn } from '../../registry/resolve.ts';
+import { getStructured } from '../../registry/schemas.ts';
 import type {
   ModelProvider,
   Profile,
@@ -9,6 +10,7 @@ import type {
   TurnEvent,
   TurnRequest,
 } from '../../types.ts';
+import { collectValidationFailures, formatValidationFailures } from './schema-validation.ts';
 import type { AttemptFlowState, StepExecutionState } from './state.ts';
 import { executeAttempt } from './steps.ts';
 
@@ -37,28 +39,6 @@ function buildRepairRequest(
       },
     },
   };
-}
-
-function hasValidatableOutput(
-  validation: ProfileOutputsSpec['validation'],
-  latestStructured: unknown,
-): boolean {
-  if (!validation || latestStructured === undefined) {
-    return false;
-  }
-  const candidateOutput = validation.extract?.(latestStructured) ?? latestStructured;
-  return candidateOutput !== undefined && candidateOutput !== null;
-}
-
-async function evaluateValidationAttempt(
-  validation: NonNullable<ProfileOutputsSpec['validation']>,
-  latestStructured: unknown,
-  slots: Record<string, string> | undefined,
-): Promise<{ candidateOutput: unknown; isValid: boolean; error: string }> {
-  const candidateOutput = validation.extract?.(latestStructured) ?? latestStructured;
-  const check = await validation.validate(candidateOutput, slots);
-  const error = check.error || check.finding || 'Validation failed';
-  return { candidateOutput, isValid: Boolean(check.isValid), error };
 }
 
 type EgressOutcome =
@@ -115,46 +95,61 @@ type ValidationOutcome =
 
 async function evaluateValidationOutcome(args: {
   validation: NonNullable<ProfileOutputsSpec['validation']>;
+  generation: ResolvedGeneration;
   latestStructured: unknown;
   request: TurnRequest;
   canRetry: boolean;
 }): Promise<ValidationOutcome> {
-  const { validation, latestStructured, request, canRetry } = args;
-  if (!hasValidatableOutput(validation, latestStructured)) {
+  const { validation, generation, latestStructured, request, canRetry } = args;
+  if (latestStructured === undefined) {
     return { action: 'pass' };
   }
-
-  const { candidateOutput, isValid, error } = await evaluateValidationAttempt(
-    validation,
+  const structuredId = generation.structured;
+  if (!structuredId) {
+    throw new TheorumError('outputs.validation requires outputs.structured with a JSON Schema');
+  }
+  const spec = getStructured(structuredId);
+  if (!spec.jsonSchema) {
+    throw new TheorumError(`structured schema '${structuredId}' has no jsonSchema for validation`);
+  }
+  const failures = await collectValidationFailures(
+    spec.jsonSchema,
     latestStructured,
+    validation.fields,
     request.input?.slots,
   );
-
-  if (isValid) {
+  if (failures.length === 0) {
     return { action: 'pass' };
   }
-
+  const error = formatValidationFailures(failures);
   if (canRetry) {
     const nextRequest = buildRepairRequest(
       request,
-      candidateOutput,
+      latestStructured,
       error,
       validation.repairGuidance,
     );
     return { action: 'retry', nextRequest };
   }
-
   return {
     action: 'accept',
     event: { type: 'structured', structured: latestStructured },
   };
 }
 
-function* yieldBufferedAttemptEvents(events: TurnEvent[]): Generator<TurnEvent> {
+function* yieldBufferedAttemptEvents(
+  events: TurnEvent[],
+  alreadyStreamedUserVisible: boolean,
+): Generator<TurnEvent> {
   for (const ev of events) {
-    if (ev.type !== 'tokens') {
-      yield ev;
+    if (ev.type === 'tokens') {
+      continue;
     }
+    // When validation-only, thought/text already streamed live.
+    if (alreadyStreamedUserVisible && (ev.type === 'thought' || ev.type === 'text')) {
+      continue;
+    }
+    yield ev;
   }
 }
 
@@ -207,6 +202,7 @@ async function* handleValidationGate(
   const canRetry = flow.currentAttempt < maxRetries;
   const outcome = await evaluateValidationOutcome({
     validation,
+    generation: flow.currentGen,
     latestStructured,
     request: flow.currentReq,
     canRetry,
@@ -291,7 +287,8 @@ async function* executeSingleAttemptCycle(args: {
   }
 
   if (validation || egress?.enforce) {
-    yield* yieldBufferedAttemptEvents(state.attemptEvents);
+    const alreadyStreamedUserVisible = !egress?.enforce;
+    yield* yieldBufferedAttemptEvents(state.attemptEvents, alreadyStreamedUserVisible);
   }
 
   return { status: 'success' };
@@ -317,6 +314,7 @@ async function* runAttemptsWithValidation(
   };
 
   while (flow.currentAttempt <= maxRetries) {
+    throwIfAborted(safe.signal);
     const step = yield* executeSingleAttemptCycle({
       flow,
       state,

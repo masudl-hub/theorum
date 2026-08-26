@@ -2,6 +2,7 @@ import '../fixtures/test-host.ts';
 import { PUBLIC_ACTION, PUBLIC_CANARY, TheorumError } from '../../src/guardrails/error.ts';
 import {
   assertEquals,
+  assertRejects,
   assertStringIncludes,
   assertThrows,
 } from '../../src/kernel/engine/assert.ts';
@@ -550,10 +551,11 @@ Deno.test('runTurn executes profile validation and auto-corrects', async () => {
     outputs: {
       structured: 'validTurn',
       validation: {
-        extract: (s: unknown) => (s as { code?: string })?.code,
-        validate: (code: unknown) => {
-          if (code === 'good') return { isValid: true };
-          return { isValid: false, error: 'code must be good' };
+        fields: {
+          code: (code: unknown) => {
+            if (code === 'good') return { isValid: true };
+            return { isValid: false, error: 'code must be good' };
+          },
         },
         maxRetries: 1,
         repairGuidance: 'emit good code',
@@ -591,36 +593,260 @@ Deno.test('runTurn executes profile validation and auto-corrects', async () => {
   assertEquals(events.at(-1)?.type, 'done');
 });
 
-Deno.test('runTurn validation uses structured output directly when extract is omitted', async () => {
+Deno.test('runTurn skips optional field validators when optional path is omitted', async () => {
+  let codeValidatorCalls = 0;
   registerProfile({
-    id: 'directValidationProfile',
-    model: { ...modelAllow('gemini35FlashLite') },
+    id: 'optionalArtifactProfile',
+    identity: { handle: 'optionalArtifact' },
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini35FlashLite'),
+      thinking: 'minimal',
+      controls: [],
+      maxSteps: 1,
+      key: 'freeA',
+    },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: 'optionalCodeTurn',
+      validation: {
+        fields: {
+          code: () => {
+            codeValidatorCalls += 1;
+            return { isValid: false, error: 'should not validate' };
+          },
+        },
+        maxRetries: 3,
+        repairGuidance: 'do not invent code',
+      },
+    },
+    guardrails: { quota: { perDay: 10 } },
+  });
+
+  let callCount = 0;
+  async function* mockMessageOnly(): AsyncGenerator<TurnEvent> {
+    await Promise.resolve();
+    callCount++;
+    yield { type: 'structured', structured: { message: '2 + 2 is 4.' } };
+  }
+
+  const events = await collect(
+    runTurn(
+      { profile: 'optionalArtifactProfile', input: { text: 'what is 2+2?' } },
+      { complete: mockMessageOnly },
+    ),
+  );
+  assertEquals(callCount, 1);
+  assertEquals(codeValidatorCalls, 0);
+  assertEquals(events.find((e) => e.type === 'structured')?.structured, {
+    message: '2 + 2 is 4.',
+  });
+  assertEquals(events.at(-1)?.type, 'done');
+});
+
+Deno.test('runTurn streams thought and text live while validation buffers structured', async () => {
+  registerProfile({
+    id: 'streamWhileValidate',
+    identity: { handle: 'streamValidate' },
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini35FlashLite'),
+      thinking: 'minimal',
+      controls: [],
+      maxSteps: 1,
+      key: 'freeA',
+    },
+    tools: { allow: [] },
+    inputs: { text: true },
     outputs: {
       structured: 'validTurn',
       validation: {
-        validate: (candidate: unknown) => {
-          const value = candidate as { code?: string };
-          return { isValid: value.code === 'good', error: 'code must be good' };
+        fields: {
+          code: () => ({ isValid: true }),
         },
+        maxRetries: 0,
       },
     },
+    guardrails: { quota: { perDay: 10 } },
   });
 
   async function* mockComplete(): AsyncGenerator<TurnEvent> {
     await Promise.resolve();
+    yield { type: 'thought', text: 'planning' };
+    yield { type: 'text', text: '{"code":' };
+    yield { type: 'structured', structured: { code: 'good' } };
+    yield { type: 'tokens', tokens: { input: 1, output: 1, thinking: 0, total: 2 } };
+  }
+
+  const events = await collect(
+    runTurn({ profile: 'streamWhileValidate', input: { text: 'go' } }, { complete: mockComplete }),
+  );
+  const types = events.map((e) => e.type);
+  assertEquals(types.includes('thought'), true);
+  assertEquals(types.includes('text'), true);
+  assertEquals(types.includes('structured'), true);
+  assertEquals(types.filter((t) => t === 'thought').length, 1);
+  assertEquals(types.filter((t) => t === 'text').length, 1);
+  assertEquals(types.indexOf('thought') < types.indexOf('structured'), true);
+  assertEquals(types.indexOf('text') < types.indexOf('structured'), true);
+  assertEquals(events.at(-1)?.type, 'done');
+});
+
+Deno.test('runTurn retries when required field is missing', async () => {
+  registerProfile({
+    id: 'requiredMissingProfile',
+    identity: { handle: 'requiredMissing' },
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini35FlashLite'),
+      thinking: 'minimal',
+      controls: [],
+      maxSteps: 1,
+      key: 'freeA',
+    },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: 'validTurn',
+      validation: { maxRetries: 1, repairGuidance: 'include code' },
+    },
+    guardrails: { quota: { perDay: 10 } },
+  });
+
+  let callCount = 0;
+  async function* mockComplete(req: ProviderCompleteRequest): AsyncGenerator<TurnEvent> {
+    await Promise.resolve();
+    callCount++;
+    if (callCount === 1) {
+      yield { type: 'structured', structured: { message: 'no code yet' } };
+      return;
+    }
+    assertEquals(
+      req.input.some(
+        (p) => p.type === 'text' && p.text.includes("required field 'code' is missing"),
+      ),
+      true,
+    );
     yield { type: 'structured', structured: { code: 'good' } };
   }
 
   const events = await collect(
     runTurn(
-      { profile: 'directValidationProfile', input: { text: 'make code' } },
+      { profile: 'requiredMissingProfile', input: { text: 'make code' } },
       { complete: mockComplete },
     ),
   );
-  assertEquals(events.find((e) => e.type === 'structured')?.structured, {
-    code: 'good',
+  assertEquals(callCount, 2);
+  assertEquals(events.find((e) => e.type === 'structured')?.structured, { code: 'good' });
+});
+
+Deno.test('runTurn validates nested required under present optional object', async () => {
+  let mermaidCalls = 0;
+  registerProfile({
+    id: 'nestedOptionalProfile',
+    identity: { handle: 'nestedOptional' },
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini35FlashLite'),
+      thinking: 'minimal',
+      controls: [],
+      maxSteps: 1,
+      key: 'freeA',
+    },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: 'optionalCodeTurn',
+      validation: {
+        fields: {
+          'diagram.mermaid': (source: unknown) => {
+            mermaidCalls += 1;
+            if (source === 'flowchart TD\nA --> B') return { isValid: true };
+            return { isValid: false, error: 'bad mermaid' };
+          },
+        },
+        maxRetries: 1,
+        repairGuidance: 'fix mermaid',
+      },
+    },
+    guardrails: { quota: { perDay: 10 } },
   });
-  assertEquals(events.at(-1)?.type, 'done');
+
+  let callCount = 0;
+  async function* mockComplete(): AsyncGenerator<TurnEvent> {
+    await Promise.resolve();
+    callCount++;
+    if (callCount === 1) {
+      yield {
+        type: 'structured',
+        structured: { message: 'here', diagram: { mermaid: 'nope' } },
+      };
+      return;
+    }
+    yield {
+      type: 'structured',
+      structured: { message: 'here', diagram: { mermaid: 'flowchart TD\nA --> B' } },
+    };
+  }
+
+  const events = await collect(
+    runTurn(
+      { profile: 'nestedOptionalProfile', input: { text: 'draw' } },
+      { complete: mockComplete },
+    ),
+  );
+  assertEquals(callCount, 2);
+  assertEquals(mermaidCalls >= 1, true);
+  assertEquals(events.find((e) => e.type === 'structured')?.structured, {
+    message: 'here',
+    diagram: { mermaid: 'flowchart TD\nA --> B' },
+  });
+});
+
+Deno.test('runTurn validation without structured schema throws', async () => {
+  registerProfile({
+    id: 'validationNoSchemaProfile',
+    identity: { handle: 'validationNoSchema' },
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini35FlashLite'),
+      thinking: 'minimal',
+      controls: [],
+      maxSteps: 1,
+      key: 'freeA',
+    },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: null,
+      validation: { fields: {}, maxRetries: 0 },
+    },
+    guardrails: { quota: { perDay: 10 } },
+  });
+
+  async function* mockComplete(): AsyncGenerator<TurnEvent> {
+    await Promise.resolve();
+    yield { type: 'structured', structured: { message: 'x' } };
+  }
+
+  await assertRejects(
+    async () => {
+      await collect(
+        runTurn(
+          { profile: 'validationNoSchemaProfile', input: { text: 'x' } },
+          { complete: mockComplete },
+        ),
+      );
+    },
+    TheorumError,
+    'outputs.validation requires outputs.structured',
+  );
 });
 
 Deno.test('runTurn passes host dynamic system prompt combined with canary', async () => {

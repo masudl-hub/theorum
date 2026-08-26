@@ -9,17 +9,20 @@
  */
 
 export {
+  describeError,
+  isAbortError,
   PUBLIC_ACTION,
   PUBLIC_CANARY,
+  PUBLIC_CANCELLED,
   PUBLIC_FILE_COUNT,
   PUBLIC_FILE_SIZE,
   PUBLIC_FILE_TYPE,
   PUBLIC_GENERIC,
   PUBLIC_IMAGE_SIZE,
   PUBLIC_UNAVAILABLE,
-  describeError,
   publicError,
   TheorumError,
+  throwIfAborted,
   toErrorEvent,
   UPSTREAM_FAILED,
 } from './error.ts';

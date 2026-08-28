@@ -17,6 +17,7 @@ await build({
     { name: './cli', path: './src/cli/index.ts' },
     { name: './presets', path: './src/presets/mod.ts' },
     { name: './presets/google', path: './src/presets/google.ts' },
+    { name: './streaming', path: './src/streaming/mod.ts' },
     {
       kind: 'bin',
       name: 'theorum',

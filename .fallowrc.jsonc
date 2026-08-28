@@ -10,6 +10,7 @@
     "tests/providers/**/*.ts",
     "tests/observability/**/*.ts",
     "tests/host/**/*.ts",
+    "tests/streaming/**/*.ts",
     "tests/fixtures/**/*.ts"
   ],
   "ignorePatterns": ["node_modules/**", "coverage/**", "scripts/**", "src/cli/**", "npm/**"],

@@ -1,6 +1,8 @@
 coverage/
 node_modules/
 npm/
+.stryker-tmp/
+.stryker-cache/
 theorum-core-*.tgz
 .env
 .env.local

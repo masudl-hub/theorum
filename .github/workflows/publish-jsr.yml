@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: deno install
 
+      - name: Verify publish bundle excludes artifacts
+        run: deno task verify:publish
+
       - name: Check package
         run: deno check mod.ts
 

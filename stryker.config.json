@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "deno test --allow-read --allow-write --allow-net --allow-sys --allow-env tests/"
+  },
+  "mutate": [
+    "src/providers/**/*.ts",
+    "!src/providers/mod.ts",
+    "!src/providers/openrouter-mod.ts"
+  ],
+  "ignorePatterns": [
+    "coverage",
+    "npm",
+    "docs",
+    ".stryker-cache",
+    ".stryker-tmp",
+    "node_modules",
+    "traces",
+    "cov_profile",
+    ".fallow"
+  ],
+  "reporters": ["clear-text", "progress"],
+  "coverageAnalysis": "off",
+  "incremental": true,
+  "incrementalFile": ".stryker-cache/incremental.json",
+  "thresholds": {
+    "high": 90,
+    "low": 80,
+    "break": 80
+  },
+  "timeoutMS": 30000,
+  "concurrency": 5,
+  "ignoreStatic": false
+}

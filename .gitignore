@@ -1,11 +1,42 @@
-coverage/
+# Dependencies & local builds
 node_modules/
 npm/
+
+# Test, coverage, and mutation artifacts (never commit or publish)
+coverage/
+cov_profile/
 .stryker-tmp/
 .stryker-cache/
-theorum-core-*.tgz
+stryker.log
+reports/
+*.lcov
+
+# Lint / analysis local caches
+.fallow/
+
+# Secrets & host-injected runtime data
 .env
-.env.local
+.env.*
+!.env.example
 traces/
+
+# OS & editor noise
 .DS_Store
-cov_profile/
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Pack / archive outputs
+theorum-core-*.tgz
+*.tgz
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temp scratch
+.tmp/
+tmp/

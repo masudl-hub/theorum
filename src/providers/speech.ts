@@ -179,3 +179,14 @@ function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider 
 }
 
 export { createSpeechProvider, streamSpeech };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = {
+  bytesToBase64,
+  extractInputText,
+  resolveSpeechWireModel,
+  buildHeaders,
+  buildPayload,
+  requestSpeech,
+  yieldSpeechSuccess,
+};

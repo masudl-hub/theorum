@@ -5,7 +5,7 @@ import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
 import type { GeminiVault } from '../../src/providers/keys.ts';
-import { createInteractionsProvider } from '../../src/providers/provider.ts';
+import { _internals, createInteractionsProvider } from '../../src/providers/provider.ts';
 import { INTERACTIONS_URL } from '../../src/providers/sse.ts';
 
 const vault: GeminiVault = {
@@ -556,4 +556,162 @@ Deno.test('provider handles null body, direct event usage/grounding, and structu
   assertEquals(textEv !== undefined, true);
   assertEquals(tokensEv !== undefined, true);
   assertEquals(structEv !== undefined, true);
+});
+
+Deno.test('_internals.base64ToBytes decodes known base64 values', () => {
+  assertEquals(_internals.base64ToBytes('aGVsbG8='), new TextEncoder().encode('hello'));
+  assertEquals(_internals.base64ToBytes(''), new Uint8Array());
+});
+
+Deno.test('_internals.bytesToBase64 encodes known byte values', () => {
+  assertEquals(_internals.bytesToBase64(new TextEncoder().encode('hello')), 'aGVsbG8=');
+  assertEquals(_internals.bytesToBase64(new Uint8Array()), '');
+});
+
+Deno.test('base64 helpers roundtrip arbitrary bytes', () => {
+  const bytes = new Uint8Array([0, 1, 2, 250, 251, 252, 253, 254, 255]);
+  const encoded = _internals.bytesToBase64(bytes);
+  assertEquals(_internals.base64ToBytes(encoded), bytes);
+});
+
+Deno.test('_internals.isRawPcmMime recognizes raw PCM mime types case-insensitively', () => {
+  assertEquals(_internals.isRawPcmMime('audio/pcm'), true);
+  assertEquals(_internals.isRawPcmMime('audio/l16'), true);
+  assertEquals(_internals.isRawPcmMime('audio/raw'), true);
+  assertEquals(_internals.isRawPcmMime('AUDIO/PCM'), true);
+});
+
+Deno.test('_internals.isRawPcmMime rejects non-PCM mime types', () => {
+  assertEquals(_internals.isRawPcmMime('audio/wav'), false);
+  assertEquals(_internals.isRawPcmMime('audio/mpeg'), false);
+});
+
+Deno.test('_internals.normalizeSpeechMedia returns event unchanged when speech is false', () => {
+  const event: TurnEvent = {
+    type: 'media',
+    media: { mimeType: 'audio/pcm', data: 'abc' },
+  };
+  assertEquals(_internals.normalizeSpeechMedia(event, false), event);
+});
+
+Deno.test('_internals.normalizeSpeechMedia returns non-media events unchanged', () => {
+  const event: TurnEvent = { type: 'text', text: 'hi' };
+  assertEquals(_internals.normalizeSpeechMedia(event, true), event);
+});
+
+Deno.test('_internals.normalizeSpeechMedia returns non-PCM media events unchanged', () => {
+  const event: TurnEvent = {
+    type: 'media',
+    media: { mimeType: 'audio/wav', data: 'abc' },
+  };
+  assertEquals(_internals.normalizeSpeechMedia(event, true), event);
+});
+
+Deno.test('_internals.normalizeSpeechMedia wraps raw PCM media as WAV when speech is true', () => {
+  const pcm = new Uint8Array([1, 2, 3, 4]);
+  const event: TurnEvent = {
+    type: 'media',
+    media: { mimeType: 'audio/pcm', data: _internals.bytesToBase64(pcm) },
+  };
+  const result = _internals.normalizeSpeechMedia(event, true);
+  assertEquals(result.type, 'media');
+  const media = result.type === 'media' ? result.media : undefined;
+  assertEquals(media?.mimeType, 'audio/wav');
+  const bytes = _internals.base64ToBytes(media?.data ?? '');
+  assertEquals(new TextDecoder().decode(bytes.slice(0, 4)), 'RIFF');
+  assertEquals(new TextDecoder().decode(bytes.slice(8, 12)), 'WAVE');
+});
+
+Deno.test('_internals.eventType prefers event_type, falls back to type, then empty string', () => {
+  assertEquals(
+    _internals.eventType({ event_type: 'content.delta', type: 'ignored' }),
+    'content.delta',
+  );
+  assertEquals(_internals.eventType({ type: 'interaction.complete' }), 'interaction.complete');
+  assertEquals(_internals.eventType({}), '');
+});
+
+Deno.test('_internals.isDeltaEvent matches delta kinds only', () => {
+  assertEquals(_internals.isDeltaEvent('content.delta'), true);
+  assertEquals(_internals.isDeltaEvent('step.delta'), true);
+  assertEquals(_internals.isDeltaEvent('interaction.complete'), false);
+  assertEquals(_internals.isDeltaEvent('other'), false);
+});
+
+Deno.test('_internals.isCompleteEvent matches interaction completion kinds', () => {
+  assertEquals(_internals.isCompleteEvent('interaction.complete'), true);
+  assertEquals(_internals.isCompleteEvent('interaction.completed'), true);
+  assertEquals(_internals.isCompleteEvent('interaction.anything'), true);
+  assertEquals(_internals.isCompleteEvent('content.delta'), false);
+});
+
+Deno.test('_internals.foldDeltaPayload accumulates text into the accumulator', () => {
+  const acc = { text: '' };
+  const events = _internals.foldDeltaPayload({ delta: { type: 'text', text: 'hello' } }, acc);
+  assertEquals(acc.text, 'hello');
+  assertEquals(events, [{ type: 'text', text: 'hello' }]);
+
+  const more = _internals.foldDeltaPayload({ delta: { type: 'text', text: ' world' } }, acc);
+  assertEquals(acc.text, 'hello world');
+  assertEquals(more, [{ type: 'text', text: ' world' }]);
+});
+
+Deno.test('_internals.foldPayload folds a delta event and accumulates text', () => {
+  const acc = { text: '' };
+  const events = _internals.foldPayload(
+    { event_type: 'content.delta', delta: { type: 'text', text: 'hi' } },
+    acc,
+  );
+  assertEquals(acc.text, 'hi');
+  assertEquals(events, [{ type: 'text', text: 'hi' }]);
+});
+
+Deno.test('_internals.foldPayload folds a complete event', () => {
+  const acc = { text: 'already streamed' };
+  const events = _internals.foldPayload(
+    { event_type: 'interaction.complete', interaction: {} },
+    acc,
+  );
+  assertEquals(Array.isArray(events), true);
+});
+
+Deno.test('_internals.foldPayload extracts direct usage metadata not covered by delta/complete events', () => {
+  const acc = { text: '' };
+  const events = _internals.foldPayload(
+    {
+      event_type: 'unknown.kind',
+      usage_metadata: { prompt_token_count: 3, candidates_token_count: 7 },
+    },
+    acc,
+  );
+  const tokens = events.find((e) => e.type === 'tokens');
+  assertEquals(tokens !== undefined, true);
+});
+
+Deno.test('_internals.foldPayload extracts direct grounding metadata not covered by delta/complete events', () => {
+  const acc = { text: '' };
+  const groundingMetadata = { groundingChunks: [{ web: { uri: 'https://example.com' } }] };
+  const events = _internals.foldPayload(
+    { event_type: 'unknown.kind', grounding_metadata: groundingMetadata },
+    acc,
+  );
+  const grounding = events.find((e) => e.type === 'grounding');
+  assertEquals(grounding !== undefined, true);
+});
+
+Deno.test('_internals.withTap wraps the transport fetch without mutating other fields', () => {
+  const calls: string[] = [];
+  const transport = {
+    vault,
+    wait: noWait,
+    fetch: (url: string | URL | Request) => {
+      calls.push(String(url));
+      return Promise.resolve(new Response('ok'));
+    },
+  };
+  const req = fromChatProfile();
+  const wrapped = _internals.withTap(req, transport);
+  assertEquals(wrapped.vault, vault);
+  assertEquals(wrapped.wait, noWait);
+  assertEquals(typeof wrapped.fetch, 'function');
 });

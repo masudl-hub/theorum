@@ -181,3 +181,20 @@ function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknow
 }
 
 export { camelToSnake, toInteractionsBody };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = {
+  camelToSnake,
+  toGoogleValue,
+  wirePart,
+  userInputStep,
+  historyStep,
+  systemHoldsUserInput,
+  jsonResponseFormat,
+  attachResponseFormat,
+  attachSpeechConfig,
+  inputStepsFromRequest,
+  applyOptionalRequestFields,
+  baseInteractionsBody,
+  toInteractionsBody,
+};

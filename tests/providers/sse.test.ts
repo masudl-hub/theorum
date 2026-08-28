@@ -1,5 +1,7 @@
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { takeSsePayloads } from '../../src/providers/sse.ts';
+import { _internals, takeSsePayloads } from '../../src/providers/sse.ts';
+
+const { asObject, dataRecord } = _internals;
 
 Deno.test('takeSsePayloads keeps event names, thought signatures, and [DONE]', () => {
   const raw = [
@@ -69,4 +71,48 @@ Deno.test('takeSsePayloads handles empty data, non-object JSON, and invalid JSON
   assertEquals(payloads[3].sseEvent, 'bad_json');
   assertEquals(payloads[3].eventType, 'sse_unparsed');
   assertEquals(payloads[3].data, '{ invalid syntax');
+});
+
+Deno.test('asObject returns the value for plain objects', () => {
+  assertEquals(asObject({ a: 1 }), { a: 1 });
+});
+
+Deno.test('asObject returns undefined for arrays', () => {
+  assertEquals(asObject([1, 2, 3]), undefined);
+});
+
+Deno.test('asObject returns undefined for null', () => {
+  assertEquals(asObject(null), undefined);
+});
+
+Deno.test('asObject returns undefined for primitives', () => {
+  assertEquals(asObject(42), undefined);
+  assertEquals(asObject('hello'), undefined);
+  assertEquals(asObject(true), undefined);
+  assertEquals(asObject(undefined), undefined);
+});
+
+Deno.test('dataRecord returns sse_done for empty data with no sseEvent', () => {
+  const row = dataRecord('data: ', '');
+  assertEquals(row, { eventType: 'sse_done' });
+});
+
+Deno.test('dataRecord returns sse_done for [DONE] sentinel', () => {
+  const row = dataRecord('data: [DONE]', 'done');
+  assertEquals(row, { sseEvent: 'done', eventType: 'sse_done' });
+});
+
+Deno.test('dataRecord merges parsed object fields with sseEvent, and row wins on conflicts', () => {
+  const row = dataRecord('data: {"sseEvent":"from-payload","x":1}', 'from-arg');
+  assertEquals(row, { sseEvent: 'from-arg', x: 1 });
+});
+
+Deno.test('dataRecord marks non-object parsed JSON as sse_unparsed', () => {
+  const row = dataRecord('data: [1,2]', '');
+  assertEquals(row, { eventType: 'sse_unparsed', data: [1, 2] });
+});
+
+Deno.test('dataRecord marks invalid JSON as sse_unparsed with raw string data', () => {
+  const row = dataRecord('data: {not json', 'ev');
+  assertEquals(row, { sseEvent: 'ev', eventType: 'sse_unparsed', data: '{not json' });
 });

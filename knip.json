@@ -1,0 +1,36 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "mod.ts",
+    "src/host/mod.ts",
+    "src/cli/index.ts",
+    "src/presets/mod.ts",
+    "src/presets/google.ts",
+    "scripts/*.{ts,mjs}"
+  ],
+  "project": ["src/**/*.ts", "tests/**/*.ts"],
+  "ignore": ["node_modules/**", "coverage/**", "npm/**"],
+  "ignoreDependencies": [
+    "@ast-grep/cli",
+    "@openrouter/ai-sdk-provider",
+    "ai"
+  ],
+  "paths": {
+    "@std/assert": ["node_modules/.deno/@std+assert@*/node_modules/@std/assert"],
+    "ai": ["node_modules/.deno/ai@*/node_modules/ai"],
+    "@openrouter/ai-sdk-provider": ["node_modules/.deno/@openrouter+ai-sdk-provider@*/node_modules/@openrouter/ai-sdk-provider"]
+  },
+  "rules": {
+    "files": "error",
+    "dependencies": "error",
+    "devDependencies": "error",
+    "optionalPeerDependencies": "error",
+    "unlisted": "error",
+    "binaries": "error",
+    "unresolved": "error",
+    "exports": "error",
+    "types": "error",
+    "duplicates": "error",
+    "enumMembers": "error"
+  }
+}

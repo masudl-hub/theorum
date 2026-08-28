@@ -55,3 +55,6 @@ function tapFetch(
 }
 
 export { tapFetch };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = { tapeHeaderValue, tapeHeaders, throwRow, tapFetch };

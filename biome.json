@@ -12,7 +12,9 @@
       ".fallowrc.jsonc",
       "!node_modules",
       "!package-lock.json",
-      "!coverage"
+      "!coverage",
+      "!.stryker-tmp",
+      "!.stryker-cache"
     ]
   },
   "formatter": {

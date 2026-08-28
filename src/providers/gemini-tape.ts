@@ -57,3 +57,13 @@ async function tapeGemini(value: unknown, canary: string): Promise<unknown> {
 }
 
 export { tapeGemini };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = {
+  isImageBlob,
+  scrubEntry,
+  scrubRecord,
+  scrubGemini,
+  redactCanaryInTree,
+  tapeGemini,
+};

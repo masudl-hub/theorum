@@ -57,3 +57,6 @@ function takeSsePayloads(
 }
 
 export { INTERACTIONS_URL, takeSsePayloads };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = { asObject, dataRecord, takeSsePayloads };

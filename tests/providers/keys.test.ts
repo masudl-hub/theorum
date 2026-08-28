@@ -2,7 +2,23 @@ import '../fixtures/test-host.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
-import { fetchGemini, type GeminiVault, withGeminiKey } from '../../src/providers/keys.ts';
+import {
+  _internals,
+  fetchGemini,
+  type GeminiVault,
+  withGeminiKey,
+} from '../../src/providers/keys.ts';
+
+const {
+  waitDefault,
+  isQuota,
+  isTransientHttp,
+  isTransientThrown,
+  requireKey,
+  backoffMs,
+  canOverflow,
+  withApiKey,
+} = _internals;
 
 const vault: GeminiVault = {
   freeA: 'free-a-key',
@@ -249,4 +265,104 @@ Deno.test('fetchGemini and withGeminiKey retry on transient network errors befor
   );
   assertEquals(result, 'data');
   assertEquals(keyAttempts, 2);
+});
+
+Deno.test('isQuota detects quota-shaped errors', () => {
+  assertEquals(isQuota('429'), true);
+  assertEquals(isQuota('RESOURCE_EXHAUSTED'), true);
+  assertEquals(isQuota('quota'), true);
+  assertEquals(isQuota('500'), false);
+  assertEquals(isQuota('not found'), false);
+});
+
+Deno.test('isTransientHttp flags retryable status codes only', () => {
+  assertEquals(isTransientHttp(408), true);
+  assertEquals(isTransientHttp(429), true);
+  assertEquals(isTransientHttp(500), true);
+  assertEquals(isTransientHttp(502), true);
+  assertEquals(isTransientHttp(503), true);
+  assertEquals(isTransientHttp(504), true);
+  assertEquals(isTransientHttp(200), false);
+  assertEquals(isTransientHttp(400), false);
+  assertEquals(isTransientHttp(401), false);
+  assertEquals(isTransientHttp(403), false);
+  assertEquals(isTransientHttp(404), false);
+});
+
+Deno.test('isTransientThrown matches known transient network error shapes', () => {
+  assertEquals(isTransientThrown(new Error('dns lookup failed')), true);
+  assertEquals(isTransientThrown(new Error('ECONNRESET')), true);
+  assertEquals(isTransientThrown(new Error('fetch failed')), true);
+  assertEquals(isTransientThrown(new Error('503 service unavailable')), true);
+  assertEquals(isTransientThrown(new Error('socket hang up')), true);
+  assertEquals(isTransientThrown(new Error('temporarily unavailable')), true);
+});
+
+Deno.test('isTransientThrown never retries abort errors', () => {
+  const abort = new DOMException('The operation was aborted.', 'AbortError');
+  assertEquals(isTransientThrown(abort), false);
+});
+
+Deno.test('isTransientThrown is false for unrelated errors', () => {
+  assertEquals(isTransientThrown(new Error('invalid input')), false);
+});
+
+Deno.test('backoffMs follows the configured schedule and falls back after it', () => {
+  assertEquals(backoffMs(0), 1000);
+  assertEquals(backoffMs(1), 2000);
+  assertEquals(backoffMs(2), 4000);
+  assertEquals(backoffMs(3), 2000);
+  assertEquals(backoffMs(10), 2000);
+});
+
+Deno.test('canOverflow only offers the paid key for a distinct free bucket', () => {
+  assertEquals(canOverflow('paid', vault, vault.paid ?? ''), undefined);
+  assertEquals(canOverflow('freeA', { ...vault, paid: undefined }, 'free-a-key'), undefined);
+  assertEquals(canOverflow('freeA', vault, 'paid-key'), undefined);
+  assertEquals(canOverflow('freeA', vault, 'free-a-key'), 'paid-key');
+});
+
+Deno.test('withApiKey sets the api key header and Content-Type for non-GET requests', () => {
+  const init = withApiKey({ method: 'POST' }, 'my-key');
+  const headers = new Headers(init.headers);
+  assertEquals(headers.get('x-goog-api-key'), 'my-key');
+  assertEquals(headers.get('Content-Type'), 'application/json');
+});
+
+Deno.test('withApiKey preserves an existing Content-Type header', () => {
+  const init = withApiKey({ method: 'POST', headers: { 'Content-Type': 'text/plain' } }, 'my-key');
+  const headers = new Headers(init.headers);
+  assertEquals(headers.get('Content-Type'), 'text/plain');
+});
+
+Deno.test('withApiKey does not set Content-Type for GET requests', () => {
+  const init = withApiKey({ method: 'GET' }, 'my-key');
+  const headers = new Headers(init.headers);
+  assertEquals(headers.get('x-goog-api-key'), 'my-key');
+  assertEquals(headers.get('Content-Type'), null);
+});
+
+Deno.test('withApiKey defaults to GET behavior when no method is given', () => {
+  const init = withApiKey({}, 'my-key');
+  const headers = new Headers(init.headers);
+  assertEquals(headers.get('Content-Type'), null);
+});
+
+Deno.test('requireKey throws TheorumError when the bucket has no key', () => {
+  let threw = false;
+  try {
+    requireKey({ ...vault, freeA: undefined }, 'freeA');
+  } catch (err) {
+    threw = err instanceof TheorumError && err.message === UPSTREAM_FAILED;
+  }
+  assertEquals(threw, true);
+});
+
+Deno.test('requireKey returns the key when present', () => {
+  assertEquals(requireKey(vault, 'freeA'), 'free-a-key');
+});
+
+Deno.test('waitDefault returns a promise', () => {
+  const result = waitDefault(0) as unknown as Promise<void>;
+  assertEquals(typeof result.then, 'function');
 });

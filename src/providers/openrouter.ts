@@ -20,7 +20,7 @@ import {
 } from 'ai';
 import { isAbortError, toErrorEvent } from '../guardrails/error.ts';
 import { tryStructured } from '../kernel/engine/delta.ts';
-import { getTool } from '../kernel/registry/catalog.ts';
+import { getStructured } from '../kernel/registry/schemas.ts';
 import type {
   DynamicToolDeclaration,
   InteractionPart,
@@ -33,22 +33,20 @@ import type {
 import {
   type OpenRouterConfig,
   resolveOpenRouterModel,
+  resolveOpenRouterPlugins,
   toOpenRouterPayload,
 } from './openrouter-payload.ts';
-import { takeSsePayloads } from './sse.ts';
 
 interface StreamAccumulator {
   text: string;
   evidenceSeen: boolean;
   emittedTokens: boolean;
   errored: boolean;
-  toolInputs: Map<string, string>;
 }
 
 interface OpenRouterStreamContext {
   openrouter: ReturnType<typeof createOpenRouter>;
   modelName: string;
-  rawCapture: () => Promise<TurnEvent[]> | undefined;
 }
 
 type JsonValue =
@@ -75,7 +73,6 @@ function createAccumulator(): StreamAccumulator {
     evidenceSeen: false,
     emittedTokens: false,
     errored: false,
-    toolInputs: new Map(),
   };
 }
 
@@ -112,10 +109,6 @@ function parseToolInput(raw: string): unknown {
 
 function stringDefault(value: string | undefined, fallback: string): string {
   return value === undefined ? fallback : value;
-}
-
-function optionalSingle(value: string | undefined): string[] | undefined {
-  return value === undefined ? undefined : [value];
 }
 
 function fallbackToolCallId(name?: string): string {
@@ -174,43 +167,21 @@ function contentHistoryMessage(msg: TurnHistoryMessage): ModelMessage {
   return { role: msg.role, content } as ModelMessage;
 }
 
-function sourceValue(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'source' }>,
-  key: string,
-): string | undefined {
-  const source = part as Record<string, unknown>;
-  const value = source[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function sourceUrl(part: Extract<TextStreamPart<ToolSet>, { type: 'source' }>): string | undefined {
-  return sourceValue(part, 'url');
-}
-
-function sourceTitle(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'source' }>,
-): string | undefined {
-  return sourceValue(part, 'title') ?? sourceUrl(part);
-}
-
-function sourceList(title: string | undefined, url: string | undefined) {
-  if (title === undefined || url === undefined) {
-    return undefined;
-  }
-  return [{ title, uri: url, type: 'web' as const }];
-}
-
 function sourceEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'source' }>): TurnEvent {
-  const raw = part as Record<string, unknown>;
-  const url = sourceUrl(part);
-  const title = sourceTitle(part);
+  if (part.sourceType !== 'url') {
+    return {
+      type: 'evidence',
+      evidence: { provider: 'openrouter', raw: part as Record<string, unknown> },
+    };
+  }
+  const title = part.title ?? part.url;
   return {
     type: 'evidence',
     evidence: {
       provider: 'openrouter',
-      raw,
-      citations: optionalSingle(url),
-      sources: sourceList(title, url),
+      raw: part as Record<string, unknown>,
+      citations: [part.url],
+      sources: [{ title, uri: part.url, type: 'web' as const }],
     },
   };
 }
@@ -247,20 +218,15 @@ function buildTools(dynamicTools?: DynamicToolDeclaration[]): ToolSet | undefine
   return tools;
 }
 
-function openRouterPlugins(req: ProviderCompleteRequest): OpenRouterChatSettings['plugins'] {
-  const plugins = req.builtins
-    .map((id) => getTool(id)?.openRouterPlugin)
-    .filter((id): id is string => Boolean(id))
-    .map((id) => ({ id }));
-  return plugins.length > 0 ? (plugins as OpenRouterChatSettings['plugins']) : undefined;
-}
-
 function openRouterSettings(req: ProviderCompleteRequest): OpenRouterChatSettings | undefined {
-  const plugins = openRouterPlugins(req);
-  if (!plugins) {
+  const { plugins, webSearch } = resolveOpenRouterPlugins(req.builtins);
+  if (plugins.length === 0 && !webSearch) {
     return undefined;
   }
-  return { plugins };
+  const settings: OpenRouterChatSettings = {};
+  if (plugins.length > 0) settings.plugins = plugins as OpenRouterChatSettings['plugins'];
+  if (webSearch) settings.web_search_options = {};
+  return settings;
 }
 
 function tokensFromUsage(usage: LanguageModelUsage): TurnTokens | undefined {
@@ -359,22 +325,6 @@ function toolArguments(input: unknown): Record<string, unknown> | undefined {
   return { value: input };
 }
 
-function isEmptyRecord(input: Record<string, unknown> | undefined): boolean {
-  return Boolean(input) && Object.keys(input ?? {}).length === 0;
-}
-
-function toolCallArguments(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'tool-call' }>,
-  acc: StreamAccumulator,
-): Record<string, unknown> | undefined {
-  const fromInput = toolArguments(part.input);
-  const rawInput = acc.toolInputs.get(part.toolCallId);
-  if ((!fromInput || isEmptyRecord(fromInput)) && rawInput) {
-    return toolArguments(parseToolInput(rawInput));
-  }
-  return fromInput;
-}
-
 function toolResultData(output: unknown): Record<string, unknown> | undefined {
   return rawRecord(output);
 }
@@ -435,54 +385,12 @@ function rawEvents(raw: unknown, acc: StreamAccumulator): TurnEvent[] {
   return events;
 }
 
-async function collectRawEvents(res: Response): Promise<TurnEvent[]> {
-  if (!res.body) {
-    return [];
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  const events: TurnEvent[] = [];
-  const acc = createAccumulator();
-  let buffer = '';
-  let pendingEvent = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    const taken = takeSsePayloads(buffer, pendingEvent);
-    buffer = taken.rest;
-    pendingEvent = taken.pendingEvent;
-    for (const payload of taken.payloads) {
-      events.push(...rawEvents(payload, acc));
-    }
-  }
-  return events;
-}
-
-function captureFetch(
-  config: OpenRouterConfig,
-  setCapture: (capture: Promise<TurnEvent[]>) => void,
-): typeof fetch {
-  const fetchFn = config.fetch ?? fetch;
-  return async (input, init) => {
-    const res = await fetchFn(input, init);
-    setCapture(collectRawEvents(res.clone()).catch(() => []));
-    return res;
-  };
-}
-
-function toolCallEvent(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'tool-call' }>,
-  acc: StreamAccumulator,
-): TurnEvent {
+function toolCallEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'tool-call' }>): TurnEvent {
   return {
     type: 'tool',
     tool: {
       name: part.toolName,
-      arguments: toolCallArguments(part, acc),
+      arguments: toolArguments(part.input),
       id: part.toolCallId,
     },
   };
@@ -523,23 +431,7 @@ function providerMetadataEvent(
   return evidenceFromMetadata(part.providerMetadata, acc);
 }
 
-function appendToolInput(part: TextStreamPart<ToolSet>, acc: StreamAccumulator): boolean {
-  if (part.type === 'tool-input-start') {
-    acc.toolInputs.set(part.id, '');
-    return true;
-  }
-  if (part.type === 'tool-input-delta') {
-    const current = acc.toolInputs.get(part.id) ?? '';
-    acc.toolInputs.set(part.id, current + part.delta);
-    return true;
-  }
-  return false;
-}
-
 function eventFromPart(part: TextStreamPart<ToolSet>, acc: StreamAccumulator): TurnEvent[] {
-  if (appendToolInput(part, acc)) {
-    return [];
-  }
   const mapped = primaryEventFromPart(part, acc);
   if (mapped) {
     return [mapped];
@@ -559,11 +451,14 @@ function primaryEventFromPart(
     case 'reasoning-delta':
       return { type: 'thought', text: part.text };
     case 'tool-call':
-      return toolCallEvent(part, acc);
+      return toolCallEvent(part);
     case 'tool-result':
       return toolResultEvent(part);
-    case 'source':
+    case 'source': {
+      if (acc.evidenceSeen) return undefined;
+      acc.evidenceSeen = true;
       return sourceEvent(part);
+    }
     case 'finish':
       return finishEvent(part, acc);
     case 'error':
@@ -588,37 +483,16 @@ function finishEvent(
   return event;
 }
 
-function emitRawEvents(
-  rawCapture: Promise<TurnEvent[]> | undefined,
-  acc: StreamAccumulator,
-): Promise<TurnEvent[]> {
-  return (rawCapture ?? Promise.resolve([])).then((events) =>
-    events.filter((event) => {
-      if (event.type !== 'evidence') {
-        return true;
-      }
-      if (acc.evidenceSeen) {
-        return false;
-      }
-      acc.evidenceSeen = true;
-      return true;
-    }),
-  );
-}
-
 function createStreamContext(
   req: ProviderCompleteRequest,
   config: OpenRouterConfig,
   apiKey: string,
 ): OpenRouterStreamContext {
-  let rawCapture: Promise<TurnEvent[]> | undefined;
   const openrouter = createOpenRouter({
     apiKey,
     baseURL: config.baseUrl,
     headers: openRouterHeaders(config),
-    fetch: captureFetch(config, (capture) => {
-      rawCapture = capture;
-    }),
+    fetch: config.fetch,
     compatibility: 'strict',
   });
   return {
@@ -627,7 +501,6 @@ function createStreamContext(
       apiId: req.apiId,
       openRouterId: req.openRouterId,
     }),
-    rawCapture: () => rawCapture,
   };
 }
 
@@ -637,14 +510,14 @@ function streamTextOptions(
 ): Parameters<typeof streamText>[0] {
   return {
     model: context.openrouter.chat(context.modelName, openRouterSettings(req)),
-    system: req.system,
+    instructions: req.system,
     messages: buildMessages(req),
     allowSystemInMessages: true,
     temperature: req.temperature,
     maxOutputTokens: req.maxOutputTokens,
     tools: buildTools(req.dynamicTools),
     providerOptions: providerOptionsFor(req),
-    includeRawChunks: true,
+    include: { rawChunks: true },
     abortSignal: req.signal,
     onError: () => undefined,
   };
@@ -656,7 +529,7 @@ async function* yieldAiSdkStream(
   context: OpenRouterStreamContext,
 ): AsyncGenerator<TurnEvent> {
   const result = streamText(streamTextOptions(req, context));
-  for await (const part of result.fullStream) {
+  for await (const part of result.stream) {
     if (part.type === 'raw') {
       req.tapGemini?.(rawRecord(part.rawValue) ?? { rawValue: part.rawValue });
       for (const event of rawEvents(part.rawValue, acc)) {
@@ -667,23 +540,6 @@ async function* yieldAiSdkStream(
     for (const event of eventFromPart(part, acc)) {
       yield event;
     }
-  }
-}
-
-async function* yieldCapturedRawEvents(
-  context: OpenRouterStreamContext,
-  acc: StreamAccumulator,
-): AsyncGenerator<TurnEvent> {
-  for (const event of await emitRawEvents(context.rawCapture(), acc)) {
-    yield event;
-  }
-}
-
-async function* yieldCapturedRawEventsUnchecked(
-  context: OpenRouterStreamContext,
-): AsyncGenerator<TurnEvent> {
-  for (const event of await (context.rawCapture() ?? Promise.resolve([]))) {
-    yield event;
   }
 }
 
@@ -705,13 +561,11 @@ async function* streamOpenRouter(
   const context = createStreamContext(req, config, apiKey);
   try {
     yield* yieldAiSdkStream(req, acc, context);
-    yield* yieldCapturedRawEvents(context, acc);
     yield* finalEvents(req, acc);
   } catch (err) {
     if (isAbortError(err)) {
       throw err;
     }
-    yield* yieldCapturedRawEventsUnchecked(context);
     yield toErrorEvent(err);
   }
 }
@@ -729,15 +583,31 @@ function* finalEvents(req: ProviderCompleteRequest, acc: StreamAccumulator): Gen
   yield { type: 'done' };
 }
 
-function providerOptionsFor(req: ProviderCompleteRequest): ProviderOptions | undefined {
-  if (req.thinking === 'none') {
-    return undefined;
-  }
+function responseFormatFor(req: ProviderCompleteRequest): Record<string, JsonValue> | undefined {
+  if (!req.structured) return undefined;
+  const spec = getStructured(req.structured);
+  if (!spec.jsonSchema) return undefined;
   return {
-    openrouter: {
-      reasoning: { effort: req.thinking },
+    type: 'json_schema',
+    json_schema: {
+      name: String(req.structured),
+      strict: true,
+      schema: spec.jsonSchema as JsonValue,
     },
-  } as ProviderOptions;
+  };
+}
+
+function providerOptionsFor(req: ProviderCompleteRequest): ProviderOptions | undefined {
+  const openrouter: Record<string, JsonValue> = {};
+  if (req.thinking !== 'none') {
+    openrouter.reasoning = { effort: req.thinking };
+  }
+  const responseFormat = responseFormatFor(req);
+  if (responseFormat) {
+    openrouter.response_format = responseFormat;
+  }
+  if (Object.keys(openrouter).length === 0) return undefined;
+  return { openrouter } as ProviderOptions;
 }
 
 function openRouterHeaders(config: OpenRouterConfig): Record<string, string> | undefined {
@@ -760,3 +630,50 @@ function createOpenRouterProvider(config: OpenRouterConfig = {}): ModelProvider 
 
 export type { OpenRouterConfig };
 export { createOpenRouterProvider, resolveOpenRouterModel, toOpenRouterPayload };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = {
+  trimApiKey,
+  createAccumulator,
+  mediaPart,
+  contentFromParts,
+  parseToolInput,
+  stringDefault,
+  fallbackToolCallId,
+  toolResultContent,
+  assistantToolCallContent,
+  historyMessage,
+  contentFromOptionalParts,
+  contentHistoryMessage,
+  buildMessages,
+  schemaForTool,
+  buildTools,
+  openRouterSettings,
+  tokensFromUsage,
+  rawRecord,
+  stringArray,
+  metadataRecord,
+  citationCandidates,
+  nestedCitations,
+  metadataAnnotations,
+  evidenceFromMetadata,
+  toolArguments,
+  toolResultData,
+  rawThoughtEvent,
+  rawChoiceMessageEvidence,
+  rawEvents,
+  toolCallEvent,
+  toolResultEvent,
+  tokenEvent,
+  providerMetadataEvent,
+  eventFromPart,
+  primaryEventFromPart,
+  finishEvent,
+  sourceEvent,
+  finalEvents,
+  responseFormatFor,
+  providerOptionsFor,
+  openRouterHeaders,
+  missingOpenRouterKey,
+  streamTextOptions,
+};

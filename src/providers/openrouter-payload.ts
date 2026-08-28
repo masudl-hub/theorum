@@ -217,16 +217,36 @@ function toOpenRouterPayload(
     payload.tools = tools;
   }
 
-  const plugins = req.builtins
-    .map((id) => getTool(id)?.openRouterPlugin)
-    .filter((id): id is string => Boolean(id))
-    .map((id) => ({ id }));
-  if (plugins.length > 0) {
-    payload.plugins = plugins;
+  const resolved = resolveOpenRouterPlugins(req.builtins);
+  if (resolved.webSearch) {
+    payload.web_search_options = {};
+  }
+  if (resolved.plugins.length > 0) {
+    payload.plugins = resolved.plugins;
   }
 
   return payload;
 }
 
-export type { OpenRouterConfig, OpenRouterWireIds };
-export { resolveOpenRouterModel, toOpenRouterPayload };
+interface ResolvedPlugins {
+  plugins: Array<{ id: string }>;
+  webSearch: boolean;
+}
+
+function resolveOpenRouterPlugins(builtins: readonly string[]): ResolvedPlugins {
+  let webSearch = false;
+  const plugins: Array<{ id: string }> = [];
+  for (const id of builtins) {
+    const pluginId = getTool(id)?.openRouterPlugin;
+    if (!pluginId) continue;
+    if (pluginId === 'web') {
+      webSearch = true;
+    } else {
+      plugins.push({ id: pluginId });
+    }
+  }
+  return { plugins, webSearch };
+}
+
+export type { OpenRouterConfig, OpenRouterWireIds, ResolvedPlugins };
+export { resolveOpenRouterModel, resolveOpenRouterPlugins, toOpenRouterPayload };

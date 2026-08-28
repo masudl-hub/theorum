@@ -1,9 +1,12 @@
 import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC, PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
-import type { ProviderCompleteRequest } from '../../src/kernel/types.ts';
+import type { InteractionPart, ProviderCompleteRequest } from '../../src/kernel/types.ts';
 import { wrapPcmAsWav } from '../../src/providers/pcm.ts';
-import { createSpeechProvider, streamSpeech } from '../../src/providers/speech.ts';
+import { _internals, createSpeechProvider, streamSpeech } from '../../src/providers/speech.ts';
 import { HOST_MODELS } from '../fixtures/models.ts';
+
+const { extractInputText, resolveSpeechWireModel, buildHeaders, buildPayload, yieldSpeechSuccess } =
+  _internals;
 
 function createMockSpeechRequest(text: string): ProviderCompleteRequest {
   const spec = HOST_MODELS.gemini31FlashTts;
@@ -221,4 +224,185 @@ Deno.test('streamSpeech respects outputs.speech voice and format mp3', async () 
   const mediaEvent = events[0] as { media: { mimeType: string; data: string } };
   assertEquals(mediaEvent.media.mimeType, 'audio/mpeg');
   assertEquals(mediaEvent.media.data, btoa(String.fromCharCode(...mockMp3Bytes)));
+});
+
+// -- _internals: extractInputText ------------------------------------------
+
+Deno.test('_internals.extractInputText joins multiple text parts with a space', () => {
+  const input: InteractionPart[] = [
+    { type: 'text', text: 'Hello' },
+    { type: 'text', text: 'world' },
+  ];
+  assertEquals(extractInputText(input), 'Hello world');
+});
+
+Deno.test('_internals.extractInputText ignores non-text parts', () => {
+  const input: InteractionPart[] = [
+    { type: 'text', text: 'Hello' },
+    { type: 'image', mimeType: 'image/png', data: 'base64data' },
+    { type: 'text', text: 'world' },
+  ];
+  assertEquals(extractInputText(input), 'Hello world');
+});
+
+Deno.test('_internals.extractInputText trims surrounding whitespace', () => {
+  const input: InteractionPart[] = [{ type: 'text', text: '  padded  ' }];
+  assertEquals(extractInputText(input), 'padded');
+});
+
+Deno.test('_internals.extractInputText returns empty string for no text parts', () => {
+  const input: InteractionPart[] = [{ type: 'image', mimeType: 'image/png', data: 'base64data' }];
+  assertEquals(extractInputText(input), '');
+});
+
+Deno.test('_internals.extractInputText returns empty string for empty input array', () => {
+  assertEquals(extractInputText([]), '');
+});
+
+// -- _internals: resolveSpeechWireModel -------------------------------------
+
+Deno.test('_internals.resolveSpeechWireModel prefers openRouterId when present', () => {
+  const req = createMockSpeechRequest('hi');
+  assertEquals(resolveSpeechWireModel(req), req.openRouterId);
+});
+
+Deno.test('_internals.resolveSpeechWireModel uses apiId when it already has a slash', () => {
+  const req: ProviderCompleteRequest = {
+    ...createMockSpeechRequest('hi'),
+    openRouterId: undefined,
+    apiId: 'anthropic/claude-tts',
+  };
+  assertEquals(resolveSpeechWireModel(req), 'anthropic/claude-tts');
+});
+
+Deno.test('_internals.resolveSpeechWireModel prefixes bare apiId with google/', () => {
+  const req: ProviderCompleteRequest = {
+    ...createMockSpeechRequest('hi'),
+    openRouterId: undefined,
+    apiId: 'gemini-3.1-flash-tts-preview',
+  };
+  assertEquals(resolveSpeechWireModel(req), 'google/gemini-3.1-flash-tts-preview');
+});
+
+Deno.test('_internals.resolveSpeechWireModel falls back to model when apiId is empty', () => {
+  const req: ProviderCompleteRequest = {
+    ...createMockSpeechRequest('hi'),
+    openRouterId: undefined,
+    apiId: '',
+  };
+  assertEquals(resolveSpeechWireModel(req), String(req.model));
+});
+
+// -- _internals: buildHeaders ------------------------------------------------
+
+Deno.test('_internals.buildHeaders sets Authorization and Content-Type only by default', () => {
+  const headers = buildHeaders('secret-key', {});
+  assertEquals(headers.Authorization, 'Bearer secret-key');
+  assertEquals(headers['Content-Type'], 'application/json');
+  assertEquals(headers['HTTP-Referer'], undefined);
+  assertEquals(headers['X-Title'], undefined);
+});
+
+Deno.test('_internals.buildHeaders adds HTTP-Referer when siteUrl is set', () => {
+  const headers = buildHeaders('secret-key', { siteUrl: 'https://theorum.dev' });
+  assertEquals(headers['HTTP-Referer'], 'https://theorum.dev');
+});
+
+Deno.test('_internals.buildHeaders adds X-Title when siteName is set', () => {
+  const headers = buildHeaders('secret-key', { siteName: 'Theorum' });
+  assertEquals(headers['X-Title'], 'Theorum');
+});
+
+Deno.test('_internals.buildHeaders adds both when siteUrl and siteName are set', () => {
+  const headers = buildHeaders('secret-key', {
+    siteUrl: 'https://theorum.dev',
+    siteName: 'Theorum',
+  });
+  assertEquals(headers['HTTP-Referer'], 'https://theorum.dev');
+  assertEquals(headers['X-Title'], 'Theorum');
+});
+
+// -- _internals: buildPayload -------------------------------------------------
+
+Deno.test('_internals.buildPayload defaults to pcm format with no voice', () => {
+  const req = createMockSpeechRequest('hi');
+  const payload = buildPayload(req, 'hi there', undefined, undefined);
+  assertEquals(payload.response_format, 'pcm');
+  assertEquals(payload.input, 'hi there');
+  assertEquals('voice' in payload, false);
+});
+
+Deno.test('_internals.buildPayload prefers speech.voice over configVoice', () => {
+  const req = createMockSpeechRequest('hi');
+  const payload = buildPayload(req, 'hi there', { voice: 'Kore' }, 'fallback-voice');
+  assertEquals(payload.voice, 'Kore');
+});
+
+Deno.test('_internals.buildPayload falls back to configVoice when speech.voice is absent', () => {
+  const req = createMockSpeechRequest('hi');
+  const payload = buildPayload(req, 'hi there', undefined, 'fallback-voice');
+  assertEquals(payload.voice, 'fallback-voice');
+});
+
+Deno.test('_internals.buildPayload honors speech.format', () => {
+  const req = createMockSpeechRequest('hi');
+  const payload = buildPayload(req, 'hi there', { format: 'mp3' }, undefined);
+  assertEquals(payload.response_format, 'mp3');
+});
+
+Deno.test('_internals.buildPayload resolves model via resolveSpeechWireModel', () => {
+  const req = createMockSpeechRequest('hi');
+  const payload = buildPayload(req, 'hi there', undefined, undefined);
+  assertEquals(payload.model, resolveSpeechWireModel(req));
+});
+
+// -- _internals: yieldSpeechSuccess -------------------------------------------
+
+Deno.test('_internals.yieldSpeechSuccess wraps pcm bytes as wav media', () => {
+  const rawBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const events = [...yieldSpeechSuccess(rawBytes, 'hello world', 'pcm')];
+
+  assertEquals(events.length, 3);
+  assertEquals(events[0]?.type, 'media');
+  const mediaEvent = events[0] as { media: { mimeType: string; data: string } };
+  assertEquals(mediaEvent.media.mimeType, 'audio/wav');
+  assertEquals(typeof mediaEvent.media.data, 'string');
+});
+
+Deno.test('_internals.yieldSpeechSuccess passes mp3 bytes through unwrapped', () => {
+  const rawBytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64]);
+  const events = [...yieldSpeechSuccess(rawBytes, 'hello world', 'mp3')];
+
+  assertEquals(events[0]?.type, 'media');
+  const mediaEvent = events[0] as { media: { mimeType: string; data: string } };
+  assertEquals(mediaEvent.media.mimeType, 'audio/mpeg');
+  assertEquals(mediaEvent.media.data, btoa(String.fromCharCode(...rawBytes)));
+});
+
+Deno.test('_internals.yieldSpeechSuccess computes token counts from text and byte lengths', () => {
+  const rawBytes = new Uint8Array(250);
+  const text = 'a'.repeat(40);
+  const events = [...yieldSpeechSuccess(rawBytes, text, 'mp3')];
+
+  assertEquals(events[1]?.type, 'tokens');
+  const tokenEvent = events[1] as { tokens: { input: number; output: number; total: number } };
+  assertEquals(tokenEvent.tokens.input, 10);
+  assertEquals(tokenEvent.tokens.output, 3);
+  assertEquals(tokenEvent.tokens.total, 13);
+});
+
+Deno.test('_internals.yieldSpeechSuccess floors token counts at 1', () => {
+  const rawBytes = new Uint8Array(1);
+  const events = [...yieldSpeechSuccess(rawBytes, 'a', 'mp3')];
+
+  const tokenEvent = events[1] as { tokens: { input: number; output: number; total: number } };
+  assertEquals(tokenEvent.tokens.input, 1);
+  assertEquals(tokenEvent.tokens.output, 1);
+  assertEquals(tokenEvent.tokens.total, 2);
+});
+
+Deno.test('_internals.yieldSpeechSuccess ends with a done event', () => {
+  const rawBytes = new Uint8Array([1, 2, 3]);
+  const events = [...yieldSpeechSuccess(rawBytes, 'hi', 'mp3')];
+  assertEquals(events[2]?.type, 'done');
 });

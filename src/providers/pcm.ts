@@ -35,3 +35,6 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Ar
   new Uint8Array(buf, 44).set(pcm);
   return new Uint8Array(buf);
 }
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = { writeAscii, wrapPcmAsWav };

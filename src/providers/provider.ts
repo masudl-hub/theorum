@@ -201,3 +201,17 @@ function createInteractionsProvider(transport: GeminiTransport): ModelProvider {
 }
 
 export { createInteractionsProvider };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = {
+  base64ToBytes,
+  bytesToBase64,
+  isRawPcmMime,
+  normalizeSpeechMedia,
+  eventType,
+  isDeltaEvent,
+  isCompleteEvent,
+  foldDeltaPayload,
+  foldPayload,
+  withTap,
+};

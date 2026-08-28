@@ -62,3 +62,6 @@ export function createProvider(
     `createProvider: unsupported protocol/provider pair '${protocol}'/'${provider}'`,
   );
 }
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = { isSpeechRole, createProvider };

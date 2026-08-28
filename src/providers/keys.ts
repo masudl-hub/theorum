@@ -192,3 +192,15 @@ async function fetchGemini(
 
 export type { GeminiTransport, GeminiVault };
 export { fetchGemini, withGeminiKey };
+
+/** @internal Exported for direct unit testing only. */
+export const _internals = {
+  waitDefault,
+  isQuota,
+  isTransientHttp,
+  isTransientThrown,
+  requireKey,
+  backoffMs,
+  canOverflow,
+  withApiKey,
+};

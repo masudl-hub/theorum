@@ -5,7 +5,7 @@ import { runTurn } from '../../src/kernel/engine/runner.ts';
 import type { TurnEvent } from '../../src/kernel/types.ts';
 import { memorySink } from '../../src/observability/trace.ts';
 import type { TraceRecord } from '../../src/observability/trace-record.ts';
-import { tapeGemini } from '../../src/providers/gemini-tape.ts';
+import { _internals, tapeGemini } from '../../src/providers/gemini-tape.ts';
 import { camelToSnake } from '../../src/providers/interactions.ts';
 import type { GeminiVault } from '../../src/providers/keys.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
@@ -184,4 +184,78 @@ Deno.test('runTurn traces Google error response bodies', async () => {
     gemini.some((item) => item.eventType === 'http_error_body' && item.body === 'quota-detail'),
     true,
   );
+});
+
+const { isImageBlob, scrubEntry, scrubRecord, scrubGemini, redactCanaryInTree } = _internals;
+
+Deno.test('isImageBlob detects type image or media', () => {
+  assertEquals(isImageBlob({ type: 'image' }), true);
+  assertEquals(isImageBlob({ type: 'media' }), true);
+  assertEquals(isImageBlob({ type: 'text' }), false);
+});
+
+Deno.test('isImageBlob detects mimeType or mime_type strings', () => {
+  assertEquals(isImageBlob({ mimeType: 'image/png' }), true);
+  assertEquals(isImageBlob({ mime_type: 'image/png' }), true);
+  assertEquals(isImageBlob({ mimeType: 42 }), false);
+  assertEquals(isImageBlob({}), false);
+});
+
+Deno.test('scrubEntry hashes data for image blobs', async () => {
+  const rec = { type: 'image', data: 'bytes' };
+  const [key, value] = await scrubEntry(rec, 'data', 'bytes');
+  assertEquals(key, 'data');
+  assertEquals(typeof value, 'string');
+  assertEquals(value === 'bytes', false);
+});
+
+Deno.test('scrubEntry passes through non-data keys recursively', async () => {
+  const rec = { type: 'text', note: 'hi' };
+  const [key, value] = await scrubEntry(rec, 'note', 'hi');
+  assertEquals(key, 'note');
+  assertEquals(value, 'hi');
+});
+
+Deno.test('scrubEntry does not hash data when not an image blob', async () => {
+  const rec = { type: 'text', data: 'plain' };
+  const [key, value] = await scrubEntry(rec, 'data', 'plain');
+  assertEquals(key, 'data');
+  assertEquals(value, 'plain');
+});
+
+Deno.test('scrubRecord sets dataKind sha256 for image blobs with string data', async () => {
+  const out = await scrubRecord({ type: 'image', mimeType: 'image/png', data: 'raw-bytes' });
+  assertEquals(out.dataKind, 'sha256');
+  assertEquals(typeof out.data, 'string');
+  assertEquals(out.data === 'raw-bytes', false);
+});
+
+Deno.test('scrubRecord leaves dataKind unset for non-image records', async () => {
+  const out = await scrubRecord({ type: 'text', data: 'plain' });
+  assertEquals(Object.hasOwn(out, 'dataKind'), false);
+  assertEquals(out.data, 'plain');
+});
+
+Deno.test('scrubGemini recurses through arrays', async () => {
+  const out = await scrubGemini([{ type: 'text', data: 'x' }, 'plain-string', 5]);
+  assertEquals(out, [{ type: 'text', data: 'x' }, 'plain-string', 5]);
+});
+
+Deno.test('scrubGemini returns primitives unchanged', async () => {
+  assertEquals(await scrubGemini('plain'), 'plain');
+  assertEquals(await scrubGemini(5), 5);
+  assertEquals(await scrubGemini(null), null);
+  assertEquals(await scrubGemini(undefined), undefined);
+});
+
+Deno.test('redactCanaryInTree returns value unchanged when canary is empty', () => {
+  const value = { note: 'leaked secret' };
+  assertEquals(redactCanaryInTree(value, ''), value);
+});
+
+Deno.test('redactCanaryInTree replaces every canary occurrence in strings', () => {
+  const value = { a: 'has secret and secret again', b: ['secret'] };
+  const out = redactCanaryInTree(value, 'secret') as { a: string; b: string[] };
+  assertEquals(out.a.includes('secret'), false);
+  assertEquals(out.b[0]?.includes('secret'), false);
 });

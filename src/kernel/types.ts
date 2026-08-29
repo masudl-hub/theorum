@@ -107,6 +107,38 @@ export interface ModelSpec {
    * (and builtin routing). Host-owned — e.g. pin image models to `paid`.
    */
   key?: GeminiBucket;
+  /** Optional compaction policy for this model's context window. */
+  compaction?: CompactionSpec;
+}
+
+/**
+ * Compaction policy for a model's conversational history.
+ *
+ * `previousExchanges` accepts three value ranges:
+ * - `≥ 1` (integer) — keep that many recent exchanges (user message + all
+ *   messages until the next user message).
+ * - `(0, 1)` — fraction of `maxHistoryTokens`; the retained tail's estimated
+ *   tokens must fit within this budget.
+ * - `0` — compact everything; no tail is retained.
+ */
+export interface CompactionSpec {
+  /** Token budget for conversational history (excludes system prompt, tools, output headroom). */
+  maxHistoryTokens: number;
+  /** Fraction of `maxHistoryTokens` at which compaction fires. Must be in (0, 1). */
+  compactAt: number;
+  /**
+   * How many recent exchanges to preserve verbatim.
+   * `≥ 1` = exchange count, `(0, 1)` = fraction of `maxHistoryTokens`, `0` = compact all.
+   */
+  previousExchanges: number;
+  /** Profile id of the compaction agent. Must be registered before the owning profile. */
+  profile: ProfileId;
+  /**
+   * When compaction runs relative to the primary turn.
+   * - `'before'`: kernel compacts synchronously before the turn; user pays latency on this turn.
+   * - `'after'`: kernel signals in the `done` event; host runs compaction asynchronously.
+   */
+  timing: 'before' | 'after';
 }
 
 /** Static metadata for harness, preset, and host-registered tools. */
@@ -410,6 +442,8 @@ export interface TurnInput {
   voice?: TurnBlob[];
   history?: TurnHistoryMessage[];
   repair?: TurnRepairRequest;
+  /** Provider-reported input token count from the previous turn. Used by compaction threshold check. */
+  lastInputTokens?: number;
 }
 
 /** Host request after kernel ingress normalization. */
@@ -445,6 +479,8 @@ export interface TurnRequest {
   signal?: AbortSignal;
   input?: TurnInput;
   toolInvoke?: { name: CustomToolId; arguments: Record<string, unknown> };
+  /** Provider for the compaction profile when `timing: 'before'`. Falls back to the turn provider. */
+  compactionProvider?: ModelProvider;
 }
 
 /** Safe profile projection suitable for UI or host inspection. */
@@ -541,6 +577,13 @@ export interface ProviderEvidenceEvent {
   sources?: GroundingSource[];
 }
 
+/** Compaction signal emitted in the `done` event when `timing: 'after'`. */
+export interface CompactionSignal {
+  needed: boolean;
+  inputTokens: number;
+  history: TurnHistoryMessage[];
+}
+
 /** Public event yielded by providers and by `runTurn`. */
 export interface TurnEvent {
   type: TurnEventType;
@@ -561,6 +604,8 @@ export interface TurnEvent {
   error?: string;
   /** Raw diagnostic detail for traces/logs; never surface to end users. */
   errorInternal?: string;
+  /** Compaction signal for `timing: 'after'` profiles. Present only on `done` events. */
+  compaction?: CompactionSignal;
 }
 
 /** Provider-neutral request object sent from the kernel to a model adapter. */

@@ -14,18 +14,76 @@ import { noopSink, type TraceSink, writeTrace } from '../../../observability/tra
 import { buildRecord } from '../../../observability/trace-record.ts';
 import { pickSystemRole, resolveTurn } from '../../registry/resolve.ts';
 import type {
+  CompactionSignal,
+  CompactionSpec,
   ModelProvider,
   Profile,
   ResolvedGeneration,
   TurnEvent,
+  TurnHistoryMessage,
   TurnRequest,
 } from '../../types.ts';
 import { bindCanary } from '../boundary.ts';
+import { compactionNeeded, splitForCompaction } from '../compaction.ts';
 import { runAttemptsWithValidation } from './gates.ts';
 import type { StepExecutionState } from './state.ts';
 import { shouldSkipStreamEvent, systemFromProfile } from './stream.ts';
 import { calculateFallbackTokens } from './tokens.ts';
 import { invokeFromUi } from './tools.ts';
+
+function getCompactionSpec(profile: Profile, modelId: string): CompactionSpec | undefined {
+  return profile.model.config[modelId]?.compaction;
+}
+
+async function runCompactionTurn(
+  toCompact: TurnHistoryMessage[],
+  spec: CompactionSpec,
+  provider: ModelProvider,
+  signal?: AbortSignal,
+): Promise<TurnHistoryMessage> {
+  const compactText = toCompact
+    .map((m) => {
+      const content = m.content ?? m.parts?.map((p) => ('text' in p ? p.text : '')).join('') ?? '';
+      return `[${m.role}]: ${content}`;
+    })
+    .join('\n');
+
+  const events: TurnEvent[] = [];
+  for await (const event of runTurn(
+    {
+      profile: spec.profile,
+      input: { text: compactText },
+      signal,
+      metadata: { _compacting: true },
+    },
+    provider,
+  )) {
+    events.push(event);
+  }
+
+  const structured = events.find((e) => e.type === 'structured')?.structured;
+  const text = structured
+    ? JSON.stringify(structured)
+    : events
+        .filter((e) => e.type === 'text')
+        .map((e) => e.text ?? '')
+        .join('');
+
+  return {
+    role: 'assistant',
+    content: text,
+    metadata: { compactionSummary: true },
+  };
+}
+
+function lastTokensFromEvents(events: TurnEvent[]): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].tokens?.input) {
+      return events[i].tokens!.input;
+    }
+  }
+  return 0;
+}
 
 async function* emitTurn(args: {
   safe: TurnRequest;
@@ -82,6 +140,31 @@ async function* runTurn(
     model = resolvedModel;
     bucket = geminiBucket;
     canary = turnCanary;
+
+    const isCompacting = req.metadata?._compacting === true;
+    const compactionSpec = isCompacting
+      ? undefined
+      : getCompactionSpec(profile, resolvedModel);
+
+    if (
+      compactionSpec?.timing === 'before' &&
+      gen.history?.length &&
+      safe.input?.lastInputTokens != null &&
+      compactionNeeded(safe.input.lastInputTokens, compactionSpec)
+    ) {
+      const { toCompact, toRetain } = splitForCompaction(gen.history, compactionSpec);
+      if (toCompact.length > 0) {
+        const compactProvider = req.compactionProvider ?? provider;
+        const summaryMessage = await runCompactionTurn(
+          toCompact,
+          compactionSpec,
+          compactProvider,
+          safe.signal,
+        );
+        gen.history = [summaryMessage, ...toRetain];
+      }
+    }
+
     const role = pickSystemRole(profile, safe.input?.role);
     const profileSys = systemFromProfile(profile, role);
     const combinedSys = [profileSys, safe.system].filter(Boolean).join('\n\n');
@@ -95,6 +178,23 @@ async function* runTurn(
       provider,
       gemini,
     })) {
+      if (event.type === 'done' && compactionSpec?.timing === 'after' && !isCompacting) {
+        const inputTokens = lastTokensFromEvents(seen);
+        if (inputTokens > 0 && compactionNeeded(inputTokens, compactionSpec)) {
+          const currentHistory = gen.history ?? [];
+          const signal: CompactionSignal = {
+            needed: true,
+            inputTokens,
+            history: currentHistory,
+          };
+          const doneWithCompaction: TurnEvent = { ...event, compaction: signal };
+          seen.push(doneWithCompaction);
+          if (!shouldSkipStreamEvent(doneWithCompaction, profile)) {
+            yield doneWithCompaction;
+          }
+          continue;
+        }
+      }
       seen.push(event);
       if (shouldSkipStreamEvent(event, profile)) {
         continue;

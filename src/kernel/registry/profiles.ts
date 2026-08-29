@@ -8,7 +8,7 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
-import type { ModelId, Profile } from '../types.ts';
+import type { CompactionSpec, ModelId, Profile } from '../types.ts';
 
 const profiles = new Map<string, Profile>();
 
@@ -110,6 +110,34 @@ function defineProfile(input: ProfileDefinition): Profile {
   };
 }
 
+function assertCompactionSpec(profileId: string, modelId: ModelId, spec: CompactionSpec): void {
+  const tag = `Profile ${profileId} model ${modelId} compaction`;
+  if (spec.maxHistoryTokens <= 0) {
+    throw new TheorumError(`${tag}: maxHistoryTokens must be > 0`);
+  }
+  if (spec.compactAt <= 0 || spec.compactAt >= 1) {
+    throw new TheorumError(`${tag}: compactAt must be in (0, 1)`);
+  }
+  if (spec.previousExchanges < 0) {
+    throw new TheorumError(`${tag}: previousExchanges must be >= 0`);
+  }
+  if (spec.previousExchanges > 0 && spec.previousExchanges < 1) {
+    if (spec.previousExchanges >= spec.compactAt) {
+      throw new TheorumError(
+        `${tag}: previousExchanges as fraction (${spec.previousExchanges}) must be < compactAt (${spec.compactAt})`,
+      );
+    }
+  }
+  if (spec.previousExchanges >= 1 && !Number.isInteger(spec.previousExchanges)) {
+    throw new TheorumError(`${tag}: previousExchanges >= 1 must be an integer`);
+  }
+  if (!profiles.has(spec.profile)) {
+    throw new TheorumError(
+      `${tag}: compaction profile '${spec.profile}' must be registered before '${profileId}'`,
+    );
+  }
+}
+
 /** Register one host-owned profile in the process-local registry. */
 function registerProfile(profileInput: Profile | ProfileDefinition): void {
   const profile = defineProfile(profileInput);
@@ -118,6 +146,11 @@ function registerProfile(profileInput: Profile | ProfileDefinition): void {
   if (attachments || voice) {
     if (!(maxFiles && maxBytes && maxTurnBytes)) {
       throw new TheorumError(`Profile ${profile.id} must set maxFiles, maxBytes, and maxTurnBytes`);
+    }
+  }
+  for (const [modelId, spec] of Object.entries(profile.model.config)) {
+    if (spec.compaction) {
+      assertCompactionSpec(profile.id, modelId, spec.compaction);
     }
   }
   profiles.set(profile.id, profile);

@@ -60,6 +60,8 @@ export {
   sanitizeText,
   sanitizeTurnRequest,
 } from './src/guardrails/sanitize.ts';
+export { compactionNeeded, splitForCompaction } from './src/kernel/engine/compaction.ts';
+export type { CompactionSplit } from './src/kernel/engine/compaction.ts';
 export { runTurn } from './src/kernel/engine/runner.ts';
 export {
   CATALOG,

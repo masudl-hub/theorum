@@ -8,6 +8,8 @@
  * @module
  */
 
+export { compactionNeeded, splitForCompaction } from './engine/compaction.ts';
+export type { CompactionSplit } from './engine/compaction.ts';
 export { runTurn } from './engine/runner.ts';
 export {
   CATALOG,

@@ -19,7 +19,7 @@ export type BuiltinToolId = string;
 /** Harness custom tool that ships with THEORUM. */
 export type HarnessToolId = 'askUser';
 /** Host-owned or harness custom tool id. */
-export type CustomToolId = HarnessToolId | (string & {});
+export type CustomToolId = HarnessToolId | (string & Record<never, never>);
 /** Any tool id accepted by profile allowlists and per-turn gates. */
 export type ToolId = BuiltinToolId | CustomToolId;
 

@@ -11,7 +11,7 @@
 import { mapStrings } from '../kernel/engine/tree.ts';
 import { sanitizeTurnBlobsForProfile } from '../kernel/registry/attachments.ts';
 import { getProfile } from '../kernel/registry/profiles.ts';
-import type { NormalizedTurnRequest, TurnRequest } from '../kernel/types.ts';
+import type { DynamicToolDeclaration, NormalizedTurnRequest, TurnRequest } from '../kernel/types.ts';
 import { applySpans } from '../observability/spans.ts';
 import { injectionSpans } from './injection.ts';
 import { sensitiveSpans } from './sensitive.ts';
@@ -30,6 +30,14 @@ function sanitizeText(
     ...(sanitizeInput ? injectionSpans(text) : []),
     ...(redactSensitive ? sensitiveSpans(text) : []),
   ];
+  return applySpans(text, spans);
+}
+
+/** Redact only sensitive data (credentials, PII) — skip injection patterns.
+ *  Use for model output text that never contained user-authored injection attempts. */
+function redactSensitiveOnly(text: string): string {
+  const spans = sensitiveSpans(text);
+  if (spans.length === 0) return text;
   return applySpans(text, spans);
 }
 
@@ -112,6 +120,31 @@ function sanitizeHistory(
   }));
 }
 
+function sanitizeDynamicTool(
+  decl: DynamicToolDeclaration,
+  options?: { sanitizeInput?: boolean; redactSensitive?: boolean },
+): DynamicToolDeclaration {
+  const clean = { ...decl };
+  if (clean.description !== undefined) {
+    clean.description = sanitizeText(clean.description, options);
+  }
+  if (clean.parameters !== undefined) {
+    clean.parameters = sanitizeArgs(clean.parameters, options) as Record<string, unknown>;
+  }
+  return clean;
+}
+
+/** Sanitize description and parameter schema text in dynamic tool declarations. */
+function sanitizeDynamicTools(
+  tools: DynamicToolDeclaration[] | undefined,
+  options?: { sanitizeInput?: boolean; redactSensitive?: boolean },
+): DynamicToolDeclaration[] | undefined {
+  if (!tools || tools.length === 0) {
+    return tools;
+  }
+  return tools.map((decl) => sanitizeDynamicTool(decl, options));
+}
+
 /** Sanitize all user-controlled text and blobs in a turn request. */
 function sanitizeTurnRequest(req: TurnRequest): NormalizedTurnRequest {
   let profileGuardrails: { sanitizeInput?: boolean; redactSensitive?: boolean } | undefined;
@@ -149,6 +182,7 @@ function sanitizeTurnRequest(req: TurnRequest): NormalizedTurnRequest {
     ...req,
     system,
     projectId: sanitizeProjectId(req.projectId),
+    dynamicTools: sanitizeDynamicTools(req.dynamicTools, options),
     input: {
       ...input,
       text,
@@ -162,4 +196,11 @@ function sanitizeTurnRequest(req: TurnRequest): NormalizedTurnRequest {
   };
 }
 
-export { PROJECT_ID_MAX, sanitizeProjectId, sanitizeText, sanitizeTurnRequest };
+export {
+  PROJECT_ID_MAX,
+  redactSensitiveOnly,
+  sanitizeDynamicTools,
+  sanitizeProjectId,
+  sanitizeText,
+  sanitizeTurnRequest,
+};

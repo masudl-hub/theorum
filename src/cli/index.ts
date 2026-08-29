@@ -1,3 +1,5 @@
+import { benchCommand } from './commands/bench.ts';
+import { fuzzGuardrailsCommand } from './commands/fuzz-guardrails.ts';
 import { listProfilesCommand, showProfileCommand } from './commands/profile.ts';
 import { runCommand } from './commands/run.ts';
 import { testProfileCommand } from './commands/test.ts';
@@ -10,6 +12,13 @@ USAGE:
   theorum <command> [options]
 
 COMMANDS:
+  bench                Synthetic kernel performance benchmark
+    --chunks <n>       Text chunks per mock turn (default: 200)
+    --iterations <n>   Measurement iterations (default: 50)
+    --warmup <n>       Warmup iterations (default: 5)
+
+  fuzz                 Adversarial guardrail fuzzer
+
   test                 Run stress matrix or custom profile tests
     --profile, -p <id> Target profile ID registered by your host app
     --all, -a          Test all registered profiles
@@ -145,7 +154,15 @@ export async function main(cliArgs = Deno.args): Promise<void> {
   const flags = parseFlags(cliArgs);
   const command = flags._[0] || (flags.help ? 'help' : 'help');
 
-  if (command === 'test') {
+  if (command === 'fuzz') {
+    fuzzGuardrailsCommand();
+  } else if (command === 'bench') {
+    await benchCommand({
+      chunks: typeof flags.chunks === 'string' ? Number(flags.chunks) : undefined,
+      iterations: typeof flags.iterations === 'string' ? Number(flags.iterations) : undefined,
+      warmup: typeof flags.warmup === 'string' ? Number(flags.warmup) : undefined,
+    });
+  } else if (command === 'test') {
     await handleTest(flags);
   } else if (command === 'run') {
     await handleRun(flags);

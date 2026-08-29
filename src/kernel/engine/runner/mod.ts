@@ -72,8 +72,9 @@ async function* runTurn(
   let canary = '';
   let system: string | undefined;
   let generation: ResolvedGeneration | undefined;
+  let safe: TurnRequest | undefined;
   try {
-    const safe = sanitizeTurnRequest(req);
+    safe = sanitizeTurnRequest(req);
     throwIfAborted(safe.signal);
     const { profile, generation: gen } = resolveTurn(safe);
     generation = gen;
@@ -114,6 +115,7 @@ async function* runTurn(
         canary,
         system,
         generation,
+        sanitizedReq: safe,
       }),
     );
     throw err;
@@ -130,6 +132,7 @@ async function* runTurn(
       canary,
       system,
       generation,
+      sanitizedReq: safe,
     }),
   );
 }

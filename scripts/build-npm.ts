@@ -1,4 +1,4 @@
-import { build, emptyDir } from 'jsr:@deno/dnt@0.43.2';
+import { build, emptyDir } from '@deno/dnt';
 
 const outDir = './npm';
 const version = JSON.parse(await Deno.readTextFile('./package.json')).version as string;

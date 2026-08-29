@@ -41,18 +41,14 @@ function bindCanary(system: string, canary: string): string {
   return `${system}\n\n${note}`;
 }
 
-function haystack(event: TurnEvent): string {
-  const chunks = [
-    event.text,
-    event.error,
-    JSON.stringify(event.structured),
-    JSON.stringify(event.tool),
-  ];
-  return chunks.join('\u0000');
-}
-
 function eventHasCanary(event: TurnEvent, canary: string): boolean {
-  return haystack(event).includes(canary);
+  if (event.text?.includes(canary)) return true;
+  if (event.error?.includes(canary)) return true;
+  if (event.structured !== undefined && JSON.stringify(event.structured).includes(canary)) {
+    return true;
+  }
+  if (event.tool !== undefined && JSON.stringify(event.tool).includes(canary)) return true;
+  return false;
 }
 
 function redactCanary(event: TurnEvent, canary: string): TurnEvent {

@@ -8,6 +8,7 @@
  */
 
 import { blobAt, type RedactSpan, spansFromPatterns } from '../observability/spans.ts';
+import { normalizeForDetection } from './normalize.ts';
 
 const IGNORE_PREVIOUS =
   /ignore\s+(all\s+)?(previous|prior)\s+((?:safety|security|system|operational|internal|core|original|initial|existing|given|stated|provided|defined|specified|established)\s+)?(instructions?|rules?|guidelines?|constraints?|directives?)/gi;
@@ -22,8 +23,8 @@ const SUPERSEDE_INSTRUCTIONS =
 const VOID_INSTRUCTIONS =
   /(all\s+)?(previous|prior)\s+instructions?\s+(are|is)\s+(void|invalid|null|obsolete|cancelled|revoked)/gi;
 const DEVELOPER_MODE = /you\s+are\s+now\s+(in\s+)?developer\s+mode/gi;
-const ENTER_SPECIAL_MODE = /enter\s+(developer|admin|debug|maintenance)\s+mode/gi;
-const ACTIVATE_SPECIAL_MODE = /activate\s+(developer|admin|debug|jailbreak)\s+mode/gi;
+const ENTER_SPECIAL_MODE = /enter\s+(developer|admin|debug|maintenance)\s+mode(?!\s+(?:in|on|via|through|from|using|for)\b)/gi;
+const ACTIVATE_SPECIAL_MODE = /activate\s+(developer|admin|debug|jailbreak)\s+mode(?!\s+(?:in|on|via|through|from|using|for)\b)/gi;
 const SYSTEM_OVERRIDE = /\bsystem\s+override\b/gi;
 const OVERRIDE_INSTRUCTIONS =
   /override\s+(your\s+)?(instructions?|rules?|guidelines?|constraints?|directives?)/gi;
@@ -45,7 +46,8 @@ const JAILBREAK_MODE = /jailbreak(ed)?\s+(mode|prompt)/gi;
 const DO_ANYTHING_NOW = /\bdo\s+anything\s+now\b/gi;
 const BYPASS_SAFETY =
   /bypass\s+(your\s+)?(safety|security|content|ethical)\s+(filters?|measures?|guidelines?|restrictions?)/gi;
-const DISABLE_SAFETY = /disable\s+(your\s+)?(safety|security|content)\s+(filters?|measures?)/gi;
+const DISABLE_SAFETY =
+  /(disable|delete|remove|turn\s+off|eliminate)\s+(all\s+)?(your\s+)?(safety|security|content)\s+(filters?|measures?|rules?|guidelines?|restrictions?)/gi;
 const IGNORE_SAFETY =
   /(ignore|disregard)\s+(all\s+)?(your\s+)?(safety|security|ethical|content)\s+(guidelines?|rules?|restrictions?|measures?|filters?|polic(?:y|ies)|protocols?)/gi;
 const SYSTEM_TAG = /<\s*\/?\s*system\s*\/?>/gi;
@@ -54,10 +56,12 @@ const ROLE_DELIMITER = /\]\s*\n\s*\[?(system|assistant|user)\]?:/gi;
 const BRACKETED_ROLE = /\[\s*(System\s*Message|System|Assistant|Internal)\s*\]/gi;
 const SYSTEM_YOU_ARE = /^\s*System:\s+(you\s+are|ignore|override)/gim;
 const CONTROL_TOKEN = /<\|(?:im_start|im_end|eot_id|start_header_id|end_header_id|endoftext)\|>/g;
-const DEEPSEEK_CONTROL = /<\uFF5C(?:end\u2581of\u2581sentence|begin\u2581of\u2581sentence)\uFF5C>/g;
+const DEEPSEEK_CONTROL = /<｜(?:end▁of▁sentence|begin▁of▁sentence)｜>/g;
 const LLAMA_INST = /\[\/?INST\]/gi;
 const IGNORE_YOUR_INSTRUCTIONS = /ignore\s+(all\s+)?(your\s+)?(instructions?|rules?)\b/gi;
 const UNRESTRICTED_MODE = /\bunrestricted\s+(ai|mode|model)\b/gi;
+const IGNORE_MULTILANG =
+  /\b(?:ignorieren|ignorez|ignora|ignorer|oubliez|vergessen|olvida|desestima|missachten)\b[\s\S]{0,50}\b(?:anweisungen|instructions?|instrucciones|directives?|r[eè]gles|reglas)\b/gi;
 
 const INJECTION_PATTERNS = [
   IGNORE_PREVIOUS,
@@ -97,6 +101,7 @@ const INJECTION_PATTERNS = [
   LLAMA_INST,
   IGNORE_YOUR_INSTRUCTIONS,
   UNRESTRICTED_MODE,
+  IGNORE_MULTILANG,
 ];
 
 const TYPO_TARGETS = [
@@ -108,6 +113,19 @@ const TYPO_TARGETS = [
   'system',
   'prompt',
   'instructions',
+  'safety',
+  'security',
+  'filters',
+  'rules',
+  'previous',
+  'guidelines',
+  'restrictions',
+  'disregard',
+  'forget',
+  'jailbreak',
+  'developer',
+  'disable',
+  'measures',
 ];
 
 const BASE64_BLOB = /[A-Za-z0-9+/]{16,}={0,2}/g;
@@ -122,6 +140,10 @@ const CODE_SPACE = 32;
 const CODE_DEL = 127;
 const HEX_RADIX = 16;
 const HEX_STEP = 2;
+const ROT13_OFFSET = 13;
+const ALPHA_COUNT = 26;
+const UPPER_A_CODE = 65;
+const LOWER_A_CODE = 97;
 
 function injectionSpansOn(text: string): RedactSpan[] {
   return spansFromPatterns(text, INJECTION_PATTERNS, 'injection');
@@ -178,19 +200,24 @@ function isMostlyPrintable(value: string): boolean {
   return ok / value.length >= PRINTABLE_MIN;
 }
 
-function decodedHits(decoded: string): boolean {
-  if (!isMostlyPrintable(decoded)) {
-    return false;
-  }
-  return injectionSpansOn(decoded).length > 0;
-}
-
 function tryBase64(blob: string): string | undefined {
   try {
     return atob(blob);
   } catch {
     return undefined;
   }
+}
+
+function decodedHits(decoded: string): boolean {
+  if (!isMostlyPrintable(decoded)) {
+    return false;
+  }
+  if (injectionSpansOn(decoded).length > 0) return true;
+  const doubleDecoded = tryBase64(decoded);
+  if (doubleDecoded && isMostlyPrintable(doubleDecoded) && injectionSpansOn(doubleDecoded).length > 0) {
+    return true;
+  }
+  return false;
 }
 
 function tryHex(blob: string): string | undefined {
@@ -241,14 +268,92 @@ function spacedSpans(text: string): RedactSpan[] {
   return spans;
 }
 
-/** Detect prompt-injection spans in a string. */
+// ── Encoding evasion decoders ────────────────────────────────────────
+
+function tryRot13(text: string): string {
+  return text.replace(/[a-zA-Z]/g, (c) => {
+    const base = c.charCodeAt(0) < LOWER_A_CODE ? UPPER_A_CODE : LOWER_A_CODE;
+    return String.fromCharCode(((c.charCodeAt(0) - base + ROT13_OFFSET) % ALPHA_COUNT) + base);
+  });
+}
+
+function tryUrlDecode(text: string): string | undefined {
+  if (!text.includes('%')) return undefined;
+  try {
+    const decoded = decodeURIComponent(text);
+    return decoded !== text ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function tryReverse(text: string): string {
+  return [...text].reverse().join('');
+}
+
+const LEET_MAP: Record<string, string> = {
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b',
+  '@': 'a', '!': 'i',
+};
+
+const LEET_CHARS = /[013457@!]/g;
+
+function tryLeet(text: string): string | undefined {
+  if (!LEET_CHARS.test(text)) return undefined;
+  LEET_CHARS.lastIndex = 0;
+  const decoded = text.replace(LEET_CHARS, (c) => LEET_MAP[c] ?? c);
+  return decoded !== text ? decoded : undefined;
+}
+
+function decodedTextSpans(text: string): RedactSpan[] {
+  const attempts: (string | undefined)[] = [
+    tryRot13(text),
+    tryUrlDecode(text),
+    tryLeet(text),
+  ];
+  const reversed = tryReverse(text);
+  if (reversed !== text) {
+    attempts.push(reversed);
+  }
+  for (const decoded of attempts) {
+    if (decoded && decoded !== text && injectionSpansOn(decoded).length > 0) {
+      return [{ start: 0, end: text.length, kind: 'injection' }];
+    }
+  }
+  return [];
+}
+
+// ── Main entry point ─────────────────────────────────────────────────
+
 function injectionSpans(text: string): RedactSpan[] {
+  const direct = injectionSpansOn(text);
+
   const shadow = typoNormalize(text);
   let typo: RedactSpan[] = [];
   if (shadow !== text) {
     typo = injectionSpansOn(shadow);
   }
-  return [...injectionSpansOn(text), ...typo, ...encodedSpans(text), ...spacedSpans(text)];
+
+  const normalized = normalizeForDetection(text);
+  let unicodeHits: RedactSpan[] = [];
+  if (normalized !== text) {
+    const normalizedTypo = typoNormalize(normalized);
+    if (
+      injectionSpansOn(normalized).length > 0 ||
+      (normalizedTypo !== normalized && injectionSpansOn(normalizedTypo).length > 0)
+    ) {
+      unicodeHits = [{ start: 0, end: text.length, kind: 'injection' }];
+    }
+  }
+
+  return [
+    ...direct,
+    ...typo,
+    ...unicodeHits,
+    ...encodedSpans(text),
+    ...spacedSpans(text),
+    ...decodedTextSpans(text),
+  ];
 }
 
 export { injectionSpans };

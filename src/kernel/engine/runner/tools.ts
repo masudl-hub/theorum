@@ -1,4 +1,5 @@
 import { toErrorEvent } from '../../../guardrails/error.ts';
+import { sanitizeDynamicTools, sanitizeText } from '../../../guardrails/sanitize.ts';
 import { CATALOG } from '../../registry/catalog.ts';
 import { executeTool } from '../../registry/tools.ts';
 import type {
@@ -13,13 +14,15 @@ import type {
 } from '../../types.ts';
 
 function formatToolFinding(res: ToolEnvelope): string {
+  let raw: string;
   if (res.finding) {
-    return res.finding;
+    raw = res.finding;
+  } else if (res.data) {
+    raw = JSON.stringify(res.data);
+  } else {
+    return 'ok';
   }
-  if (res.data) {
-    return JSON.stringify(res.data);
-  }
-  return 'ok';
+  return sanitizeText(raw);
 }
 
 function* invokeFromUi(profile: Profile, req: TurnRequest): Generator<TurnEvent> {
@@ -209,13 +212,14 @@ async function executeDynamicToolLoader(args: {
       finding: `Tool '${decl.name}' is marked as a loader but no loader is configured.`,
     };
   }
-  const loaded = await loader({
+  const rawLoaded = await loader({
     name: decl.name,
     args: toolArgs,
     profile,
     currentTools: generation.dynamicTools ?? [],
     sessionPermissions: generation.sessionPermissions,
   });
+  const loaded = sanitizeDynamicTools(rawLoaded) ?? [];
   generation.dynamicTools = mergeDynamicTools(generation.dynamicTools, loaded);
   return {
     status: 'ok',

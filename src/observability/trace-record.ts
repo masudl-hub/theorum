@@ -8,7 +8,7 @@
  */
 
 import { isAbortError, publicError } from '../guardrails/error.ts';
-import { sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
+import { redactSensitiveOnly, sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
 import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
 import { sha256 } from '../kernel/engine/hash.ts';
 import type { ResolvedGeneration, TurnBlob, TurnEvent, TurnRequest } from '../kernel/types.ts';
@@ -119,13 +119,13 @@ function hashBlobs(blobs: TurnBlob[] | undefined): Promise<TraceImage[]> {
 async function snapshotEvent(event: TurnEvent): Promise<TraceEvent> {
   const row: TraceEvent = { type: event.type };
   if (event.text) {
-    row.text = sanitizeText(event.text);
+    row.text = redactSensitiveOnly(event.text);
   }
   if (event.error) {
     row.error = event.error;
   }
   if (event.errorInternal) {
-    row.errorInternal = sanitizeText(event.errorInternal);
+    row.errorInternal = redactSensitiveOnly(event.errorInternal);
   }
   if (event.structured !== undefined) {
     row.structured = event.structured;
@@ -214,9 +214,10 @@ async function buildRecord(args: {
   canary?: string;
   system?: string;
   generation?: ResolvedGeneration;
+  sanitizedReq?: TurnRequest;
 }): Promise<TraceRecord> {
   const { req, events, started, model, bucket, thrown, gemini, canary, system, generation } = args;
-  const safe = requestForTrace(req);
+  const safe = args.sanitizedReq ?? requestForTrace(req);
   const input = safe.input ?? {};
   const snapped = await Promise.all(events.map((event) => snapshotEvent(event)));
   const lastErr = [...snapped].reverse().find((row) => row.type === 'error');

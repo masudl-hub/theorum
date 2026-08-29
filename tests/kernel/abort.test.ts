@@ -38,7 +38,7 @@ Deno.test('runTurn cancels an in-flight provider when signal aborts', async () =
   const into: TraceRecord[] = [];
   let sawAbort = false;
   const provider: ModelProvider = {
-    async *complete(req: ProviderCompleteRequest) {
+    async *complete(req: ProviderCompleteRequest): AsyncGenerator<TurnEvent> {
       await new Promise<void>((_resolve, reject) => {
         const { signal } = req;
         if (!signal) {
@@ -59,6 +59,7 @@ Deno.test('runTurn cancels an in-flight provider when signal aborts', async () =
         );
         queueMicrotask(() => controller.abort());
       });
+      yield { type: 'done' };
     },
   };
 

@@ -55,6 +55,10 @@ await build({
       'gemini',
     ],
     sideEffects: false,
+    repository: {
+      type: 'git',
+      url: 'https://github.com/masudl-hub/theorum',
+    },
   },
   postBuild: async () => {
     await Deno.copyFile('README.md', `${outDir}/README.md`);
@@ -66,6 +70,7 @@ await build({
     );
     await Deno.copyFile('docs/CLI_SPEC.md', `${outDir}/docs/CLI_SPEC.md`);
     await Deno.copyFile('docs/SECRETS.md', `${outDir}/docs/SECRETS.md`);
+    await Deno.copyFile('docs/COMPACTION.md', `${outDir}/docs/COMPACTION.md`);
 
     // npm publish rejects bin paths with a leading "./" and silently drops them.
     // dnt emits "./esm/...", so normalize before the package is packed.

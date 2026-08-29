@@ -3,6 +3,10 @@
   "version": "0.1.12",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/masudl-hub/theorum"
+  },
   "type": "module",
   "keywords": [
     "agent",

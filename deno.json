@@ -1,6 +1,6 @@
 {
   "name": "@theorum/core",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "keywords": [

@@ -1,11 +1,13 @@
 import '../fixtures/test-host.ts';
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { OMIT_CANARY } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
 import type { TurnEvent } from '../../src/kernel/types.ts';
 import { memorySink } from '../../src/observability/trace.ts';
 import type { TraceRecord } from '../../src/observability/trace-record.ts';
-import { _internals, tapeGemini } from '../../src/providers/gemini-tape.ts';
+import { tapeGemini } from '../../src/providers/gemini-tape.ts';
 import { camelToSnake } from '../../src/providers/interactions.ts';
 import type { GeminiVault } from '../../src/providers/keys.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
@@ -186,7 +188,7 @@ Deno.test('runTurn traces Google error response bodies', async () => {
   );
 });
 
-const { isImageBlob, scrubEntry, scrubRecord, scrubGemini, redactCanaryInTree } = _internals;
+const { isImageBlob, scrubEntry, scrubRecord, scrubGemini, redactCanaryInTree } = testInternals('gemini-tape');
 
 Deno.test('isImageBlob detects type image or media', () => {
   assertEquals(isImageBlob({ type: 'image' }), true);

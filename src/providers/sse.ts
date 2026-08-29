@@ -1,3 +1,5 @@
+import { exposeForTests } from './expose-for-tests.ts';
+
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse';
 
 const DATA_PREFIX = 'data: ';
@@ -58,5 +60,4 @@ function takeSsePayloads(
 
 export { INTERACTIONS_URL, takeSsePayloads };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = { asObject, dataRecord, takeSsePayloads };
+exposeForTests('sse', { asObject, dataRecord, takeSsePayloads });

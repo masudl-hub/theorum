@@ -2,6 +2,7 @@ import { TheorumError } from '../guardrails/error.ts';
 import { getTool } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
 import type { InteractionPart, ProviderCompleteRequest } from '../kernel/types.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 function camelToSnake(key: string): string {
   return key.replaceAll(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
@@ -182,8 +183,7 @@ function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknow
 
 export { camelToSnake, toInteractionsBody };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = {
+exposeForTests('interactions', {
   camelToSnake,
   toGoogleValue,
   wirePart,
@@ -197,4 +197,4 @@ export const _internals = {
   applyOptionalRequestFields,
   baseInteractionsBody,
   toInteractionsBody,
-};
+});

@@ -1,6 +1,6 @@
 {
   "name": "theorum",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "type": "module",
@@ -31,7 +31,6 @@
   "files": [
     "README.md",
     "deno.json",
-    "deno.lock",
     "docs/",
     "mod.ts",
     "src/"

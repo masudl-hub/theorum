@@ -1,9 +1,10 @@
 import '../fixtures/test-host.ts';
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import {
-  _internals,
   fetchGemini,
   type GeminiVault,
   withGeminiKey,
@@ -18,7 +19,7 @@ const {
   backoffMs,
   canOverflow,
   withApiKey,
-} = _internals;
+} = testInternals('keys');
 
 const vault: GeminiVault = {
   freeA: 'free-a-key',

@@ -4,6 +4,8 @@
  * @module
  */
 
+import { exposeForTests } from './expose-for-tests.ts';
+
 const SAMPLE_RATE = 24000;
 
 function writeAscii(view: DataView, offset: number, str: string): void {
@@ -36,5 +38,4 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Ar
   return new Uint8Array(buf);
 }
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = { writeAscii, wrapPcmAsWav };
+exposeForTests('pcm', { writeAscii, wrapPcmAsWav });

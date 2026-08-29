@@ -9,6 +9,7 @@
 
 import { isAbortError, TheorumError, UPSTREAM_FAILED } from '../guardrails/error.ts';
 import type { GeminiBucket } from '../kernel/types.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 type GeminiVault = Record<GeminiBucket, string | undefined>;
 
@@ -193,8 +194,7 @@ async function fetchGemini(
 export type { GeminiTransport, GeminiVault };
 export { fetchGemini, withGeminiKey };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = {
+exposeForTests('keys', {
   waitDefault,
   isQuota,
   isTransientHttp,
@@ -203,4 +203,4 @@ export const _internals = {
   backoffMs,
   canOverflow,
   withApiKey,
-};
+});

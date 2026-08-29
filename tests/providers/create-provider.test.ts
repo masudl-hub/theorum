@@ -1,9 +1,11 @@
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import type { Profile } from '../../src/kernel/types.ts';
-import { _internals, createProvider } from '../../src/providers/create-provider.ts';
+import { createProvider } from '../../src/providers/create-provider.ts';
 
-const { isSpeechRole } = _internals;
+const { isSpeechRole } = testInternals('create-provider');
 
 function baseProfile(
   model: { protocol: 'geminiInteractions' | 'openAi'; provider: string },

@@ -1,7 +1,9 @@
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { _internals, tapFetch } from '../../src/providers/google-tap.ts';
+import { tapFetch } from '../../src/providers/google-tap.ts';
 
-const { tapeHeaderValue, tapeHeaders, throwRow } = _internals;
+const { tapeHeaderValue, tapeHeaders, throwRow } = testInternals('google-tap');
 
 Deno.test('tapeHeaderValue redacts secret-looking header names', () => {
   assertEquals(tapeHeaderValue('Authorization', 'Bearer abc'), '[redacted]');

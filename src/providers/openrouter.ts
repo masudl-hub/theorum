@@ -36,6 +36,7 @@ import {
   resolveOpenRouterPlugins,
   toOpenRouterPayload,
 } from './openrouter-payload.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 interface StreamAccumulator {
   text: string;
@@ -631,8 +632,7 @@ function createOpenRouterProvider(config: OpenRouterConfig = {}): ModelProvider 
 export type { OpenRouterConfig };
 export { createOpenRouterProvider, resolveOpenRouterModel, toOpenRouterPayload };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = {
+exposeForTests('openrouter', {
   trimApiKey,
   createAccumulator,
   mediaPart,
@@ -676,4 +676,4 @@ export const _internals = {
   openRouterHeaders,
   missingOpenRouterKey,
   streamTextOptions,
-};
+});

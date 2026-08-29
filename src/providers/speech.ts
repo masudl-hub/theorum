@@ -17,6 +17,7 @@ import type {
   TurnEvent,
 } from '../kernel/types.ts';
 import { wrapPcmAsWav } from './pcm.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 const HTTP_OK = 200;
 
@@ -180,8 +181,7 @@ function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider 
 
 export { createSpeechProvider, streamSpeech };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = {
+exposeForTests('speech', {
   bytesToBase64,
   extractInputText,
   resolveSpeechWireModel,
@@ -189,4 +189,4 @@ export const _internals = {
   buildPayload,
   requestSpeech,
   yieldSpeechSuccess,
-};
+});

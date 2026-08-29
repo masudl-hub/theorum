@@ -1,7 +1,9 @@
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { _internals, takeSsePayloads } from '../../src/providers/sse.ts';
+import { takeSsePayloads } from '../../src/providers/sse.ts';
 
-const { asObject, dataRecord } = _internals;
+const { asObject, dataRecord } = testInternals('sse');
 
 Deno.test('takeSsePayloads keeps event names, thought signatures, and [DONE]', () => {
   const raw = [

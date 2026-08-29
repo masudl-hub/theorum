@@ -23,6 +23,7 @@ import { toInteractionsBody } from './interactions.ts';
 import { fetchGemini, type GeminiTransport } from './keys.ts';
 import { wrapPcmAsWav } from './pcm.ts';
 import { INTERACTIONS_URL, takeSsePayloads } from './sse.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 const HTTP_OK = 200;
 
@@ -202,8 +203,7 @@ function createInteractionsProvider(transport: GeminiTransport): ModelProvider {
 
 export { createInteractionsProvider };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = {
+exposeForTests('provider', {
   base64ToBytes,
   bytesToBase64,
   isRawPcmMime,
@@ -214,4 +214,4 @@ export const _internals = {
   foldDeltaPayload,
   foldPayload,
   withTap,
-};
+});

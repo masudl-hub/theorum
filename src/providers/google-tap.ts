@@ -1,4 +1,5 @@
 import type { ProviderCompleteRequest } from '../kernel/types.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 const SECRET_HEADER = /key|auth|cookie|secret|token/i;
 
@@ -56,5 +57,4 @@ function tapFetch(
 
 export { tapFetch };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = { tapeHeaderValue, tapeHeaders, throwRow, tapFetch };
+exposeForTests('google-tap', { tapeHeaderValue, tapeHeaders, throwRow, tapFetch });

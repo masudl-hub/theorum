@@ -1,12 +1,16 @@
 import '../fixtures/test-host.ts';
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
 import type { GeminiVault } from '../../src/providers/keys.ts';
-import { _internals, createInteractionsProvider } from '../../src/providers/provider.ts';
+import { createInteractionsProvider } from '../../src/providers/provider.ts';
 import { INTERACTIONS_URL } from '../../src/providers/sse.ts';
+
+const _internals = testInternals('provider');
 
 const vault: GeminiVault = {
   freeA: 'free-a-key',
@@ -684,7 +688,7 @@ Deno.test('_internals.foldPayload extracts direct usage metadata not covered by 
     },
     acc,
   );
-  const tokens = events.find((e) => e.type === 'tokens');
+  const tokens = events.find((e: { type: string }) => e.type === 'tokens');
   assertEquals(tokens !== undefined, true);
 });
 
@@ -695,7 +699,7 @@ Deno.test('_internals.foldPayload extracts direct grounding metadata not covered
     { event_type: 'unknown.kind', grounding_metadata: groundingMetadata },
     acc,
   );
-  const grounding = events.find((e) => e.type === 'grounding');
+  const grounding = events.find((e: { type: string }) => e.type === 'grounding');
   assertEquals(grounding !== undefined, true);
 });
 

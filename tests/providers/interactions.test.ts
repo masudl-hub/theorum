@@ -1,4 +1,6 @@
 import '../fixtures/test-host.ts';
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals, assertThrows } from '@std/assert';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import type {
@@ -6,7 +8,7 @@ import type {
   ProviderCompleteRequest,
   TurnHistoryMessage,
 } from '../../src/kernel/types.ts';
-import { _internals } from '../../src/providers/interactions.ts';
+import '../../src/providers/interactions.ts';
 
 const {
   camelToSnake,
@@ -22,7 +24,7 @@ const {
   applyOptionalRequestFields,
   baseInteractionsBody,
   toInteractionsBody,
-} = _internals;
+} = testInternals('interactions');
 
 function baseReq(overrides: Partial<ProviderCompleteRequest> = {}): ProviderCompleteRequest {
   return {

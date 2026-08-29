@@ -1,7 +1,9 @@
+import '../fixtures/enable-test-internals.ts';
+import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { _internals, wrapPcmAsWav } from '../../src/providers/pcm.ts';
+import { wrapPcmAsWav } from '../../src/providers/pcm.ts';
 
-const { writeAscii } = _internals;
+const { writeAscii } = testInternals('pcm');
 
 Deno.test('writeAscii writes each character code at the given offset', () => {
   const buf = new ArrayBuffer(8);

@@ -14,6 +14,7 @@ import { createOpenRouterProvider } from './openrouter.ts';
 import type { OpenRouterConfig } from './openrouter-payload.ts';
 import { createInteractionsProvider } from './provider.ts';
 import { createSpeechProvider } from './speech.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 /** Credentials supplied by the host when creating a provider. */
 export interface CreateProviderOptions {
@@ -63,5 +64,4 @@ export function createProvider(
   );
 }
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = { isSpeechRole, createProvider };
+exposeForTests('create-provider', { isSpeechRole, createProvider });

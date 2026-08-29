@@ -1,6 +1,7 @@
 import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
 import { sha256 } from '../kernel/engine/hash.ts';
 import { mapStrings } from '../kernel/engine/tree.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 
 function isImageBlob(rec: Record<string, unknown>): boolean {
   if (rec.type === 'image' || rec.type === 'media') {
@@ -58,12 +59,11 @@ async function tapeGemini(value: unknown, canary: string): Promise<unknown> {
 
 export { tapeGemini };
 
-/** @internal Exported for direct unit testing only. */
-export const _internals = {
+exposeForTests('gemini-tape', {
   isImageBlob,
   scrubEntry,
   scrubRecord,
   scrubGemini,
   redactCanaryInTree,
   tapeGemini,
-};
+});

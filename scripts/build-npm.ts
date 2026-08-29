@@ -66,5 +66,20 @@ await build({
     );
     await Deno.copyFile('docs/CLI_SPEC.md', `${outDir}/docs/CLI_SPEC.md`);
     await Deno.copyFile('docs/SECRETS.md', `${outDir}/docs/SECRETS.md`);
+
+    // npm publish rejects bin paths with a leading "./" and silently drops them.
+    // dnt emits "./esm/...", so normalize before the package is packed.
+    const pkgPath = `${outDir}/package.json`;
+    const pkg = JSON.parse(await Deno.readTextFile(pkgPath)) as {
+      bin?: Record<string, string> | string;
+    };
+    if (typeof pkg.bin === 'string') {
+      pkg.bin = pkg.bin.replace(/^\.\//, '');
+    } else if (pkg.bin && typeof pkg.bin === 'object') {
+      for (const [name, target] of Object.entries(pkg.bin)) {
+        pkg.bin[name] = target.replace(/^\.\//, '');
+      }
+    }
+    await Deno.writeTextFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   },
 });

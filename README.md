@@ -341,6 +341,16 @@ Internal files remain present in source for maintainability, but package consume
 
 ---
 
+## Documentation
+
+| Doc | Topic |
+| :--- | :--- |
+| [`docs/SECRETS.md`](docs/SECRETS.md) | Host-owned credentials; `createProvider` args; no env reads |
+| [`docs/COMPACTION.md`](docs/COMPACTION.md) | History / input meters, lazy BPE, `trigger`, signals |
+| [`docs/STOP.md`](docs/STOP.md) | Normalized `done.stop`, resume policy, `continueFrom` |
+
+---
+
 ## Development
 
 ```bash

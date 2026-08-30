@@ -194,6 +194,7 @@ on the `TurnRequest`.
 | --- | --- | --- |
 | `CompactionSpec` | type | Config on `ModelSpec` |
 | `CompactionMeter` | type | `'history' \| 'input'` |
+| `CompactionTriggerContext` | type | Args for optional `trigger` |
 | `CompactionSignal` | type | `done.compaction`: `meter`, `tokens`, optional `promptTokens`, `history` |
 | `CompactionSplit` / `CompactionTokens` | type | Split result / resolved meter count |
 | `resolveHistoryTokens` | async function | Host `historyTokens` or local history estimate |

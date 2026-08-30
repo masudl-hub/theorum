@@ -72,7 +72,7 @@ export async function resolveHistoryTokens(input?: TurnInput): Promise<number> {
   if (input?.historyTokens != null) {
     return input.historyTokens;
   }
-  return estimateHistoryTokens(input?.history ?? []);
+  return await estimateHistoryTokens(input?.history ?? []);
 }
 
 /**
@@ -129,7 +129,7 @@ export async function shouldCompact(
       compactAt: spec.compactAt,
       meter: resolved.meter,
     };
-    return spec.trigger(ctx);
+    return await spec.trigger(ctx);
   }
   return compactionNeeded(resolved.tokens, spec);
 }

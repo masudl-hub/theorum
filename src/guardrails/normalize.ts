@@ -115,7 +115,7 @@ function mapMath(code: number): string | undefined {
 }
 
 const EMOJI_BETWEEN =
-  /(?<=[a-zA-Z])(?:[\u{1F300}-\u{1FFFF}]+|[\u{2600}-\u{27BF}]+|[\u{FE00}-\u{FE0F}]+|[\u{231A}-\u{23FF}]+)+(?=[a-zA-Z])/gu;
+  /(?<=[a-zA-Z])(?:[\u{1F300}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{231A}-\u{23FF}])+(?=[a-zA-Z])/gu;
 
 const BACKSLASH_BEFORE_ALPHA = /\\(?=[a-zA-Z])/g;
 

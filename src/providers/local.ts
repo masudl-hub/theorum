@@ -86,7 +86,9 @@ type PendingToolCall = { id: string; name: string; args: string };
 // ── request mapping ─────────────────────────────────
 
 function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '');
+  let end = baseUrl.length;
+  while (end > 0 && baseUrl.charCodeAt(end - 1) === 47) end -= 1;
+  return baseUrl.slice(0, end);
 }
 
 function resolveBaseUrl(config?: LocalProviderConfig): string {

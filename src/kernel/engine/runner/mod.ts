@@ -298,7 +298,7 @@ async function maybeAttachAfter(
   if (!(event.type === 'done' && compactionSpec?.timing === 'after' && !isCompacting && ctx.safe)) {
     return event;
   }
-  return attachAfterCompaction(event, {
+  return await attachAfterCompaction(event, {
     spec: compactionSpec,
     history: gen.history ?? [],
     input: ctx.safe.input,

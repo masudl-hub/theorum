@@ -7,7 +7,11 @@ const JSON_ESCAPES: Record<string, string> = {
   '/': '/',
 };
 
-function decodeEscapedChar(ch: string, jsonText: string, index: number): { text: string; next: number } {
+function decodeEscapedChar(
+  ch: string,
+  jsonText: string,
+  index: number,
+): { text: string; next: number } {
   if (ch === 'u' && index + 4 < jsonText.length) {
     const hex = jsonText.slice(index + 1, index + 5);
     if (/^[0-9a-fA-F]{4}$/.test(hex)) {

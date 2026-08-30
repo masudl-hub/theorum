@@ -23,8 +23,10 @@ const SUPERSEDE_INSTRUCTIONS =
 const VOID_INSTRUCTIONS =
   /(all\s+)?(previous|prior)\s+instructions?\s+(are|is)\s+(void|invalid|null|obsolete|cancelled|revoked)/gi;
 const DEVELOPER_MODE = /you\s+are\s+now\s+(in\s+)?developer\s+mode/gi;
-const ENTER_SPECIAL_MODE = /enter\s+(developer|admin|debug|maintenance)\s+mode(?!\s+(?:in|on|via|through|from|using|for)\b)/gi;
-const ACTIVATE_SPECIAL_MODE = /activate\s+(developer|admin|debug|jailbreak)\s+mode(?!\s+(?:in|on|via|through|from|using|for)\b)/gi;
+const ENTER_SPECIAL_MODE =
+  /enter\s+(developer|admin|debug|maintenance)\s+mode(?!\s+(?:in|on|via|through|from|using|for)\b)/gi;
+const ACTIVATE_SPECIAL_MODE =
+  /activate\s+(developer|admin|debug|jailbreak)\s+mode(?!\s+(?:in|on|via|through|from|using|for)\b)/gi;
 const SYSTEM_OVERRIDE = /\bsystem\s+override\b/gi;
 const OVERRIDE_INSTRUCTIONS =
   /override\s+(your\s+)?(instructions?|rules?|guidelines?|constraints?|directives?)/gi;
@@ -214,7 +216,11 @@ function decodedHits(decoded: string): boolean {
   }
   if (injectionSpansOn(decoded).length > 0) return true;
   const doubleDecoded = tryBase64(decoded);
-  if (doubleDecoded && isMostlyPrintable(doubleDecoded) && injectionSpansOn(doubleDecoded).length > 0) {
+  if (
+    doubleDecoded &&
+    isMostlyPrintable(doubleDecoded) &&
+    injectionSpansOn(doubleDecoded).length > 0
+  ) {
     return true;
   }
   return false;
@@ -292,8 +298,15 @@ function tryReverse(text: string): string {
 }
 
 const LEET_MAP: Record<string, string> = {
-  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b',
-  '@': 'a', '!': 'i',
+  '0': 'o',
+  '1': 'i',
+  '3': 'e',
+  '4': 'a',
+  '5': 's',
+  '7': 't',
+  '8': 'b',
+  '@': 'a',
+  '!': 'i',
 };
 
 const LEET_CHARS = /[013457@!]/g;
@@ -306,11 +319,7 @@ function tryLeet(text: string): string | undefined {
 }
 
 function decodedTextSpans(text: string): RedactSpan[] {
-  const attempts: (string | undefined)[] = [
-    tryRot13(text),
-    tryUrlDecode(text),
-    tryLeet(text),
-  ];
+  const attempts: (string | undefined)[] = [tryRot13(text), tryUrlDecode(text), tryLeet(text)];
   const reversed = tryReverse(text);
   if (reversed !== text) {
     attempts.push(reversed);

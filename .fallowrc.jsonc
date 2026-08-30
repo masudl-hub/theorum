@@ -11,7 +11,8 @@
     "tests/observability/**/*.ts",
     "tests/host/**/*.ts",
     "tests/streaming/**/*.ts",
-    "tests/fixtures/**/*.ts"
+    "tests/fixtures/**/*.ts",
+    "tests/fixtures/**/*.js"
   ],
   "ignorePatterns": ["node_modules/**", "coverage/**", "scripts/**", "src/cli/**", "npm/**"],
   "health": {

@@ -16,8 +16,8 @@ import type {
   SpeechAudioFormat,
   TurnEvent,
 } from '../kernel/types.ts';
-import { wrapPcmAsWav } from './pcm.ts';
 import { exposeForTests } from './expose-for-tests.ts';
+import { wrapPcmAsWav } from './pcm.ts';
 
 const HTTP_OK = 200;
 

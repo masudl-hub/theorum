@@ -56,6 +56,9 @@ async function* executeAutonomousStep(
       latestStructured = event.structured;
     }
     if (event.type === 'done') {
+      if (event.stop) {
+        state.lastStop = event.stop;
+      }
       continue;
     }
     if (event.type === 'tool' && event.tool) {

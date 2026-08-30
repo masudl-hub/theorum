@@ -30,6 +30,11 @@ const provider = createProvider(profile, {
   openRouter: {
     apiKey: hostResolvedOpenRouterKey,
   },
+  // openAi / local (Ollama, llama.cpp, vLLM, LM Studio, …)
+  // Hosts that honor OLLAMA_HOST should resolve it themselves — THEORUM does not.
+  local: {
+    baseUrl: hostResolvedLocalBaseUrl, // optional; default http://127.0.0.1:11434
+  },
 });
 
 for await (const event of runTurn({ profile: profile.id, input: { text: '…' } }, provider)) {
@@ -37,7 +42,7 @@ for await (const event of runTurn({ profile: profile.id, input: { text: '…' } 
 }
 ```
 
-`createProvider` picks the transport from `profile.model.protocol` / `provider` (and whether the profile is a speech role). Hosts do not choose a separate speech constructor.
+`createProvider` picks the transport from `profile.model.protocol` / `provider` (and whether the profile is a speech role). Hosts do not choose a separate speech constructor. OpenRouter's Vercel AI SDK dependency loads only when an `openAi` + `openrouter` chat provider first calls `complete` — Google and local paths never import it.
 
 ## 3. Tracing
 

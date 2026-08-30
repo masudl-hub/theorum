@@ -164,7 +164,7 @@ async function assertPublicEntrypointsOmitTestHooks(): Promise<void> {
 async function assertExposeForTestsStaysGated(): Promise<void> {
   const rel = 'src/providers/expose-for-tests.ts';
   const text = await Deno.readTextFile(`${root}/${rel}`);
-  if (!text.includes("THEORUM_TEST_INTERNALS") || !text.includes("=== '1'")) {
+  if (!text.includes('THEORUM_TEST_INTERNALS') || !text.includes("=== '1'")) {
     throw new Error(`${rel} must gate exposure on THEORUM_TEST_INTERNALS=1`);
   }
   const pkg = JSON.parse(await Deno.readTextFile(`${root}/deno.json`)) as {

@@ -8,8 +8,18 @@
  * @module
  */
 
-export { compactionNeeded, splitForCompaction } from './engine/compaction.ts';
-export type { CompactionSplit } from './engine/compaction.ts';
+export type { CompactionSplit, CompactionTokens } from './engine/compaction.ts';
+export {
+  compactionMeter,
+  compactionNeeded,
+  estimateHistoryTokens,
+  HISTORY_MEDIA_TOKENS,
+  HISTORY_TEXT_ENCODING,
+  resolveCompactionTokens,
+  resolveHistoryTokens,
+  shouldCompact,
+  splitForCompaction,
+} from './engine/compaction.ts';
 export { runTurn } from './engine/runner.ts';
 export {
   CATALOG,
@@ -38,4 +48,18 @@ export {
 export { projectProfile, resolveTurn } from './registry/resolve.ts';
 export { getStructured, registerStructured } from './registry/schemas.ts';
 export { executeTool } from './registry/tools.ts';
+export type { ProfileResumeSpec, TurnContinueFrom, TurnStop, TurnStopKind } from './stop.ts';
+export {
+  AUTO_CONTINUE_DELAY_MS,
+  CONTINUE_INSTRUCTION,
+  DEFAULT_AUTO_CONTINUE,
+  GenerationStopError,
+  isGenerationStopError,
+  isResumeableStop,
+  isUserCancelledStop,
+  shouldAutoContinue,
+  turnStopFromClientStreamEnd,
+  turnStopFromInteractionStatus,
+  turnStopFromOpenRouter,
+} from './stop.ts';
 export type * from './types.ts';

@@ -15,6 +15,10 @@ export function exposeForTests(bucket: string, api: Record<string, unknown>): vo
   if (!enabled) return;
 
   const g = globalThis as Record<string, unknown>;
-  const root = (g.__theorumTestInternals ??= {}) as Record<string, unknown>;
+  let root = g.__theorumTestInternals as Record<string, unknown> | undefined;
+  if (!root) {
+    root = {};
+    g.__theorumTestInternals = root;
+  }
   root[bucket] = api;
 }

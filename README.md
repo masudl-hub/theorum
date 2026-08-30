@@ -288,6 +288,8 @@ import { createProvider, runTurn } from "jsr:@theorum/core";
 const provider = createProvider(profile, {
   gemini: { vault: hostGeminiKeyVault, fetch },
   openRouter: { apiKey: hostSecrets.openRouterApiKey },
+  // openAi + local — optional; default baseUrl http://127.0.0.1:11434
+  local: { baseUrl: hostResolvedLocalBaseUrl },
 });
 
 for await (const event of runTurn({ profile: profile.id, input: { text: "…" } }, provider)) {
@@ -302,10 +304,21 @@ for await (const event of runTurn({ profile: profile.id, input: { text: "…" } 
 | `geminiInteractions` + `google` | Google Interactions (chat, image, speech) |
 | `openAi` + `openrouter` (chat) | OpenRouter chat completions |
 | `openAi` + `openrouter` (speech role) | OpenRouter `/audio/speech` |
+| `openAi` + `local` | Local OpenAI-compatible `/v1/chat/completions` (Ollama, llama.cpp, vLLM, LM Studio, …) |
 
-OpenRouter uses Vercel AI SDK Core inside THEORUM's provider adapter. The adapter still emits THEORUM `TurnEvent` values and preserves raw provider evidence for citations/provenance where the normalized SDK stream does not expose enough detail.
+Local adapters take an optional `baseUrl` (default `http://127.0.0.1:11434`). THEORUM does not read `OLLAMA_HOST`; hosts that honor that env should resolve it and pass `local.baseUrl`. History `parts` (including images) are mapped on the wire; `done` events include a normalized `stop` from the OpenAI `finish_reason`.
 
-Advanced OpenRouter exports live under `theorum/openrouter` (`createOpenRouterProvider`, `toOpenRouterPayload`, …). Prefer `createProvider` for turns unless the host needs to wire the OpenRouter adapter directly.
+OpenRouter uses Vercel AI SDK Core inside THEORUM's provider adapter. That stack
+loads **lazily on the first `complete` call** for `openAi` + `openrouter` chat —
+not when importing THEORUM, and not for Google or local providers. The adapter
+still emits THEORUM `TurnEvent` values and preserves raw provider evidence for
+citations/provenance where the normalized SDK stream does not expose enough detail.
+
+Advanced OpenRouter exports live under `theorum/openrouter` (`createOpenRouterProvider`,
+`toOpenRouterPayload`, …). Prefer `createProvider` for turns unless the host needs
+to wire the OpenRouter adapter directly. Direct local construction is also available
+as `createLocalProvider` from the main / providers entrypoints. Importing
+`theorum/openrouter` loads the Vercel SDK immediately.
 
 ---
 

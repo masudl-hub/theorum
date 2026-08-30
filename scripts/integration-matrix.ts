@@ -15,9 +15,9 @@
  */
 
 import '../tests/fixtures/test-host.ts';
-import { createProvider } from '../src/providers/create-provider.ts';
 import { testProfileCommand } from '../src/cli/commands/test.ts';
 import { listProfiles } from '../src/kernel/registry/profiles.ts';
+import { createProvider } from '../src/providers/create-provider.ts';
 import type { GeminiVault } from '../src/providers/keys.ts';
 
 function loadEnvFile(path: string): void {

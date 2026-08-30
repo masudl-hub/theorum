@@ -18,12 +18,12 @@ import {
   tryStructured,
 } from '../kernel/engine/delta.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../kernel/types.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 import { tapFetch } from './google-tap.ts';
 import { toInteractionsBody } from './interactions.ts';
 import { fetchGemini, type GeminiTransport } from './keys.ts';
 import { wrapPcmAsWav } from './pcm.ts';
 import { INTERACTIONS_URL, takeSsePayloads } from './sse.ts';
-import { exposeForTests } from './expose-for-tests.ts';
 
 const HTTP_OK = 200;
 

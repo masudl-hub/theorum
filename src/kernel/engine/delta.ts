@@ -1,3 +1,4 @@
+import { turnStopFromInteractionStatus } from '../stop.ts';
 import type { GroundingEvent, GroundingSource, TurnEvent, TurnTokens } from '../types.ts';
 import { asRecord } from './record.ts';
 
@@ -402,24 +403,47 @@ function extractTokenEvent(
 
 function eventsFromComplete(event: Record<string, unknown>, alreadyText: boolean): TurnEvent[] {
   const interaction = asRecord(event.interaction) ?? event;
-  const outputText = interaction.output_text;
   const events: TurnEvent[] = [];
+  const outputText = interaction.output_text;
   if (!alreadyText && typeof outputText === 'string' && outputText) {
     events.push({ type: 'text', text: outputText });
   }
   const media = mediaFromComplete(event);
-  if (media) {
-    events.push(media);
-  }
+  if (media) events.push(media);
   const tokenEvent = extractTokenEvent(event, interaction);
-  if (tokenEvent) {
-    events.push(tokenEvent);
-  }
+  if (tokenEvent) events.push(tokenEvent);
   const groundingEvent = groundingFromEvent(event);
-  if (groundingEvent) {
-    events.push(groundingEvent);
-  }
+  if (groundingEvent) events.push(groundingEvent);
+  const done = doneFromInteractionStatus(interaction, event);
+  if (done) events.push(done);
   return events;
+}
+
+const TERMINAL_INTERACTION_STATUSES = new Set([
+  'completed',
+  'incomplete',
+  'budget_exceeded',
+  'failed',
+  'cancelled',
+  'requires_action',
+]);
+
+function doneFromInteractionStatus(
+  interaction: Record<string, unknown>,
+  event: Record<string, unknown>,
+): TurnEvent | undefined {
+  const status =
+    typeof interaction.status === 'string'
+      ? interaction.status
+      : typeof event.status === 'string'
+        ? event.status
+        : undefined;
+  if (!status || !TERMINAL_INTERACTION_STATUSES.has(status.toLowerCase())) return undefined;
+  return {
+    type: 'done',
+    stop: turnStopFromInteractionStatus(status),
+    ...(typeof interaction.id === 'string' ? { interactionId: interaction.id } : {}),
+  };
 }
 
 function tryStructured(text: string): TurnEvent | undefined {

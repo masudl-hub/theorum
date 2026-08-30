@@ -1,7 +1,7 @@
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { wrapPcmAsWav } from '../../src/providers/pcm.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 
 const { writeAscii } = testInternals('pcm');
 

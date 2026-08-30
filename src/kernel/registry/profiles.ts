@@ -112,12 +112,28 @@ function defineProfile(input: ProfileDefinition): Profile {
 
 function assertCompactionSpec(profileId: string, modelId: ModelId, spec: CompactionSpec): void {
   const tag = `Profile ${profileId} model ${modelId} compaction`;
-  if (spec.maxHistoryTokens <= 0) {
-    throw new TheorumError(`${tag}: maxHistoryTokens must be > 0`);
+  assertCompactionBudget(tag, spec);
+  assertCompactionRetain(tag, spec);
+  if (spec.meter != null && spec.meter !== 'history' && spec.meter !== 'input') {
+    throw new TheorumError(`${tag}: meter must be 'history' or 'input'`);
+  }
+  if (!profiles.has(spec.profile)) {
+    throw new TheorumError(
+      `${tag}: compaction profile '${spec.profile}' must be registered before '${profileId}'`,
+    );
+  }
+}
+
+function assertCompactionBudget(tag: string, spec: CompactionSpec): void {
+  if (spec.maxTokens <= 0) {
+    throw new TheorumError(`${tag}: maxTokens must be > 0`);
   }
   if (spec.compactAt <= 0 || spec.compactAt >= 1) {
     throw new TheorumError(`${tag}: compactAt must be in (0, 1)`);
   }
+}
+
+function assertCompactionRetain(tag: string, spec: CompactionSpec): void {
   if (spec.previousExchanges < 0) {
     throw new TheorumError(`${tag}: previousExchanges must be >= 0`);
   }
@@ -130,11 +146,6 @@ function assertCompactionSpec(profileId: string, modelId: ModelId, spec: Compact
   }
   if (spec.previousExchanges >= 1 && !Number.isInteger(spec.previousExchanges)) {
     throw new TheorumError(`${tag}: previousExchanges >= 1 must be an integer`);
-  }
-  if (!profiles.has(spec.profile)) {
-    throw new TheorumError(
-      `${tag}: compaction profile '${spec.profile}' must be registered before '${profileId}'`,
-    );
   }
 }
 

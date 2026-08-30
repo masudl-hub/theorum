@@ -1,13 +1,14 @@
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC, PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import type { InteractionPart, ProviderCompleteRequest } from '../../src/kernel/types.ts';
 import { wrapPcmAsWav } from '../../src/providers/pcm.ts';
 import { createSpeechProvider, streamSpeech } from '../../src/providers/speech.ts';
 import { HOST_MODELS } from '../fixtures/models.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 
-const { extractInputText, resolveSpeechWireModel, buildHeaders, buildPayload, yieldSpeechSuccess } = testInternals('speech');
+const { extractInputText, resolveSpeechWireModel, buildHeaders, buildPayload, yieldSpeechSuccess } =
+  testInternals('speech');
 
 function createMockSpeechRequest(text: string): ProviderCompleteRequest {
   const spec = HOST_MODELS.gemini31FlashTts;

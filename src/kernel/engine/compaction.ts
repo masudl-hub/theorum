@@ -1,14 +1,26 @@
 /**
- * Compaction helpers for splitting conversation history.
+ * Compaction helpers: history split + threshold metering.
  *
- * `splitForCompaction` is a pure function — it does not call providers or
- * manage state. Hosts and the runner call it to partition history into a
- * compactable segment and a retained tail.
+ * Pure and stateless. History lives on the request; the kernel does not store
+ * cross-turn session state.
  *
  * @module
  */
 
-import type { CompactionSpec, TurnHistoryMessage } from '../types.ts';
+import type {
+  CompactionMeter,
+  CompactionSpec,
+  CompactionTriggerContext,
+  TurnHistoryMessage,
+  TurnInput,
+} from '../types.ts';
+import { estimateHistoryTokens } from './history-tokens.ts';
+
+export {
+  estimateHistoryTokens,
+  HISTORY_MEDIA_TOKENS,
+  HISTORY_TEXT_ENCODING,
+} from './history-tokens.ts';
 
 /** Result of splitting history for compaction. */
 export interface CompactionSplit {
@@ -16,6 +28,18 @@ export interface CompactionSplit {
   toCompact: TurnHistoryMessage[];
   /** Recent exchanges to preserve verbatim. */
   toRetain: TurnHistoryMessage[];
+}
+
+/** Resolved meter for a compaction decision. */
+export interface CompactionTokens {
+  meter: CompactionMeter;
+  /** Token count compared to `compactAt * maxTokens`. */
+  tokens: number;
+}
+
+/** Effective meter; defaults to `'history'`. */
+export function compactionMeter(spec: CompactionSpec): CompactionMeter {
+  return spec.meter ?? 'history';
 }
 
 /**
@@ -37,32 +61,77 @@ function findExchangeBoundaries(history: TurnHistoryMessage[]): number[] {
   return boundaries;
 }
 
-function estimateTokens(messages: TurnHistoryMessage[]): number {
-  let chars = 0;
-  for (const msg of messages) {
-    if (msg.content) chars += msg.content.length;
-    if (msg.parts) {
-      for (const part of msg.parts) {
-        if ('text' in part) chars += part.text.length;
-      }
-    }
-    if (msg.tool_calls) {
-      for (const tc of msg.tool_calls) {
-        chars += tc.function.arguments.length;
-      }
-    }
+/**
+ * History token count for `meter: 'history'`.
+ *
+ * Prefers host-supplied `input.historyTokens`. Otherwise estimates from
+ * `input.history` (tiktoken `o200k_base` + media stubs). Empty/missing → 0.
+ * The BPE import runs only when an estimate needs text encoding.
+ */
+export async function resolveHistoryTokens(input?: TurnInput): Promise<number> {
+  if (input?.historyTokens != null) {
+    return input.historyTokens;
   }
-  return Math.ceil(chars / 4);
+  return estimateHistoryTokens(input?.history ?? []);
 }
 
 /**
- * Whether compaction should fire based on the previous turn's input token count.
+ * Resolve the token count used for the compaction threshold.
+ *
+ * - `meter: 'history'` (default) — `historyTokens` or estimate of `history`.
+ * - `meter: 'input'` — prefer `promptTokens` (this turn's provider
+ *   `tokens.input`, for `timing: 'after'`), else host `input.inputTokens`
+ *   (previous turn, for `timing: 'before'`). Missing/non-positive → undefined
+ *   (do not fire).
+ *
+ * `meter: 'input'` never loads the history tokenizer.
  */
-export function compactionNeeded(
-  lastInputTokens: number,
+export async function resolveCompactionTokens(args: {
+  spec: CompactionSpec;
+  input?: TurnInput;
+  /** Provider full-prompt input tokens from this turn, when known. */
+  promptTokens?: number;
+}): Promise<CompactionTokens | undefined> {
+  const meter = compactionMeter(args.spec);
+  if (meter === 'history') {
+    return { meter, tokens: await resolveHistoryTokens(args.input) };
+  }
+  const fromPrompt =
+    args.promptTokens != null && args.promptTokens > 0 ? args.promptTokens : undefined;
+  const fromHost =
+    args.input?.inputTokens != null && args.input.inputTokens > 0
+      ? args.input.inputTokens
+      : undefined;
+  const tokens = fromPrompt ?? fromHost;
+  if (tokens == null) return undefined;
+  return { meter, tokens };
+}
+
+/** Whether compaction should fire for a resolved token count (token-threshold only). */
+export function compactionNeeded(tokens: number, spec: CompactionSpec): boolean {
+  return tokens > spec.compactAt * spec.maxTokens;
+}
+
+/**
+ * Whether compaction should fire, respecting a custom trigger when provided.
+ *
+ * When `spec.trigger` is set, it is called with full context and its result
+ * is returned directly. Otherwise falls back to `compactionNeeded`.
+ */
+export async function shouldCompact(
+  resolved: CompactionTokens,
   spec: CompactionSpec,
-): boolean {
-  return lastInputTokens > spec.compactAt * spec.maxHistoryTokens;
+): Promise<boolean> {
+  if (spec.trigger) {
+    const ctx: CompactionTriggerContext = {
+      tokens: resolved.tokens,
+      maxTokens: spec.maxTokens,
+      compactAt: spec.compactAt,
+      meter: resolved.meter,
+    };
+    return spec.trigger(ctx);
+  }
+  return compactionNeeded(resolved.tokens, spec);
 }
 
 /**
@@ -71,13 +140,13 @@ export function compactionNeeded(
  * `previousExchanges` semantics:
  * - `0` — compact everything, retain nothing.
  * - `≥ 1` (integer) — retain the last N exchanges.
- * - `(0, 1)` — retain exchanges that fit within this fraction of `maxHistoryTokens`,
- *   walking backwards from the most recent.
+ * - `(0, 1)` — retain exchanges that fit within this fraction of `maxTokens`,
+ *   walking backwards from the most recent (always uses the history estimator).
  */
-export function splitForCompaction(
+export async function splitForCompaction(
   history: TurnHistoryMessage[],
   spec: CompactionSpec,
-): CompactionSplit {
+): Promise<CompactionSplit> {
   if (history.length === 0) {
     return { toCompact: [], toRetain: [] };
   }
@@ -98,14 +167,14 @@ export function splitForCompaction(
     const keep = Math.min(spec.previousExchanges, boundaries.length);
     cutIndex = boundaries[boundaries.length - keep];
   } else {
-    const budget = spec.previousExchanges * spec.maxHistoryTokens;
+    const budget = spec.previousExchanges * spec.maxTokens;
     let accumulated = 0;
     cutIndex = history.length;
     for (let i = boundaries.length - 1; i >= 0; i--) {
       const exchangeStart = boundaries[i];
       const exchangeEnd = i < boundaries.length - 1 ? boundaries[i + 1] : history.length;
       const exchangeMessages = history.slice(exchangeStart, exchangeEnd);
-      const exchangeTokens = estimateTokens(exchangeMessages);
+      const exchangeTokens = await estimateHistoryTokens(exchangeMessages);
       if (accumulated + exchangeTokens > budget) {
         break;
       }

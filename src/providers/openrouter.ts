@@ -21,6 +21,7 @@ import {
 import { isAbortError, toErrorEvent } from '../guardrails/error.ts';
 import { tryStructured } from '../kernel/engine/delta.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
+import { turnStopFromOpenRouter } from '../kernel/stop.ts';
 import type {
   DynamicToolDeclaration,
   InteractionPart,
@@ -30,19 +31,21 @@ import type {
   TurnHistoryMessage,
   TurnTokens,
 } from '../kernel/types.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 import {
   type OpenRouterConfig,
   resolveOpenRouterModel,
   resolveOpenRouterPlugins,
   toOpenRouterPayload,
 } from './openrouter-payload.ts';
-import { exposeForTests } from './expose-for-tests.ts';
 
 interface StreamAccumulator {
   text: string;
   evidenceSeen: boolean;
   emittedTokens: boolean;
   errored: boolean;
+  finishReason?: string | null;
+  nativeFinishReason?: string | null;
 }
 
 interface OpenRouterStreamContext {
@@ -383,6 +386,17 @@ function rawEvents(raw: unknown, acc: StreamAccumulator): TurnEvent[] {
   if (messageEvidence) {
     events.push(messageEvidence);
   }
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  for (const choice of choices) {
+    const row = rawRecord(choice);
+    if (!row) continue;
+    if (typeof row.finish_reason === 'string' || row.finish_reason === null) {
+      acc.finishReason = row.finish_reason as string | null;
+    }
+    if (typeof row.native_finish_reason === 'string' || row.native_finish_reason === null) {
+      acc.nativeFinishReason = row.native_finish_reason as string | null;
+    }
+  }
   return events;
 }
 
@@ -474,6 +488,9 @@ function finishEvent(
   part: Extract<TextStreamPart<ToolSet>, { type: 'finish' }>,
   acc: StreamAccumulator,
 ): TurnEvent | undefined {
+  if ('finishReason' in part && part.finishReason != null) {
+    acc.finishReason = String(part.finishReason);
+  }
   if (acc.emittedTokens) {
     return undefined;
   }
@@ -482,6 +499,22 @@ function finishEvent(
     acc.emittedTokens = true;
   }
   return event;
+}
+
+function* finalEvents(req: ProviderCompleteRequest, acc: StreamAccumulator): Generator<TurnEvent> {
+  if (acc.errored) {
+    return;
+  }
+  if (req.structured && acc.text) {
+    const structured = tryStructured(acc.text);
+    if (structured) {
+      yield structured;
+    }
+  }
+  yield {
+    type: 'done',
+    stop: turnStopFromOpenRouter(acc.finishReason, acc.nativeFinishReason),
+  };
 }
 
 function createStreamContext(
@@ -569,19 +602,6 @@ async function* streamOpenRouter(
     }
     yield toErrorEvent(err);
   }
-}
-
-function* finalEvents(req: ProviderCompleteRequest, acc: StreamAccumulator): Generator<TurnEvent> {
-  if (acc.errored) {
-    return;
-  }
-  if (req.structured && acc.text) {
-    const structured = tryStructured(acc.text);
-    if (structured) {
-      yield structured;
-    }
-  }
-  yield { type: 'done' };
 }
 
 function responseFormatFor(req: ProviderCompleteRequest): Record<string, JsonValue> | undefined {

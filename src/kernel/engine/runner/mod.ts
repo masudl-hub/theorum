@@ -13,6 +13,7 @@ import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { noopSink, type TraceSink, writeTrace } from '../../../observability/trace.ts';
 import { buildRecord } from '../../../observability/trace-record.ts';
 import { pickSystemRole, resolveTurn } from '../../registry/resolve.ts';
+import { CONTINUE_INSTRUCTION } from '../../stop.ts';
 import type {
   CompactionSignal,
   CompactionSpec,
@@ -24,7 +25,7 @@ import type {
   TurnRequest,
 } from '../../types.ts';
 import { bindCanary } from '../boundary.ts';
-import { compactionNeeded, splitForCompaction } from '../compaction.ts';
+import { resolveCompactionTokens, shouldCompact, splitForCompaction } from '../compaction.ts';
 import { runAttemptsWithValidation } from './gates.ts';
 import type { StepExecutionState } from './state.ts';
 import { shouldSkipStreamEvent, systemFromProfile } from './stream.ts';
@@ -78,11 +79,61 @@ async function runCompactionTurn(
 
 function lastTokensFromEvents(events: TurnEvent[]): number {
   for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].tokens?.input) {
-      return events[i].tokens!.input;
-    }
+    const input = events[i]?.tokens?.input;
+    if (input) return input;
   }
   return 0;
+}
+
+async function compactHistoryBeforeTurn(args: {
+  spec: CompactionSpec;
+  history: TurnHistoryMessage[];
+  input: TurnRequest['input'];
+  provider: ModelProvider;
+  compactionProvider?: ModelProvider;
+  signal?: AbortSignal;
+}): Promise<TurnHistoryMessage[]> {
+  const decision = await resolveCompactionTokens({
+    spec: args.spec,
+    input: args.input,
+  });
+  if (!(decision && (await shouldCompact(decision, args.spec)))) return args.history;
+  const { toCompact, toRetain } = await splitForCompaction(args.history, args.spec);
+  if (toCompact.length === 0) return args.history;
+  const summaryMessage = await runCompactionTurn(
+    toCompact,
+    args.spec,
+    args.compactionProvider ?? args.provider,
+    args.signal,
+  );
+  return [summaryMessage, ...toRetain];
+}
+
+async function attachAfterCompaction(
+  event: TurnEvent,
+  args: {
+    spec: CompactionSpec;
+    history: TurnHistoryMessage[];
+    input: TurnRequest['input'];
+    seen: TurnEvent[];
+  },
+): Promise<TurnEvent> {
+  if (args.history.length === 0) return event;
+  const promptTokens = lastTokensFromEvents(args.seen);
+  const decision = await resolveCompactionTokens({
+    spec: args.spec,
+    input: args.input,
+    promptTokens,
+  });
+  if (!(decision && (await shouldCompact(decision, args.spec)))) return event;
+  const signal: CompactionSignal = {
+    needed: true,
+    meter: decision.meter,
+    tokens: decision.tokens,
+    history: args.history,
+  };
+  if (promptTokens > 0) signal.promptTokens = promptTokens;
+  return { ...event, compaction: signal };
 }
 
 async function* emitTurn(args: {
@@ -113,7 +164,43 @@ async function* emitTurn(args: {
     yield* calculateFallbackTokens(safe, system, state.allEmittedEvents);
   }
 
-  yield { type: 'done' };
+  yield {
+    type: 'done',
+    stop: state.lastStop ?? { kind: 'completed' },
+  };
+}
+
+type TraceCtx = {
+  req: TurnRequest;
+  seen: TurnEvent[];
+  started: number;
+  model?: string;
+  bucket?: string;
+  canary: string;
+  system?: string;
+  generation?: ResolvedGeneration;
+  safe?: TurnRequest;
+  gemini: Record<string, unknown>[];
+  thrown?: unknown;
+};
+
+async function flushTurnTrace(sink: TraceSink, ctx: TraceCtx): Promise<void> {
+  await writeTrace(
+    sink,
+    buildRecord({
+      req: ctx.req,
+      events: ctx.seen,
+      started: ctx.started,
+      model: ctx.model,
+      bucket: ctx.bucket,
+      thrown: ctx.thrown,
+      gemini: ctx.gemini,
+      canary: ctx.canary,
+      system: ctx.system,
+      generation: ctx.generation,
+      sanitizedReq: ctx.safe,
+    }),
+  );
 }
 
 /** Execute one host turn against a provider adapter. */
@@ -122,119 +209,101 @@ async function* runTurn(
   provider: ModelProvider,
   sink: TraceSink = noopSink(),
 ): AsyncGenerator<TurnEvent> {
-  const started = Date.now();
-  const seen: TurnEvent[] = [];
-  const gemini: Record<string, unknown>[] = [];
-  let model: string | undefined;
-  let bucket: string | undefined;
-  let canary = '';
-  let system: string | undefined;
-  let generation: ResolvedGeneration | undefined;
-  let safe: TurnRequest | undefined;
+  const ctx: TraceCtx = {
+    req,
+    seen: [],
+    started: Date.now(),
+    canary: '',
+    gemini: [],
+  };
   try {
-    safe = sanitizeTurnRequest(req);
-    throwIfAborted(safe.signal);
-    const { profile, generation: gen } = resolveTurn(safe);
-    generation = gen;
-    const { model: resolvedModel, geminiBucket, canary: turnCanary } = gen;
-    model = resolvedModel;
-    bucket = geminiBucket;
-    canary = turnCanary;
-
-    const isCompacting = req.metadata?._compacting === true;
-    const compactionSpec = isCompacting
-      ? undefined
-      : getCompactionSpec(profile, resolvedModel);
-
-    if (
-      compactionSpec?.timing === 'before' &&
-      gen.history?.length &&
-      safe.input?.lastInputTokens != null &&
-      compactionNeeded(safe.input.lastInputTokens, compactionSpec)
-    ) {
-      const { toCompact, toRetain } = splitForCompaction(gen.history, compactionSpec);
-      if (toCompact.length > 0) {
-        const compactProvider = req.compactionProvider ?? provider;
-        const summaryMessage = await runCompactionTurn(
-          toCompact,
-          compactionSpec,
-          compactProvider,
-          safe.signal,
-        );
-        gen.history = [summaryMessage, ...toRetain];
-      }
-    }
-
-    const role = pickSystemRole(profile, safe.input?.role);
-    const profileSys = systemFromProfile(profile, role);
-    const combinedSys = [profileSys, safe.system].filter(Boolean).join('\n\n');
-    const bound = bindCanary(combinedSys, turnCanary);
-    system = bound;
-    for await (const event of emitTurn({
-      safe,
-      profile,
-      generation: gen,
-      system: bound,
-      provider,
-      gemini,
-    })) {
-      if (event.type === 'done' && compactionSpec?.timing === 'after' && !isCompacting) {
-        const inputTokens = lastTokensFromEvents(seen);
-        if (inputTokens > 0 && compactionNeeded(inputTokens, compactionSpec)) {
-          const currentHistory = gen.history ?? [];
-          const signal: CompactionSignal = {
-            needed: true,
-            inputTokens,
-            history: currentHistory,
-          };
-          const doneWithCompaction: TurnEvent = { ...event, compaction: signal };
-          seen.push(doneWithCompaction);
-          if (!shouldSkipStreamEvent(doneWithCompaction, profile)) {
-            yield doneWithCompaction;
-          }
-          continue;
-        }
-      }
-      seen.push(event);
-      if (shouldSkipStreamEvent(event, profile)) {
-        continue;
-      }
-      yield event;
-    }
+    yield* runTurnBody(ctx, provider);
   } catch (err) {
-    await writeTrace(
-      sink,
-      buildRecord({
-        req,
-        events: seen,
-        started,
-        model,
-        bucket,
-        thrown: err,
-        gemini,
-        canary,
-        system,
-        generation,
-        sanitizedReq: safe,
-      }),
-    );
+    await flushTurnTrace(sink, { ...ctx, thrown: err });
     throw err;
   }
-  await writeTrace(
-    sink,
-    buildRecord({
-      req,
-      events: seen,
-      started,
-      model,
-      bucket,
-      gemini,
-      canary,
-      system,
-      generation,
-      sanitizedReq: safe,
-    }),
-  );
+  await flushTurnTrace(sink, ctx);
+}
+
+async function* runTurnBody(ctx: TraceCtx, provider: ModelProvider): AsyncGenerator<TurnEvent> {
+  ctx.safe = sanitizeTurnRequest(ctx.req);
+  throwIfAborted(ctx.safe.signal);
+  const { profile, generation: gen } = resolveTurn(ctx.safe);
+  ctx.generation = gen;
+  ctx.model = gen.model;
+  ctx.bucket = gen.geminiBucket;
+  ctx.canary = gen.canary;
+
+  const isCompacting = ctx.req.metadata?._compacting === true;
+  const compactionSpec = isCompacting ? undefined : getCompactionSpec(profile, gen.model);
+  await maybeCompactBefore(ctx, gen, compactionSpec, provider);
+
+  const role = pickSystemRole(profile, ctx.safe.input?.role);
+  const continueSys = ctx.safe.continueFrom ? CONTINUE_INSTRUCTION : '';
+  const combinedSys = [systemFromProfile(profile, role), ctx.safe.system, continueSys]
+    .filter(Boolean)
+    .join('\n\n');
+  ctx.system = bindCanary(combinedSys, ctx.canary);
+
+  yield* streamTurnEvents(ctx, profile, gen, provider, compactionSpec, isCompacting);
+}
+
+async function maybeCompactBefore(
+  ctx: TraceCtx,
+  gen: ResolvedGeneration,
+  compactionSpec: CompactionSpec | undefined,
+  provider: ModelProvider,
+): Promise<void> {
+  if (!(compactionSpec?.timing === 'before' && gen.history?.length && ctx.safe)) return;
+  gen.history = await compactHistoryBeforeTurn({
+    spec: compactionSpec,
+    history: gen.history,
+    input: ctx.safe.input,
+    provider,
+    compactionProvider: ctx.req.compactionProvider,
+    signal: ctx.safe.signal,
+  });
+}
+
+async function* streamTurnEvents(
+  ctx: TraceCtx,
+  profile: Profile,
+  gen: ResolvedGeneration,
+  provider: ModelProvider,
+  compactionSpec: CompactionSpec | undefined,
+  isCompacting: boolean,
+): AsyncGenerator<TurnEvent> {
+  if (!ctx.safe || ctx.system === undefined) return;
+  for await (const event of emitTurn({
+    safe: ctx.safe,
+    profile,
+    generation: gen,
+    system: ctx.system,
+    provider,
+    gemini: ctx.gemini,
+  })) {
+    const out = await maybeAttachAfter(event, ctx, gen, compactionSpec, isCompacting);
+    ctx.seen.push(out);
+    if (!shouldSkipStreamEvent(out, profile)) yield out;
+  }
+}
+
+async function maybeAttachAfter(
+  event: TurnEvent,
+  ctx: TraceCtx,
+  gen: ResolvedGeneration,
+  compactionSpec: CompactionSpec | undefined,
+  isCompacting: boolean,
+): Promise<TurnEvent> {
+  if (!(event.type === 'done' && compactionSpec?.timing === 'after' && !isCompacting && ctx.safe)) {
+    return event;
+  }
+  return attachAfterCompaction(event, {
+    spec: compactionSpec,
+    history: gen.history ?? [],
+    input: ctx.safe.input,
+    seen: ctx.seen,
+  });
 }
 
 export { runTurn };

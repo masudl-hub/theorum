@@ -16,10 +16,7 @@
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
 import { bindCanary, eventHasCanary, mintCanary } from '../../kernel/engine/boundary.ts';
 import { runTurn } from '../../kernel/engine/runner.ts';
-import {
-  clearProfiles,
-  registerProfile,
-} from '../../kernel/registry/profiles.ts';
+import { clearProfiles, registerProfile } from '../../kernel/registry/profiles.ts';
 import { pickSystemRole, resolveTurn } from '../../kernel/registry/resolve.ts';
 import type {
   ModelProvider,
@@ -111,9 +108,7 @@ interface TimingResult {
   textEvents: number;
 }
 
-async function measureRawProvider(
-  provider: ModelProvider,
-): Promise<TimingResult> {
+async function measureRawProvider(provider: ModelProvider): Promise<TimingResult> {
   const req = buildBenchRequest();
   const start = performance.now();
   let firstEvent = 0;
@@ -159,9 +154,7 @@ async function measureRawProvider(
   };
 }
 
-async function measureKernelPipeline(
-  provider: ModelProvider,
-): Promise<TimingResult> {
+async function measureKernelPipeline(provider: ModelProvider): Promise<TimingResult> {
   const req = buildBenchRequest();
   const start = performance.now();
   let firstEvent = 0;
@@ -208,9 +201,7 @@ function aggregate(results: TimingResult[]): AggregatedMetrics {
   const ttfe = results.map((r) => r.ttfe).sort((a, b) => a - b);
   const ttft = results.map((r) => r.ttft).sort((a, b) => a - b);
   const total = results.map((r) => r.totalMs).sort((a, b) => a - b);
-  const tps = results
-    .map((r) => (r.textEvents / r.totalMs) * MS_PER_SEC)
-    .sort((a, b) => a - b);
+  const tps = results.map((r) => (r.textEvents / r.totalMs) * MS_PER_SEC).sort((a, b) => a - b);
 
   const mean = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
 
@@ -265,10 +256,7 @@ function printMetricRow(
   );
 }
 
-function printResults(
-  label: string,
-  metrics: AggregatedMetrics,
-): void {
+function printResults(label: string, metrics: AggregatedMetrics): void {
   console.log(`\n${label}`);
   console.log('─'.repeat(72));
   printMetricRow('TTFE', metrics.ttfeMs, fmtMs);
@@ -277,10 +265,7 @@ function printResults(
   printMetricRow('Total', metrics.totalMs, fmtMs);
 }
 
-function printOverhead(
-  raw: AggregatedMetrics,
-  kernel: AggregatedMetrics,
-): void {
+function printOverhead(raw: AggregatedMetrics, kernel: AggregatedMetrics): void {
   console.log('\nOverhead (kernel − raw)');
   console.log('─'.repeat(72));
   const ttfeDelta = kernel.ttfeMs.median - raw.ttfeMs.median;
@@ -404,7 +389,10 @@ function microArrayPush(chunks: TurnEvent[], iterations: number): MicroResult {
   };
 }
 
-async function microAsyncGenOverhead(chunks: TurnEvent[], iterations: number): Promise<MicroResult> {
+async function microAsyncGenOverhead(
+  chunks: TurnEvent[],
+  iterations: number,
+): Promise<MicroResult> {
   async function* layer1(events: TurnEvent[]): AsyncGenerator<TurnEvent> {
     for (const e of events) yield e;
   }
@@ -511,9 +499,10 @@ async function printMicroBenchmarks(chunks: TurnEvent[], iterations: number): Pr
   console.log('\nPer-Event Micro-Benchmarks');
   console.log('─'.repeat(72));
   for (const r of results) {
-    const perEvent = r.label === 'buildRecord (trace)'
-      ? `${fmtMs(r.totalMs / Math.min(iterations, 20)).padStart(10)}/turn`
-      : `${fmtNs(r.perEventNs).padStart(8)}/event`;
+    const perEvent =
+      r.label === 'buildRecord (trace)'
+        ? `${fmtMs(r.totalMs / Math.min(iterations, 20)).padStart(10)}/turn`
+        : `${fmtNs(r.perEventNs).padStart(8)}/event`;
     console.log(`  ${r.label.padEnd(24)} ${perEvent}    (${fmtMs(r.totalMs)} total)`);
   }
 

@@ -10,6 +10,8 @@
 
 # THEORUM: The Flat Agent Kernel
 
+**Current release: `0.1.15`** (`jsr:@theorum/core` / npm `theorum`).
+
 > **"Profiles describe the contract. Providers move bytes. The runner enforces the turn."**
 
 THEORUM is a compact TypeScript agent kernel for apps that need deterministic agent execution without embedding product logic inside the runtime. It gives a host application one runner, typed profiles, multimodal input normalization, dynamic tool dispatch, provider adapters, trace sinks, and guardrail hooks.

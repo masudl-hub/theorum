@@ -1,7 +1,7 @@
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { tapFetch } from '../../src/providers/google-tap.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 
 const { tapeHeaderValue, tapeHeaders, throwRow } = testInternals('google-tap');
 

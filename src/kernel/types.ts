@@ -112,23 +112,55 @@ export interface ModelSpec {
 }
 
 /**
- * Compaction policy for a model's conversational history.
+ * What the compaction threshold meters.
+ *
+ * - `'history'` (default) — conversational history only (`TurnInput.historyTokens`
+ *   or a local estimate of `history`). Excludes system, tool schemas, and this
+ *   turn's attachments.
+ * - `'input'` — full-prompt provider input tokens (`TurnInput.inputTokens` for
+ *   `timing: 'before'`, this turn's `tokens.input` for `timing: 'after'`).
+ */
+export type CompactionMeter = 'history' | 'input';
+
+/**
+ * Context supplied to a custom compaction trigger.
+ *
+ * Includes the resolved token count and the spec values so the trigger can
+ * incorporate the token-based threshold as a fallback alongside other signals
+ * (e.g. available system RAM).
+ */
+export interface CompactionTriggerContext {
+  /** Resolved token count for the configured meter. */
+  tokens: number;
+  /** `CompactionSpec.maxTokens` — the token ceiling for this profile. */
+  maxTokens: number;
+  /** `CompactionSpec.compactAt` — the fraction at which the default check fires. */
+  compactAt: number;
+  /** Which meter produced `tokens`. */
+  meter: CompactionMeter;
+}
+
+/**
+ * Compaction policy for a model.
  *
  * `previousExchanges` accepts three value ranges:
  * - `≥ 1` (integer) — keep that many recent exchanges (user message + all
  *   messages until the next user message).
- * - `(0, 1)` — fraction of `maxHistoryTokens`; the retained tail's estimated
+ * - `(0, 1)` — fraction of `maxTokens`; the retained tail's estimated history
  *   tokens must fit within this budget.
  * - `0` — compact everything; no tail is retained.
  */
 export interface CompactionSpec {
-  /** Token budget for conversational history (excludes system prompt, tools, output headroom). */
-  maxHistoryTokens: number;
-  /** Fraction of `maxHistoryTokens` at which compaction fires. Must be in (0, 1). */
+  /**
+   * Token budget compared by the trigger (`compactAt * maxTokens`).
+   * Meaning depends on `meter`: history budget vs full-prompt input budget.
+   */
+  maxTokens: number;
+  /** Fraction of `maxTokens` at which compaction fires. Must be in (0, 1). */
   compactAt: number;
   /**
    * How many recent exchanges to preserve verbatim.
-   * `≥ 1` = exchange count, `(0, 1)` = fraction of `maxHistoryTokens`, `0` = compact all.
+   * `≥ 1` = exchange count, `(0, 1)` = fraction of `maxTokens`, `0` = compact all.
    */
   previousExchanges: number;
   /** Profile id of the compaction agent. Must be registered before the owning profile. */
@@ -139,6 +171,21 @@ export interface CompactionSpec {
    * - `'after'`: kernel signals in the `done` event; host runs compaction asynchronously.
    */
   timing: 'before' | 'after';
+  /**
+   * Threshold meter. Defaults to `'history'`.
+   * Use `'input'` when the host prefers provider full-prompt usage (after
+   * subtracting a known baseline in `maxTokens` / `compactAt`).
+   */
+  meter?: CompactionMeter;
+  /**
+   * Optional custom trigger. When present, replaces the default token-threshold
+   * check (`tokens > compactAt * maxTokens`). The trigger receives full context
+   * so it can incorporate the token-based logic as a fallback alongside other
+   * signals such as available system RAM.
+   *
+   * Both sync and async returns are accepted.
+   */
+  trigger?: (ctx: CompactionTriggerContext) => boolean | Promise<boolean>;
 }
 
 /** Static metadata for harness, preset, and host-registered tools. */
@@ -243,6 +290,15 @@ export interface ProfileStreamingSpec {
   gateMedia?: boolean;
 }
 
+export type {
+  ProfileResumeSpec,
+  TurnContinueFrom,
+  TurnStop,
+  TurnStopKind,
+} from './stop.ts';
+
+import type { ProfileResumeSpec, TurnContinueFrom, TurnStop } from './stop.ts';
+
 /** Context passed to a host-owned outbound disclosure guard. */
 export interface EgressContext {
   text: string;
@@ -286,7 +342,7 @@ export interface ProfileGuardrailsSpec {
 /** Model, provider, thinking, and step bounds for a profile. */
 export interface ProfileModelSpec {
   protocol: 'geminiInteractions' | 'openAi';
-  provider: 'google' | 'openrouter';
+  provider: 'google' | 'openrouter' | 'local';
   /** Ids this profile may select. Each id must exist in `config`. */
   allow: ModelId[];
   /** Host-owned wire config keyed by the same ids used in `allow` / `select`. */
@@ -319,6 +375,8 @@ export interface ProfileOutputsSpec {
   speech?: ProfileSpeechSpec;
   validation?: ProfileValidationSpec;
   streaming?: ProfileStreamingSpec;
+  /** Resume / Continue policy for non-user stops. */
+  resume?: ProfileResumeSpec;
 }
 
 /** Complete host-owned agent contract consumed by the kernel. */
@@ -442,8 +500,17 @@ export interface TurnInput {
   voice?: TurnBlob[];
   history?: TurnHistoryMessage[];
   repair?: TurnRepairRequest;
-  /** Provider-reported input token count from the previous turn. Used by compaction threshold check. */
-  lastInputTokens?: number;
+  /**
+   * Optional host-supplied history token count for `meter: 'history'`.
+   * When set, overrides the local history estimate. Not full-prompt API tokens.
+   */
+  historyTokens?: number;
+  /**
+   * Optional host-supplied full-prompt input token count for `meter: 'input'`
+   * with `timing: 'before'` (typically the previous turn's `tokens.input`).
+   * Ignored when `meter` is `'history'`.
+   */
+  inputTokens?: number;
 }
 
 /** Host request after kernel ingress normalization. */
@@ -477,6 +544,11 @@ export interface TurnRequest {
    * in-flight provider HTTP where the adapter supports it.
    */
   signal?: AbortSignal;
+  /**
+   * Continue a prior resumeable stop. Kernel appends CONTINUE_INSTRUCTION to
+   * the system prompt; hosts should also pass partial artifact via input/history.
+   */
+  continueFrom?: TurnContinueFrom;
   input?: TurnInput;
   toolInvoke?: { name: CustomToolId; arguments: Record<string, unknown> };
   /** Provider for the compaction profile when `timing: 'before'`. Falls back to the turn provider. */
@@ -580,7 +652,15 @@ export interface ProviderEvidenceEvent {
 /** Compaction signal emitted in the `done` event when `timing: 'after'`. */
 export interface CompactionSignal {
   needed: boolean;
-  inputTokens: number;
+  /** Which meter produced `tokens`. */
+  meter: CompactionMeter;
+  /** Token count used for the compaction decision. */
+  tokens: number;
+  /**
+   * Provider-reported full-prompt input tokens from this turn, when known.
+   * Always observability; also the decision value when `meter: 'input'`.
+   */
+  promptTokens?: number;
   history: TurnHistoryMessage[];
 }
 
@@ -606,6 +686,8 @@ export interface TurnEvent {
   errorInternal?: string;
   /** Compaction signal for `timing: 'after'` profiles. Present only on `done` events. */
   compaction?: CompactionSignal;
+  /** Why the turn ended. Present on terminal `done` events when known. */
+  stop?: TurnStop;
 }
 
 /** Provider-neutral request object sent from the kernel to a model adapter. */

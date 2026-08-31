@@ -3,6 +3,7 @@ import type {
   TurnEvent,
   TurnHistoryMessage,
   TurnRequest,
+  TurnStop,
 } from '../../types.ts';
 
 interface StepExecutionState {
@@ -11,6 +12,8 @@ interface StepExecutionState {
   sawTokensEvent: boolean;
   allEmittedEvents: TurnEvent[];
   attemptEvents: TurnEvent[];
+  /** Last provider stop from a discarded provider `done` event. */
+  lastStop?: TurnStop;
 }
 
 interface AttemptFlowState {

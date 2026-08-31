@@ -60,8 +60,18 @@ export {
   sanitizeText,
   sanitizeTurnRequest,
 } from './src/guardrails/sanitize.ts';
-export { compactionNeeded, splitForCompaction } from './src/kernel/engine/compaction.ts';
-export type { CompactionSplit } from './src/kernel/engine/compaction.ts';
+export type { CompactionSplit, CompactionTokens } from './src/kernel/engine/compaction.ts';
+export {
+  compactionMeter,
+  compactionNeeded,
+  estimateHistoryTokens,
+  HISTORY_MEDIA_TOKENS,
+  HISTORY_TEXT_ENCODING,
+  resolveCompactionTokens,
+  resolveHistoryTokens,
+  shouldCompact,
+  splitForCompaction,
+} from './src/kernel/engine/compaction.ts';
 export { runTurn } from './src/kernel/engine/runner.ts';
 export {
   CATALOG,
@@ -90,6 +100,25 @@ export {
 export { projectProfile, resolveTurn } from './src/kernel/registry/resolve.ts';
 export { getStructured, registerStructured } from './src/kernel/registry/schemas.ts';
 export { executeTool } from './src/kernel/registry/tools.ts';
+export type {
+  ProfileResumeSpec,
+  TurnContinueFrom,
+  TurnStop,
+  TurnStopKind,
+} from './src/kernel/stop.ts';
+export {
+  AUTO_CONTINUE_DELAY_MS,
+  CONTINUE_INSTRUCTION,
+  DEFAULT_AUTO_CONTINUE,
+  GenerationStopError,
+  isGenerationStopError,
+  isResumeableStop,
+  isUserCancelledStop,
+  shouldAutoContinue,
+  turnStopFromClientStreamEnd,
+  turnStopFromInteractionStatus,
+  turnStopFromOpenRouter,
+} from './src/kernel/stop.ts';
 export type * from './src/kernel/types.ts';
 export {
   jsonlSink,
@@ -100,5 +129,14 @@ export {
   writeTrace,
 } from './src/observability/trace.ts';
 export type { TraceRecord } from './src/observability/trace-record.ts';
-export type { CreateProviderOptions, GeminiTransport, GeminiVault } from './src/providers/mod.ts';
-export { createProvider } from './src/providers/mod.ts';
+export type {
+  CreateProviderOptions,
+  GeminiTransport,
+  GeminiVault,
+  LocalProviderConfig,
+} from './src/providers/mod.ts';
+export {
+  createLocalProvider,
+  createProvider,
+  DEFAULT_LOCAL_BASE_URL,
+} from './src/providers/mod.ts';

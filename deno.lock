@@ -16,7 +16,8 @@
     "npm:@biomejs/biome@^2.5.8": "2.5.11",
     "npm:@openrouter/ai-sdk-provider@3": "3.0.0_ai@7.0.84__zod@4.5.2",
     "npm:ai@7": "7.0.84_zod@4.5.2",
-    "npm:fallow@3.17.0": "3.17.0"
+    "npm:fallow@3.17.0": "3.17.0",
+    "npm:gpt-tokenizer@4": "4.0.0"
   },
   "jsr": {
     "@david/code-block-writer@13.0.3": {
@@ -400,6 +401,9 @@
       ],
       "bin": true
     },
+    "gpt-tokenizer@4.0.0": {
+      "integrity": "sha512-YAWIyzvuVUHEfW7tFfFAxH8qQb+Q3RU9nYOTy7skMNX5qzU6Q8jxTHZLyO56ug1vYvCR7wndzpd3jwD86/mhjQ=="
+    },
     "json-schema@0.4.0": {
       "integrity": "sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA=="
     },
@@ -441,7 +445,8 @@
       "jsr:@deno/dnt@0.43.2",
       "jsr:@std/assert@1",
       "npm:@openrouter/ai-sdk-provider@3",
-      "npm:ai@7"
+      "npm:ai@7",
+      "npm:gpt-tokenizer@4"
     ],
     "packageJson": {
       "dependencies": [
@@ -449,7 +454,8 @@
         "npm:@biomejs/biome@^2.5.8",
         "npm:@openrouter/ai-sdk-provider@3",
         "npm:ai@7",
-        "npm:fallow@3.17.0"
+        "npm:fallow@3.17.0",
+        "npm:gpt-tokenizer@4"
       ]
     }
   }

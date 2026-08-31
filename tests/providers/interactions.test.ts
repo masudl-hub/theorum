@@ -1,6 +1,5 @@
 import '../fixtures/test-host.ts';
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { assertEquals, assertThrows } from '@std/assert';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import type {
@@ -8,6 +7,7 @@ import type {
   ProviderCompleteRequest,
   TurnHistoryMessage,
 } from '../../src/kernel/types.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 import '../../src/providers/interactions.ts';
 
 const {

@@ -1,14 +1,10 @@
 import '../fixtures/test-host.ts';
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
-import {
-  fetchGemini,
-  type GeminiVault,
-  withGeminiKey,
-} from '../../src/providers/keys.ts';
+import { fetchGemini, type GeminiVault, withGeminiKey } from '../../src/providers/keys.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 
 const {
   waitDefault,

@@ -64,13 +64,9 @@ await build({
     await Deno.copyFile('README.md', `${outDir}/README.md`);
     await Deno.copyFile('LICENSE', `${outDir}/LICENSE`);
     await Deno.mkdir(`${outDir}/docs`, { recursive: true });
-    await Deno.copyFile(
-      'docs/AGENT_PROFILE_CONTRACT.md',
-      `${outDir}/docs/AGENT_PROFILE_CONTRACT.md`,
-    );
-    await Deno.copyFile('docs/CLI_SPEC.md', `${outDir}/docs/CLI_SPEC.md`);
     await Deno.copyFile('docs/SECRETS.md', `${outDir}/docs/SECRETS.md`);
     await Deno.copyFile('docs/COMPACTION.md', `${outDir}/docs/COMPACTION.md`);
+    await Deno.copyFile('docs/STOP.md', `${outDir}/docs/STOP.md`);
 
     // npm publish rejects bin paths with a leading "./" and silently drops them.
     // dnt emits "./esm/...", so normalize before the package is packed.

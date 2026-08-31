@@ -4,17 +4,26 @@
  * Routes from `profile.model.protocol` / `provider` (and whether the profile is
  * a speech role). Adapters under this folder are internal implementation.
  *
+ * The OpenRouter / Vercel AI SDK stack is loaded only when an `openAi` +
+ * `openrouter` chat provider actually runs `complete` — not when this module
+ * is imported, and not for Google or local paths.
+ *
  * @module
  */
 
 import { TheorumError } from '../guardrails/error.ts';
-import type { ModelProvider, Profile } from '../kernel/types.ts';
+import type {
+  ModelProvider,
+  Profile,
+  ProviderCompleteRequest,
+  TurnEvent,
+} from '../kernel/types.ts';
+import { exposeForTests } from './expose-for-tests.ts';
 import type { GeminiTransport } from './keys.ts';
-import { createOpenRouterProvider } from './openrouter.ts';
+import { createLocalProvider, type LocalProviderConfig } from './local.ts';
 import type { OpenRouterConfig } from './openrouter-payload.ts';
 import { createInteractionsProvider } from './provider.ts';
 import { createSpeechProvider } from './speech.ts';
-import { exposeForTests } from './expose-for-tests.ts';
 
 /** Credentials supplied by the host when creating a provider. */
 export interface CreateProviderOptions {
@@ -26,10 +35,26 @@ export interface CreateProviderOptions {
    * Optional `voice` is a fallback when `outputs.speech.voice` is omitted.
    */
   openRouter?: OpenRouterConfig & { voice?: string };
+  /** Local OpenAI-compatible server (Ollama, llama.cpp, vLLM, LM Studio). */
+  local?: LocalProviderConfig;
 }
 
 function isSpeechRole(profile: Profile): boolean {
   return profile.outputs.speech !== undefined;
+}
+
+/**
+ * Defer loading `@openrouter/ai-sdk-provider` / `ai` until the first `complete`.
+ * Keeps Google and local hosts free of the Vercel SDK graph.
+ */
+function lazyOpenRouterChat(config: OpenRouterConfig): ModelProvider {
+  let pending: Promise<ModelProvider> | undefined;
+  return {
+    async *complete(req: ProviderCompleteRequest): AsyncGenerator<TurnEvent> {
+      pending ??= import('./openrouter.ts').then((m) => m.createOpenRouterProvider(config));
+      yield* (await pending).complete(req);
+    },
+  };
 }
 
 /**
@@ -56,7 +81,11 @@ export function createProvider(
     if (isSpeechRole(profile)) {
       return createSpeechProvider(options.openRouter);
     }
-    return createOpenRouterProvider(options.openRouter);
+    return lazyOpenRouterChat(options.openRouter);
+  }
+
+  if (protocol === 'openAi' && provider === 'local') {
+    return createLocalProvider(options.local);
   }
 
   throw new TheorumError(
@@ -64,4 +93,4 @@ export function createProvider(
   );
 }
 
-exposeForTests('create-provider', { isSpeechRole, createProvider });
+exposeForTests('create-provider', { isSpeechRole, createProvider, lazyOpenRouterChat });

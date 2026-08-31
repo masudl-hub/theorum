@@ -1,6 +1,5 @@
 import '../fixtures/test-host.ts';
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { PUBLIC_UNAVAILABLE } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
@@ -9,6 +8,7 @@ import { camelToSnake, toInteractionsBody } from '../../src/providers/interactio
 import type { GeminiVault } from '../../src/providers/keys.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
 import { INTERACTIONS_URL } from '../../src/providers/sse.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 
 const _internals = testInternals('provider');
 

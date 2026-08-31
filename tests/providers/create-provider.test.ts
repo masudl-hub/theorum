@@ -1,9 +1,9 @@
 import '../fixtures/enable-test-internals.ts';
-import { testInternals } from '../fixtures/testInternals.ts';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
 import type { Profile } from '../../src/kernel/types.ts';
 import { createProvider } from '../../src/providers/create-provider.ts';
+import { testInternals } from '../fixtures/testInternals.js';
 
 const { isSpeechRole } = testInternals('create-provider');
 
@@ -97,4 +97,25 @@ Deno.test('createProvider throws for unsupported protocol/provider pairs', () =>
     (thrown as Error).message,
     "createProvider: unsupported protocol/provider pair 'openAi'/'google'",
   );
+});
+
+Deno.test('createProvider routes openAi/local without requiring options.local', () => {
+  const profile = baseProfile({ protocol: 'openAi', provider: 'local' }, false);
+  const provider = createProvider(profile, {});
+  assertEquals(typeof provider.complete, 'function');
+  const withUrl = createProvider(profile, { local: { baseUrl: 'http://127.0.0.1:8080' } });
+  assertEquals(typeof withUrl.complete, 'function');
+});
+
+Deno.test('create-provider loads OpenRouter adapter only via dynamic import', async () => {
+  const src = await Deno.readTextFile(
+    new URL('../../src/providers/create-provider.ts', import.meta.url),
+  );
+  assertEquals(/from\s+['"]\.\/openrouter\.ts['"]/.test(src), false);
+  assertEquals(src.includes("import('./openrouter.ts')"), true);
+  // Sync createProvider for openrouter chat must not touch the Vercel graph.
+  // This file's suite runs without --allow-sys; an eager openrouter import would throw.
+  const profile = baseProfile({ protocol: 'openAi', provider: 'openrouter' }, false);
+  const provider = createProvider(profile, { openRouter: { apiKey: 'key' } });
+  assertEquals(typeof provider.complete, 'function');
 });

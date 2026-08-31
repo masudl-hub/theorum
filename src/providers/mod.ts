@@ -10,3 +10,5 @@
 export type { CreateProviderOptions } from './create-provider.ts';
 export { createProvider } from './create-provider.ts';
 export type { GeminiTransport, GeminiVault } from './keys.ts';
+export type { LocalProviderConfig } from './local.ts';
+export { createLocalProvider, DEFAULT_LOCAL_BASE_URL } from './local.ts';

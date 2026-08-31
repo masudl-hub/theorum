@@ -63,10 +63,24 @@ await build({
   postBuild: async () => {
     await Deno.copyFile('README.md', `${outDir}/README.md`);
     await Deno.copyFile('LICENSE', `${outDir}/LICENSE`);
+    // Co-located contracts ship inside esm/src via the normal dnt copy of src/.
+    // Also mirror them under docs/ for npm consumers who browse the tarball root.
     await Deno.mkdir(`${outDir}/docs`, { recursive: true });
-    await Deno.copyFile('docs/SECRETS.md', `${outDir}/docs/SECRETS.md`);
-    await Deno.copyFile('docs/COMPACTION.md', `${outDir}/docs/COMPACTION.md`);
-    await Deno.copyFile('docs/STOP.md', `${outDir}/docs/STOP.md`);
+    const contracts: Array<[string, string]> = [
+      ['src/kernel/CONTRACT.md', 'docs/kernel.md'],
+      ['src/providers/CONTRACT.md', 'docs/providers.md'],
+      ['src/providers/OPENROUTER.md', 'docs/openrouter.md'],
+      ['src/guardrails/CONTRACT.md', 'docs/guardrails.md'],
+      ['src/observability/CONTRACT.md', 'docs/observability.md'],
+      ['src/host/CONTRACT.md', 'docs/host.md'],
+      ['src/cli/CONTRACT.md', 'docs/cli.md'],
+      ['src/presets/CONTRACT.md', 'docs/presets.md'],
+      ['src/presets/GOOGLE.md', 'docs/presets-google.md'],
+      ['src/streaming/CONTRACT.md', 'docs/streaming.md'],
+    ];
+    for (const [from, to] of contracts) {
+      await Deno.copyFile(from, `${outDir}/${to}`);
+    }
 
     // npm publish rejects bin paths with a leading "./" and silently drops them.
     // dnt emits "./esm/...", so normalize before the package is packed.

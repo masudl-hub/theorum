@@ -6,7 +6,7 @@
  * normalized `TurnEvent` objects. No external SDK dependency — raw fetch + SSE.
  *
  * Hosts pass `baseUrl` explicitly. THEORUM does not read `OLLAMA_HOST` or other
- * environment variables (see docs/SECRETS.md).
+ * environment variables (see src/providers/CONTRACT.md).
  *
  * @module
  */

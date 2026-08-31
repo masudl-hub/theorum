@@ -14,6 +14,8 @@
     "tests/fixtures/**/*.ts",
     "tests/fixtures/**/*.js"
   ],
+  // docs-truth loads the ownership graph via dynamic import (graph.mjs → _map.mjs).
+  "dynamicallyLoaded": ["docs/_map.mjs"],
   "ignorePatterns": ["node_modules/**", "coverage/**", "scripts/**", "src/cli/**", "npm/**"],
   "health": {
     // Kernel turn/sanitize paths are intentionally branchy; keep these just

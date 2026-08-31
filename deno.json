@@ -1,6 +1,6 @@
 {
   "name": "@theorum/core",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "keywords": [
@@ -66,6 +66,8 @@
     "check": "deno check mod.ts",
     "verify:publish": "deno run --allow-read scripts/verify-publish-bundle.ts",
     "lint": "npm run lint",
+    "lint:docs": "npm run lint:docs",
+    "hooks:install": "npm run hooks:install",
     "verify:live": "deno run --allow-net scripts/verify-live.ts"
   }
 }

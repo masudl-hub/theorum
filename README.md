@@ -339,15 +339,55 @@ as `createLocalProvider` from the main / providers entrypoints. Importing
 
 Internal files remain present in source for maintainability, but package consumers should use the public entrypoints above.
 
+### Exported API (`mod.ts`)
+
+Named exports from the root barrel (same symbols hosts get from `theorum` /
+`jsr:@theorum/core`):
+
+| Group | Symbols |
+| --- | --- |
+| Guardrails errors | `describeError`, `isAbortError`, `publicError`, `TheorumError`, `throwIfAborted`, `toErrorEvent` |
+| Quota | `QuotaSlotStatus`, `clientIp`, `quotaMessage`, `releaseSlot`, `resetSlots`, `skipQuota`, `takeSlot` |
+| Sanitize | `PROJECT_ID_MAX`, `sanitizeProjectId`, `sanitizeText`, `sanitizeTurnRequest` |
+| Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
+| Runner | `runTurn` |
+| Catalog | `CATALOG`, `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
+| Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn` |
+| Structured | `getStructured`, `registerStructured`, `executeTool` |
+| Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenRouter` |
+| Observability | `jsonlSink`, `memorySink`, `noopSink`, `resolveTraceDir`, `sinkFromDir`, `writeTrace`, `TraceRecord` |
+| Providers | `CreateProviderOptions`, `GeminiTransport`, `GeminiVault`, `LocalProviderConfig`, `createLocalProvider`, `createProvider`, `DEFAULT_LOCAL_BASE_URL` |
+
+Kernel types re-exported through this barrel follow `export type *` from
+`src/kernel/types.ts` (see `src/kernel/CONTRACT.md`).
+
 ---
 
 ## Documentation
 
-| Doc | Topic |
+Package docs are co-located with each public export (plus this README for `.`):
+
+| Doc | Export |
 | :--- | :--- |
-| [`docs/SECRETS.md`](docs/SECRETS.md) | Host-owned credentials; `createProvider` args; no env reads |
-| [`docs/COMPACTION.md`](docs/COMPACTION.md) | History / input meters, lazy BPE, `trigger`, signals |
-| [`docs/STOP.md`](docs/STOP.md) | Normalized `done.stop`, resume policy, `continueFrom` |
+| [`src/kernel/CONTRACT.md`](src/kernel/CONTRACT.md) | `theorum/kernel` — profiles, runner, compaction, stop/resume |
+| [`src/providers/CONTRACT.md`](src/providers/CONTRACT.md) | `theorum/providers` — `createProvider`, secrets boundary |
+| [`src/providers/OPENROUTER.md`](src/providers/OPENROUTER.md) | `theorum/openrouter` |
+| [`src/guardrails/CONTRACT.md`](src/guardrails/CONTRACT.md) | `theorum/guardrails` |
+| [`src/observability/CONTRACT.md`](src/observability/CONTRACT.md) | `theorum/observability` |
+| [`src/host/CONTRACT.md`](src/host/CONTRACT.md) | `theorum/host` |
+| [`src/cli/CONTRACT.md`](src/cli/CONTRACT.md) | `theorum/cli` |
+| [`src/presets/CONTRACT.md`](src/presets/CONTRACT.md) | `theorum/presets` |
+| [`src/presets/GOOGLE.md`](src/presets/GOOGLE.md) | `theorum/presets/google` |
+| [`src/streaming/CONTRACT.md`](src/streaming/CONTRACT.md) | `theorum/streaming` |
+
+Document health is enforced by `npm run lint:docs` — the **first** step of
+`npm run lint` / `deno task lint` (`docs/_map.mjs`):
+
+- Full production-file ownership (`mod.ts`, `src/**/*.ts`, `package.json`, docs-truth scripts)
+- Export parity with `package.json` and export-drift vs entry `mod.ts` files
+- Doc + **section** freshness on every code change (no Export-only gaming)
+- Behavioral sections require `contract_test` evidence (≥2 supports each)
+- Pre-commit runs `lint:docs` automatically (`prepare` installs the hook on `npm install`)
 
 ---
 
@@ -415,3 +455,40 @@ If an app needs domain rules, platform delivery policy, product copy, database a
 ## License
 
 MIT License. Copyright (c) ORCHID AI LLC.
+
+```theorum-evidence
+{
+  "sections": {
+    "Core Principles": {
+      "supports": [
+        { "kind": "source", "path": "mod.ts" },
+        { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" }
+      ]
+    },
+    "Architecture": {
+      "supports": [
+        { "kind": "source", "path": "src/kernel/engine/runner.ts" },
+        { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" }
+      ]
+    },
+    "Public Entrypoints": {
+      "supports": [
+        { "kind": "config", "path": "package.json" },
+        { "kind": "contract_test", "path": "scripts/docs-truth/graph.test.mjs" }
+      ]
+    },
+    "Documentation": {
+      "supports": [
+        { "kind": "graph", "path": "docs/_map.mjs" },
+        { "kind": "contract_test", "path": "scripts/docs-truth/graph.test.mjs" }
+      ]
+    },
+    "Package Boundary": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/create-provider.ts" },
+        { "kind": "contract_test", "path": "tests/providers/create-provider.test.ts" }
+      ]
+    }
+  }
+}
+```

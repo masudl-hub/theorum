@@ -11,7 +11,7 @@ import { TheorumError } from '../../guardrails/error.ts';
 import type {
   BuiltinToolId,
   Catalog,
-  GeminiInputKind,
+  MediaInputKind,
   ModelId,
   ModelSpec,
   Profile,
@@ -65,8 +65,8 @@ function resetTools(): void {
   Object.assign(CATALOG.tools, HARNESS_TOOLS);
 }
 
-/** Gemini Interactions inline MIME → part type (adapter wire map). */
-const GEMINI_INPUT_KINDS: Record<string, GeminiInputKind> = {
+/** MIME essence → normalized media part category (shared ingress map). */
+const MEDIA_INPUT_KINDS: Record<string, MediaInputKind> = {
   'image/png': 'image',
   'image/jpeg': 'image',
   'image/jpg': 'image',
@@ -118,8 +118,8 @@ function mimeAllowed(accept: string[], mime: string): boolean {
   });
 }
 
-function geminiKindForMime(mime: string): GeminiInputKind | undefined {
-  return GEMINI_INPUT_KINDS[mimeEssence(mime)];
+function mediaKindForMime(mime: string): MediaInputKind | undefined {
+  return MEDIA_INPUT_KINDS[mimeEssence(mime)];
 }
 
 /** Require a host-declared model spec for an allowed profile model id. */
@@ -169,9 +169,9 @@ export {
   CATALOG,
   clampThinkingLevel,
   clampThinkingLevelForApiId,
-  geminiKindForMime,
   getTool,
   listBuiltinIds,
+  mediaKindForMime,
   mimeAllowed,
   mimeEssence,
   modelEntryByApiId,

@@ -1,6 +1,6 @@
 {
   "name": "theorum",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "repository": {
@@ -51,7 +51,12 @@
     "lint:biome": "biome check .",
     "lint:ast-grep": "ast-grep scan",
     "lint:fallow": "npm run coverage && fallow audit && fallow health && fallow dupes && fallow dead-code",
-    "lint": "npm run lint:biome && npm run lint:ast-grep && npm run lint:fallow"
+    "lint:docs": "node ./scripts/docs-truth/cli.mjs lint && node ./scripts/docs-truth/export-drift.mjs && node --test ./scripts/docs-truth/graph.test.mjs",
+    "docs:inventory": "node ./scripts/docs-truth/cli.mjs inventory",
+    "docs:freshness": "node ./scripts/docs-truth/cli.mjs freshness",
+    "hooks:install": "node ./scripts/hooks/install.mjs",
+    "prepare": "node ./scripts/hooks/install.mjs",
+    "lint": "npm run lint:docs && npm run lint:biome && npm run lint:ast-grep && npm run lint:fallow"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",

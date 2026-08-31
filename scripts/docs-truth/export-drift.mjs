@@ -32,7 +32,10 @@ function parseExportNames(source) {
     for (const part of match[1].split(',')) {
       const trimmed = part.trim();
       if (!trimmed) continue;
-      const alias = trimmed.split(/\s+as\s+/i).pop()?.trim();
+      const alias = trimmed
+        .split(/\s+as\s+/i)
+        .pop()
+        ?.trim();
       if (alias) names.add(alias.replace(/^type\s+/, ''));
     }
   }

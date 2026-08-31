@@ -27,7 +27,7 @@
  * @module
  */
 
-import type { GeminiInputKind, InteractionPart, TurnHistoryMessage } from '../types.ts';
+import type { InteractionPart, MediaInputKind, TurnHistoryMessage } from '../types.ts';
 
 /** Tiktoken encoding used for history text. */
 export const HISTORY_TEXT_ENCODING = 'o200k_base';
@@ -41,7 +41,7 @@ export const HISTORY_MEDIA_TOKENS = {
   document: 258,
   audio: 32,
   video: 263,
-} as const satisfies Record<GeminiInputKind, number>;
+} as const satisfies Record<MediaInputKind, number>;
 
 type EncodeFn = (text: string) => number[];
 
@@ -52,7 +52,7 @@ function loadEncode(): Promise<EncodeFn> {
   return encodePromise;
 }
 
-function mediaTokens(kind: GeminiInputKind): number {
+function mediaTokens(kind: MediaInputKind): number {
   return HISTORY_MEDIA_TOKENS[kind];
 }
 

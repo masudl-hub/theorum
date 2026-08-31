@@ -36,6 +36,10 @@ A `Profile` binds:
 | `outputs` | Structured, image, speech, streaming, validation, `resume` |
 | `guardrails` | Quota, canary, sanitize, redact, egress |
 
+Multimodal ingress uses provider-neutral `InteractionPart` values;
+`InteractionMediaPart.type` is `MediaInputKind` (`image` | `audio` | `video` |
+`document`). MIME → kind mapping lives in `mediaKindForMime` (`catalog.ts`).
+
 `model.protocol` is `'geminiInteractions' | 'openAi'`.
 `model.provider` is `'google' | 'openrouter' | 'local'`.
 Every id in `allow` must exist in `config`. Each `ModelSpec` carries wire ids
@@ -316,7 +320,7 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
 | --- | --- |
 | Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
 | Runner | `runTurn` |
-| Catalog | `CATALOG`, `clampThinkingLevel`, `clampThinkingLevelForApiId`, `geminiKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
+| Catalog | `CATALOG`, `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
 | Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn` |
 | Structured + tools | `getStructured`, `registerStructured`, `executeTool` |
 | Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenRouter` |

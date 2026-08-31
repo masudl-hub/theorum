@@ -11,16 +11,16 @@ import { wrapUserData } from '../engine/boundary.ts';
 import { synthesizeRepairPrompt } from '../engine/repair.ts';
 import type {
   BuiltinToolId,
-  GeminiInputKind,
   ImageResponseFormat,
   InteractionPart,
+  MediaInputKind,
   ModelId,
   Profile,
   TurnBlob,
   TurnRequest,
 } from '../types.ts';
 import { assertAttachmentLimits, requireMediaLimits } from './attachments.ts';
-import { geminiKindForMime, mimeAllowed, mimeEssence } from './catalog.ts';
+import { mediaKindForMime, mimeAllowed, mimeEssence } from './catalog.ts';
 
 function listedValue(allowed: string[] | undefined, value: string | undefined): string | undefined {
   if (!value) {
@@ -131,10 +131,10 @@ function resolveImageFormat(
   };
 }
 
-function assertGeminiMime(mime: string): GeminiInputKind {
-  const kind = geminiKindForMime(mime);
+function assertMediaMime(mime: string): MediaInputKind {
+  const kind = mediaKindForMime(mime);
   if (!kind) {
-    throw new TheorumError(`MIME '${mime}' is not a Gemini input type`);
+    throw new TheorumError(`MIME '${mime}' is not a supported media input type`);
   }
   return kind;
 }
@@ -151,12 +151,12 @@ function mediaParts(
     throw new TheorumError(`Profile ${profile.id} does not accept ${channel}`);
   }
   const maxInputImages = profile.outputs.image?.maxInputImages;
-  const imageCount = blobs.filter((blob) => geminiKindForMime(blob.mimeType) === 'image').length;
+  const imageCount = blobs.filter((blob) => mediaKindForMime(blob.mimeType) === 'image').length;
   if (maxInputImages !== undefined && imageCount > maxInputImages) {
     throw new TheorumError(`At most ${maxInputImages} reference images on ${model}`);
   }
   return blobs.map((blob) => {
-    const kind = assertGeminiMime(blob.mimeType);
+    const kind = assertMediaMime(blob.mimeType);
     if (!mimeAllowed(accept, blob.mimeType)) {
       throw new TheorumError(`MIME '${blob.mimeType}' is not accepted on ${profile.id}`);
     }

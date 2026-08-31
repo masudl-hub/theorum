@@ -26,8 +26,8 @@ export type ToolId = BuiltinToolId | CustomToolId;
 /** Id of a host-registered structured output schema. */
 export type StructuredSchemaId = string;
 
-/** Interactions inline part types Gemini accepts besides text. */
-export type GeminiInputKind = 'image' | 'audio' | 'video' | 'document';
+/** Normalized multimodal part category (image, audio, video, document). */
+export type MediaInputKind = 'image' | 'audio' | 'video' | 'document';
 
 /** Host-owned profile identifier. */
 export type ProfileId = string;
@@ -403,7 +403,7 @@ export interface InteractionTextPart {
 
 /** Inline media part sent to provider adapters after MIME validation. */
 export interface InteractionMediaPart {
-  type: GeminiInputKind;
+  type: MediaInputKind;
   mimeType: string;
   data: string;
 }

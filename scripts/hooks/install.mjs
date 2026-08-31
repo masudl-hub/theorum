@@ -21,4 +21,6 @@ try {
 await mkdir(hooksDir, { recursive: true });
 await copyFile(hookSrc, hookDest);
 await chmod(hookDest, 0o755);
-console.log('Installed git pre-commit hook → npm run lint:docs (docs-truth, first step of npm run lint)');
+console.log(
+  'Installed git pre-commit hook → npm run lint:docs (docs-truth, first step of npm run lint)',
+);

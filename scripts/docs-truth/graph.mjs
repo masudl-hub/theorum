@@ -24,11 +24,7 @@ export function normalizePath(value) {
 }
 
 export function normalizeHeading(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[`*]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return String(value).toLowerCase().replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 export function pathRuleMatches(rule, file) {
@@ -57,8 +53,9 @@ export function pathRuleMatches(rule, file) {
   }
 
   if (normalizedRule.endsWith('/')) {
-    return normalizedFile === normalizedRule.slice(0, -1) ||
-      normalizedFile.startsWith(normalizedRule);
+    return (
+      normalizedFile === normalizedRule.slice(0, -1) || normalizedFile.startsWith(normalizedRule)
+    );
   }
 
   return normalizedFile === normalizedRule;
@@ -89,11 +86,7 @@ function normalizeWatch(entry) {
 }
 
 function normalizeSectionTrigger(entry) {
-  const paths = Array.isArray(entry?.paths)
-    ? entry.paths
-    : entry?.path
-      ? [entry.path]
-      : [];
+  const paths = Array.isArray(entry?.paths) ? entry.paths : entry?.path ? [entry.path] : [];
   return {
     paths: paths.map((p) => normalizePath(p)),
     sections: Array.isArray(entry?.sections) ? entry.sections.map(String) : [],
@@ -110,7 +103,7 @@ function behavioralSections(entry, graph) {
   return (entry.required_sections ?? []).filter((section) => !structural.has(section));
 }
 
-function sectionKeyTouched(changedSectionKeys, sectionName, sections) {
+function sectionKeyTouched(changedSectionKeys, sectionName, _sections) {
   const target = normalizeHeading(sectionName);
   return changedSectionKeys.some(
     (key) => normalizeHeading(key) === target || normalizeHeading(key).endsWith(`/${target}`),
@@ -153,7 +146,10 @@ export function extractSections(source) {
     const title = match[2].trim();
     while (stack.length > 0 && stack[stack.length - 1].level >= level) {
       const closed = stack.pop();
-      const closedKey = stack.concat(closed).map((entry) => entry.title).join('/');
+      const closedKey = stack
+        .concat(closed)
+        .map((entry) => entry.title)
+        .join('/');
       const existing = sections.find((section) => section.key === closedKey);
       if (existing && existing.end_line === null) {
         existing.end_line = index;
@@ -228,7 +224,7 @@ function validateExportParity(graph, packageExports, errors) {
     }
   }
   const internalEntries = Object.values(graph.entries ?? {}).filter((e) =>
-    String(e.export ?? '').startsWith('_')
+    String(e.export ?? '').startsWith('_'),
   );
   if (internalEntries.length === 0) {
     errors.push('docs graph should include _internal/docs-truth maintainer entry');
@@ -328,7 +324,10 @@ function validateEvidenceSupport({ docPath, support, graphPath, graph, errors })
     errors.push(`${docPath}: evidence support missing path`);
     return;
   }
-  if (kind === 'source' && !(graph.production_roots ?? []).some((r) => pathRuleMatches(r, supportPath))) {
+  if (
+    kind === 'source' &&
+    !(graph.production_roots ?? []).some((r) => pathRuleMatches(r, supportPath))
+  ) {
     errors.push(`${docPath}: source evidence outside production roots: ${supportPath}`);
   }
   if (
@@ -341,7 +340,8 @@ function validateEvidenceSupport({ docPath, support, graphPath, graph, errors })
     errors.push(`${docPath}: graph evidence must point at ${graphPath}`);
   }
   if (kind === 'doc') {
-    const ok = supportPath === 'README.md' ||
+    const ok =
+      supportPath === 'README.md' ||
       supportPath.startsWith('docs/') ||
       /CONTRACT\.md$/.test(supportPath) ||
       /GOOGLE\.md$/.test(supportPath) ||
@@ -406,7 +406,10 @@ export function changedSectionsForDoc(docSource, lineRanges) {
   return changed;
 }
 
-export async function collectChangedSectionsByDoc(repoRoot, { base = process.env.THEORUM_DOCS_BASE ?? 'origin/main' } = {}) {
+export async function collectChangedSectionsByDoc(
+  repoRoot,
+  { base = process.env.THEORUM_DOCS_BASE ?? 'origin/main' } = {},
+) {
   const rangesByFile = collectChangedLineRanges(repoRoot, base);
   const changedSectionsByDoc = new Map();
 
@@ -423,7 +426,10 @@ export async function collectChangedSectionsByDoc(repoRoot, { base = process.env
   return changedSectionsByDoc;
 }
 
-export function collectChangedFiles(repoRoot, { base = process.env.THEORUM_DOCS_BASE ?? 'origin/main' } = {}) {
+export function collectChangedFiles(
+  repoRoot,
+  { base = process.env.THEORUM_DOCS_BASE ?? 'origin/main' } = {},
+) {
   const run = (args) => readGit(repoRoot, args);
 
   const files = new Set();
@@ -506,13 +512,11 @@ export async function lintDocsTruth({
     if (owners.length === 0) {
       errors.push(`${file}: production file has no owning docs-truth entry`);
     } else if (owners.length > 1) {
-      errors.push(
-        `${file}: owned by multiple entries (${owners.map(([id]) => id).join(', ')})`,
-      );
+      errors.push(`${file}: owned by multiple entries (${owners.map(([id]) => id).join(', ')})`);
     }
   }
 
-  for (const [id, entry] of Object.entries(entries)) {
+  for (const [_id, entry] of Object.entries(entries)) {
     const docPath = normalizePath(entry.doc);
     if (!(await pathExists(repoRoot, docPath))) continue;
 
@@ -528,12 +532,16 @@ export async function lintDocsTruth({
 
     const sections = extractSections(docSource);
     const minLines = minDocLinesFor(graph, docPath);
-    const lineCount = docSource.split('\n').filter((line) => line.trim() && !line.startsWith('```')).length;
+    const lineCount = docSource
+      .split('\n')
+      .filter((line) => line.trim() && !line.startsWith('```')).length;
     if (minLines > 0 && lineCount < minLines) {
       errors.push(`${docPath}: ${lineCount} substantive lines; need at least ${minLines}`);
     }
 
-    const structural = new Set(graph.structural_sections ?? ['Export', 'Ownership', 'Exported API']);
+    const structural = new Set(
+      graph.structural_sections ?? ['Export', 'Ownership', 'Exported API'],
+    );
 
     for (const required of entry.required_sections ?? []) {
       if (!sectionExists(sections, required)) {
@@ -548,9 +556,13 @@ export async function lintDocsTruth({
       }
       if (!structural.has(required)) {
         const supports = evidence[required]?.supports ?? [];
-        const hasTest = supports.some((s) => s?.kind === 'contract_test' || s?.kind === 'validation');
+        const hasTest = supports.some(
+          (s) => s?.kind === 'contract_test' || s?.kind === 'validation',
+        );
         if (!hasTest) {
-          errors.push(`${docPath}: behavioral section ${required} must include contract_test evidence`);
+          errors.push(
+            `${docPath}: behavioral section ${required} must include contract_test evidence`,
+          );
         }
       }
     }
@@ -576,9 +588,13 @@ export async function lintDocsTruth({
   }
 
   const mappedDocs = new Set(
-    Object.values(entries).map((entry) => normalizePath(entry.doc)).filter(Boolean),
+    Object.values(entries)
+      .map((entry) => normalizePath(entry.doc))
+      .filter(Boolean),
   );
-  const normalizedChanged = [...new Set((changedFiles ?? collectChangedFiles(repoRoot)).map(normalizePath))]
+  const normalizedChanged = [
+    ...new Set((changedFiles ?? collectChangedFiles(repoRoot)).map(normalizePath)),
+  ]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
   const touchedDocs = new Set(normalizedChanged.filter((file) => mappedDocs.has(file)));
@@ -613,7 +629,8 @@ export async function lintDocsTruth({
         changedKeys = docSections.map((section) => section.key);
       }
 
-      const explicitTriggers = (entry.section_triggers ?? []).map(normalizeSectionTrigger)
+      const explicitTriggers = (entry.section_triggers ?? [])
+        .map(normalizeSectionTrigger)
         .filter((trigger) => sectionTriggerMatchesFile(trigger, changedFile));
 
       if (explicitTriggers.length > 0) {
@@ -630,7 +647,8 @@ export async function lintDocsTruth({
         continue;
       }
 
-      const watch = (entry.watches ?? []).map(normalizeWatch)
+      const watch = (entry.watches ?? [])
+        .map(normalizeWatch)
         .find((w) => pathRuleMatches(w.path, changedFile));
       if (watch?.sections?.length) {
         const missing = watch.sections.filter(
@@ -647,7 +665,7 @@ export async function lintDocsTruth({
       if (entryOwnsFile(entry, changedFile)) {
         const behavioral = behavioralSections(entry, graph);
         const touchedBehavioral = behavioral.filter((section) =>
-          sectionKeyTouched(changedKeys, section, docSections)
+          sectionKeyTouched(changedKeys, section, docSections),
         );
         if (behavioral.length > 0 && touchedBehavioral.length === 0) {
           errors.push(

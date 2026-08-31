@@ -49,6 +49,9 @@ Deterministic document-health lint for THEORUM. No waivers. No LLM.
 | CI | `npm run lint:docs` with `THEORUM_DOCS_BASE=origin/<base>` |
 | Pre-commit | `npm run lint:docs` (auto-installed by `prepare` on `npm install`) |
 
+Fallow: `docs/_map.mjs` is listed under `dynamicallyLoaded` in `.fallowrc.jsonc`
+(docs-truth imports it at runtime; static analysis cannot see the edge).
+
 Re-install manually: `npm run hooks:install`
 
 ```theorum-evidence

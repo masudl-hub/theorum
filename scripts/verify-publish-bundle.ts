@@ -141,12 +141,10 @@ async function assertPublicEntrypointsOmitTestHooks(): Promise<void> {
     'mod.ts',
     'src/kernel/mod.ts',
     'src/providers/mod.ts',
-    'src/providers/openrouter-mod.ts',
     'src/guardrails/mod.ts',
     'src/observability/mod.ts',
     'src/host/mod.ts',
     'src/presets/mod.ts',
-    'src/streaming/mod.ts',
   ];
   const hits: string[] = [];
   for (const rel of entrypoints) {

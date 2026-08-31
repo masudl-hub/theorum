@@ -8,8 +8,7 @@ const graph = {
     'README.md': 340,
     'docs/DOCS_TRUTH.md': 60,
     'src/kernel/CONTRACT.md': 280,
-    'src/providers/CONTRACT.md': 120,
-    'src/providers/OPENROUTER.md': 90,
+    'src/providers/CONTRACT.md': 160,
     'src/guardrails/CONTRACT.md': 110,
   },
   production_roots: [
@@ -97,16 +96,8 @@ const graph = {
       export: './kernel',
       doc: 'src/kernel/CONTRACT.md',
       owns: ['src/kernel/'],
-      watches: [
-        {
-          path: 'src/streaming/mod.ts',
-          reason: 'Streaming entry re-exports stop helpers owned by kernel',
-          sections: ['Stop and resume'],
-        },
-      ],
       validates: [
         'tests/kernel/',
-        'tests/streaming/turnStop.test.ts',
       ],
       required_sections: [
         'Export',
@@ -149,33 +140,26 @@ const graph = {
       export: './providers',
       doc: 'src/providers/CONTRACT.md',
       owns: ['src/providers/'],
-      owns_except: [
-        'src/providers/openrouter.ts',
-        'src/providers/openrouter-mod.ts',
-        'src/providers/openrouter-payload.ts',
-      ],
       watches: [
         {
           path: 'src/kernel/registry/vault.ts',
           reason: 'Gemini vault types feed createProvider',
           sections: ['Gemini transport', 'createProvider'],
         },
-        {
-          path: 'src/providers/openrouter.ts',
-          reason: 'createProvider lazy-loads OpenRouter chat transport',
-          sections: ['createProvider'],
-        },
       ],
       validates: [
         'tests/providers/create-provider.test.ts',
         'tests/providers/keys.test.ts',
         'tests/providers/local.test.ts',
+        'tests/providers/openrouter.test.ts',
+        'tests/providers/openrouter-payload.test.ts',
       ],
       required_sections: [
         'Export',
         'Ownership',
         'Package boundary',
         'createProvider',
+        'OpenRouter',
         'Google Interactions',
         'Local provider',
         'Speech roles',
@@ -188,6 +172,10 @@ const graph = {
           sections: ['createProvider', 'Package boundary'],
         },
         {
+          paths: ['src/providers/openrouter.ts', 'src/providers/openrouter-payload.ts'],
+          sections: ['OpenRouter'],
+        },
+        {
           paths: ['src/providers/local.ts'],
           sections: ['Local provider'],
         },
@@ -198,46 +186,6 @@ const graph = {
         {
           paths: ['src/providers/speech.ts'],
           sections: ['Speech roles'],
-        },
-      ],
-    },
-
-    openrouter: {
-      export: './openrouter',
-      doc: 'src/providers/OPENROUTER.md',
-      owns: [
-        'src/providers/openrouter.ts',
-        'src/providers/openrouter-mod.ts',
-        'src/providers/openrouter-payload.ts',
-      ],
-      watches: [
-        {
-          path: 'src/providers/create-provider.ts',
-          reason: 'Main door lazy-imports this adapter',
-          sections: ['Adapter behavior'],
-        },
-      ],
-      validates: [
-        'tests/providers/openrouter.test.ts',
-        'tests/providers/openrouter-payload.test.ts',
-      ],
-      required_sections: [
-        'Export',
-        'Ownership',
-        'Configuration',
-        'Model resolution',
-        'Payloads',
-        'Adapter behavior',
-        'Exported API',
-      ],
-      section_triggers: [
-        {
-          paths: ['src/providers/openrouter-payload.ts'],
-          sections: ['Configuration', 'Model resolution', 'Payloads'],
-        },
-        {
-          paths: ['src/providers/openrouter.ts'],
-          sections: ['Adapter behavior'],
         },
       ],
     },
@@ -294,11 +242,16 @@ const graph = {
         'Ownership',
         'HTTP replies',
         'Cutout mint trace',
+        'Structured JSON preview',
         'Exported API',
       ],
       section_triggers: [
         { paths: ['src/host/reply.ts'], sections: ['HTTP replies'] },
         { paths: ['src/host/mint-trace.ts'], sections: ['Cutout mint trace'] },
+        {
+          paths: ['src/host/readStreamingJsonStringField.ts'],
+          sections: ['Structured JSON preview'],
+        },
       ],
     },
 
@@ -352,33 +305,6 @@ const graph = {
         'Builtins',
         'Vocabularies',
         'Exported API',
-      ],
-    },
-
-    streaming: {
-      export: './streaming',
-      doc: 'src/streaming/CONTRACT.md',
-      owns: ['src/streaming/'],
-      watches: [
-        {
-          path: 'src/kernel/stop.ts',
-          reason: 'Streaming entry re-exports stop helpers',
-          sections: ['Stop re-exports'],
-        },
-      ],
-      validates: ['tests/streaming/'],
-      required_sections: [
-        'Export',
-        'Ownership',
-        'Streaming JSON preview',
-        'Stop re-exports',
-        'Exported API',
-      ],
-      section_triggers: [
-        {
-          paths: ['src/streaming/readStreamingJsonStringField.ts'],
-          sections: ['Streaming JSON preview'],
-        },
       ],
     },
   },

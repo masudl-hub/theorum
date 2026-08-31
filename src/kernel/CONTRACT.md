@@ -17,7 +17,6 @@ provider adapters.
 | Scope | Path |
 | --- | --- |
 | Tree | `src/kernel/` (engine, registry, `stop.ts`, `types.ts`) |
-| Re-exports | `theorum/streaming` re-exports stop helpers; source of truth stays here |
 
 ## Profiles
 
@@ -65,7 +64,7 @@ into a `ProjectedProfile` / `ResolvedGeneration` the runner and providers consum
 for one agent turn. Pipeline (see `engine/runner/mod.ts`):
 
 1. **Resolve** — `resolveTurn` picks model, thinking, tools, structured schema,
-   streaming flags, canary token.
+   streaming flags (`TurnRequest.stream` for Interactions SSE vs JSON), canary token.
 2. **Sanitize** — `sanitizeTurnRequest` strips injection/sensitive spans per
    profile guardrails (unless disabled).
 3. **Compaction (before)** — when `timing: 'before'` and threshold fires, kernel
@@ -76,7 +75,11 @@ for one agent turn. Pipeline (see `engine/runner/mod.ts`):
 5. **Provider stream** — `provider.complete` yields partial events; runner may
    gate thoughts/media per `outputs.streaming`.
 6. **Tool loop** — while under `maxSteps`, tool calls execute via `executeTool`
-   / `invokeFromUi`; results feed the next step.
+   / `invokeFromUi`; results feed the next step. Google Interactions host tools
+   continue with `previous_interaction_id` + every `function_result` from that
+   step; OpenRouter
+   appends tool-call history. Server-side `codeExecution` does not consume a
+   runner step.
 7. **Validation / repair** — structured output validators (`outputs.validation`)
    may trigger repair turns with `input.repair`.
 8. **Egress** — `guardrails.egress.enforce` may block, refuse, or retry with
@@ -103,13 +106,25 @@ different transport than the primary turn.
 | `structured` | Parsed JSON object when schema enforced |
 | `media` | Generated image/audio bytes + mime |
 | `grounding` | Search/maps grounding metadata (classic `grounding_metadata` and Interactions tool results such as `google_search_result.search_suggestions`) |
-| `evidence` | Provider-native evidence attachments |
+| `evidence` | Provider-native attachments. Google code execution sets `kind` (`code_execution_call` / `code_execution_result`) plus parsed `code` / `result` / `isError` / `id` / `callId`, and always keeps `raw`. |
 | `tokens` | `input` / `output` / `total` usage (billing; may gate `meter: 'input'`) |
 | `done` | Terminal: `stop`, `tokens`, `compaction`, final text pointer |
 | `error` | Public-safe failure (`toErrorEvent`) |
 
 `TurnHistoryMessage` preserves `role`, `content`, `parts`, `tool_calls`,
 `tool_call_id`, and opaque `metadata` across turns.
+
+Google Interactions code execution (`codeExecution` builtin) is a server-side
+tool: THEORUM does not run Python. Hosts receive the sandbox timeline as
+`evidence` events (streamed SSE deltas, or a batched replay of `steps[]` when
+`TurnRequest.stream === false`). Generated plots/annotated images arrive as
+`media`. `maxSteps` does not bound Google's internal code loop; it only bounds
+host function-calling round trips. The sandbox runtime cap (~30s per execution)
+is Google's, not a THEORUM setting.
+
+`stream` on `TurnRequest` / `ProviderCompleteRequest` defaults to SSE (`true`).
+`false` POSTs without `alt=sse` and folds the JSON `interaction` into the same
+event types.
 
 ## Dynamic tools
 
@@ -350,6 +365,8 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
     "Turn lifecycle": {
       "supports": [
         { "kind": "source", "path": "src/kernel/engine/runner/mod.ts" },
+        { "kind": "source", "path": "src/kernel/engine/runner/steps.ts" },
+        { "kind": "source", "path": "src/kernel/engine/runner/state.ts" },
         { "kind": "source", "path": "src/kernel/registry/resolve.ts" },
         { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" }
       ]
@@ -357,7 +374,9 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
     "Stream events": {
       "supports": [
         { "kind": "source", "path": "src/kernel/types.ts" },
-        { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" }
+        { "kind": "source", "path": "src/kernel/engine/delta.ts" },
+        { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" },
+        { "kind": "contract_test", "path": "tests/kernel/delta.test.ts" }
       ]
     },
     "Dynamic tools": {
@@ -383,7 +402,7 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
     "Stop and resume": {
       "supports": [
         { "kind": "source", "path": "src/kernel/stop.ts" },
-        { "kind": "contract_test", "path": "tests/streaming/turnStop.test.ts" }
+        { "kind": "contract_test", "path": "tests/kernel/turnStop.test.ts" }
       ]
     },
     "Validation": {

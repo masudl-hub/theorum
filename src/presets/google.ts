@@ -32,6 +32,11 @@ const GOOGLE_BUILTIN_TOOLS: Record<string, ToolCatalogEntry> = {
     ui: true,
     interactionsType: 'url_context',
   },
+  codeExecution: {
+    kind: 'builtin',
+    ui: true,
+    interactionsType: 'code_execution',
+  },
 };
 
 /** Common Gemini image input MIME allowlist. */

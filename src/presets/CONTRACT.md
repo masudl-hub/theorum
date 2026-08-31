@@ -22,7 +22,7 @@ kernel.
 
 | Concern | Kernel | Preset |
 | --- | --- | --- |
-| Tool ids | `string` allowlist | Registers `googleSearch`, `googleMaps`, `urlContext` |
+| Tool ids | `string` allowlist | Registers `googleSearch`, `googleMaps`, `urlContext`, `codeExecution` |
 | Image/speech pins | Open `string` fields | Typed constants (`GOOGLE_IMAGE_SIZES`, voices, …) |
 | Registration | `registerTools` API | `registerGooglePreset()` at host startup |
 
@@ -36,7 +36,7 @@ own tools and vocabularies directly via `registerTools`.
 
 | Use preset | Skip preset |
 | --- | --- |
-| Google Gemini hosts wanting typed pins + search/maps/url builtins | Custom tool catalog entirely host-owned |
+| Google Gemini hosts wanting typed pins + search/maps/url/code-execution builtins | Custom tool catalog entirely host-owned |
 | Quick start matching Google Interactions wire types | Non-Google providers only |
 
 ## Exported API
@@ -68,6 +68,7 @@ This barrel re-exports the Google pack:
     "Role in the package": {
       "supports": [
         { "kind": "source", "path": "src/presets/mod.ts" },
+        { "kind": "source", "path": "src/presets/google.ts" },
         { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" }
       ]
     },

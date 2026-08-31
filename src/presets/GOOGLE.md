@@ -25,8 +25,10 @@ for image and speech-adjacent profile fields.
 | `googleSearch` | Interactions `google_search`; OpenRouter plugin `web` |
 | `googleMaps` | Interactions `google_maps`; conflicts with `googleSearch` and `urlContext` |
 | `urlContext` | Interactions `url_context` |
+| `codeExecution` | Interactions `code_execution` (server-side Python sandbox) |
 
 All are `kind: 'builtin'` with `ui: true`. Profiles must allowlist ids they use;
+`codeExecution` combines with `googleSearch` on Gemini 3+ and with host function tools when `dynamicTools` are wired on Interactions. THEORUM also sends structured `responseFormat` on the same request when both are configured; Google may still reject that pairing at the API. List `codeExecution` on `ModelSpec.keyBuiltins` to keep it on the profile's free vault slot; otherwise an enabled builtin that is not in `keyBuiltins` selects `paid`. Google's sandbox runtime (~30s) is not a THEORUM knob.
 `conflictsWith` drops maps when search/urlContext are also requested.
 
 ## Vocabularies

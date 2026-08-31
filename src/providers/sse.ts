@@ -1,6 +1,7 @@
 import { exposeForTests } from './expose-for-tests.ts';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse';
+const INTERACTIONS_JSON_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 
 const DATA_PREFIX = 'data: ';
 const EVENT_PREFIX = 'event: ';
@@ -58,6 +59,6 @@ function takeSsePayloads(
   return { rest, payloads, pendingEvent: sseEvent };
 }
 
-export { INTERACTIONS_URL, takeSsePayloads };
+export { INTERACTIONS_JSON_URL, INTERACTIONS_URL, takeSsePayloads };
 
 exposeForTests('sse', { asObject, dataRecord, takeSsePayloads });

@@ -525,6 +525,12 @@ export interface TurnRequest {
   previousInteractionId?: string;
   /** Optional Interactions storage override. Omit to let provider/project policy decide. */
   store?: boolean;
+  /**
+   * Google Interactions transport mode. Default `true` (SSE).
+   * `false` POSTs a non-SSE interaction and THEORUM yields the same `TurnEvent`
+   * types from the completed `steps[]` array.
+   */
+  stream?: boolean;
   select?: string;
   thinking?: boolean;
   /** Host-provided dynamic system prompt combined with profile persona */
@@ -579,6 +585,8 @@ export interface ProviderGenerationConfig {
   openRouterId?: string;
   previousInteractionId?: string;
   store?: boolean;
+  /** Google Interactions: omit or `true` for SSE; `false` for a single JSON interaction. */
+  stream?: boolean;
   thinking: ThinkingLevel;
   summaries: 'auto' | 'none';
   maxOutputTokens: number;
@@ -593,6 +601,11 @@ export interface ResolvedGeneration extends ProviderGenerationConfig {
   dynamicToolLoader?: DynamicToolLoader;
   sessionPermissions?: string[];
   history?: TurnHistoryMessage[];
+  /**
+   * Interactions-only: when set, sent as the request `input` array instead of
+   * history + user parts (e.g. a lone `function_result` continuation step).
+   */
+  interactionOnlyInput?: Record<string, unknown>[];
   maxSteps: number;
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
@@ -622,6 +635,8 @@ export interface TurnTokens {
   output: number;
   thinking?: number;
   toolUse?: number;
+  /** Google code-execution / tool intermediate tokens when the API reports them. */
+  intermediate?: number;
   total: number;
 }
 
@@ -640,13 +655,27 @@ export interface GroundingEvent {
   sources: GroundingSource[];
 }
 
-/** Provider evidence such as OpenRouter citations or annotations. */
+/** Provider evidence such as OpenRouter citations or Google server-side tool steps. */
 export interface ProviderEvidenceEvent {
   provider: 'openrouter' | 'google' | string;
   raw?: Record<string, unknown>;
   citations?: string[];
   annotations?: unknown[];
   sources?: GroundingSource[];
+  /** Interactions server-side step type when this event is a Google builtin payload. */
+  kind?: 'code_execution_call' | 'code_execution_result' | string;
+  /** Generated Python (or other) source from `code_execution_call.arguments.code`. */
+  code?: string;
+  /** Language of `code` when the API supplies it (typically `python`). */
+  language?: string;
+  /** Stdout / sandbox output from `code_execution_result.result`. */
+  result?: string;
+  /** `true` when the sandbox reported an execution error. */
+  isError?: boolean;
+  /** Step id (`code_execution_call.id`). */
+  id?: string;
+  /** Links a result to its call (`code_execution_result.call_id`). */
+  callId?: string;
 }
 
 /** Compaction signal emitted in the `done` event when `timing: 'after'`. */
@@ -695,6 +724,11 @@ export interface ProviderCompleteRequest extends ProviderGenerationConfig {
   system: string;
   input: InteractionPart[];
   history?: TurnHistoryMessage[];
+  /**
+   * Interactions-only: when set, sent as the request `input` array instead of
+   * history + user parts (e.g. a lone `function_result` continuation step).
+   */
+  interactionOnlyInput?: Record<string, unknown>[];
   dynamicTools?: DynamicToolDeclaration[];
   dynamicToolLoader?: DynamicToolLoader;
   structured: StructuredSchemaId | null;

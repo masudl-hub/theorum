@@ -315,12 +315,8 @@ loads **lazily on the first `complete` call** for `openAi` + `openrouter` chat �
 not when importing THEORUM, and not for Google or local providers. The adapter
 still emits THEORUM `TurnEvent` values and preserves raw provider evidence for
 citations/provenance where the normalized SDK stream does not expose enough detail.
-
-Advanced OpenRouter exports live under `theorum/openrouter` (`createOpenRouterProvider`,
-`toOpenRouterPayload`, …). Prefer `createProvider` for turns unless the host needs
-to wire the OpenRouter adapter directly. Direct local construction is also available
-as `createLocalProvider` from the main / providers entrypoints. Importing
-`theorum/openrouter` loads the Vercel SDK immediately.
+Use `createProvider` for all OpenRouter turns; the adapter and payload helpers
+stay internal to the providers package.
 
 ---
 
@@ -331,13 +327,12 @@ as `createLocalProvider` from the main / providers entrypoints. Importing
 | `jsr:@theorum/core` / `theorum` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
 | `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile/turn types, tool catalog, `requireModelSpec`, thinking clamps over host model maps. |
 | `jsr:@theorum/core/providers` / `theorum/providers` | `createProvider` + Gemini vault types. |
-| `jsr:@theorum/core/openrouter` / `theorum/openrouter` | Direct OpenRouter provider adapter and payload helpers (advanced). |
 | `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
 | `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
 | `jsr:@theorum/core/host` / `theorum/host` | Optional Deno HTTP helpers (`json`, status mapping, cutout mint flush). |
 | `jsr:@theorum/core/cli` / `theorum/cli` | Profile inspection and stress-test CLI (`theorum` binary on npm). |
 | `jsr:@theorum/core/presets` / `theorum/presets` | Optional convenience packs (`registerGooglePreset`, …). |
-| `jsr:@theorum/core/presets/google` / `theorum/presets/google` | Google builtins (search/maps/urlContext) + Interactions/OpenRouter wire metadata. |
+| `jsr:@theorum/core/presets/google` / `theorum/presets/google` | Google builtins (search/maps/urlContext/codeExecution) + Interactions/OpenRouter wire metadata. |
 
 Internal files remain present in source for maintainability, but package consumers should use the public entrypoints above.
 
@@ -373,14 +368,12 @@ Package docs are co-located with each public export (plus this README for `.`):
 | :--- | :--- |
 | [`src/kernel/CONTRACT.md`](src/kernel/CONTRACT.md) | `theorum/kernel` — profiles, runner, compaction, stop/resume |
 | [`src/providers/CONTRACT.md`](src/providers/CONTRACT.md) | `theorum/providers` — `createProvider`, secrets boundary |
-| [`src/providers/OPENROUTER.md`](src/providers/OPENROUTER.md) | `theorum/openrouter` |
 | [`src/guardrails/CONTRACT.md`](src/guardrails/CONTRACT.md) | `theorum/guardrails` |
 | [`src/observability/CONTRACT.md`](src/observability/CONTRACT.md) | `theorum/observability` |
 | [`src/host/CONTRACT.md`](src/host/CONTRACT.md) | `theorum/host` |
 | [`src/cli/CONTRACT.md`](src/cli/CONTRACT.md) | `theorum/cli` |
 | [`src/presets/CONTRACT.md`](src/presets/CONTRACT.md) | `theorum/presets` |
 | [`src/presets/GOOGLE.md`](src/presets/GOOGLE.md) | `theorum/presets/google` |
-| [`src/streaming/CONTRACT.md`](src/streaming/CONTRACT.md) | `theorum/streaming` |
 
 Document health is enforced by `npm run lint:docs` — the **first** step of
 `npm run lint` / `deno task lint` (`docs/_map.mjs`):

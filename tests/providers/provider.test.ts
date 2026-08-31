@@ -7,7 +7,7 @@ import type { ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.
 import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
 import type { GeminiVault } from '../../src/providers/keys.ts';
 import { createInteractionsProvider } from '../../src/providers/provider.ts';
-import { INTERACTIONS_URL } from '../../src/providers/sse.ts';
+import { INTERACTIONS_JSON_URL, INTERACTIONS_URL } from '../../src/providers/sse.ts';
 import { testInternals } from '../fixtures/testInternals.js';
 
 const _internals = testInternals('provider');
@@ -227,6 +227,53 @@ Deno.test('pinned profile wires 3.5 minimal through theorum', () => {
   const config = body[camelToSnake('generationConfig')] as Record<string, unknown>;
   assertEquals(body.model, 'gemini-3.5-flash-lite');
   assertEquals(config[camelToSnake('thinkingLevel')], 'low');
+});
+
+Deno.test('provider POSTs Interactions JSON when stream is false', async () => {
+  let href = '';
+  let postedStream: unknown;
+  const provider = createInteractionsProvider({
+    vault,
+    wait: noWait,
+    fetch: (url, init) => {
+      href = String(url);
+      postedStream = JSON.parse(String(init?.body ?? '{}')).stream;
+      return Promise.resolve(
+        Response.json({
+          id: 'v1_batch',
+          status: 'completed',
+          steps: [
+            {
+              type: 'code_execution_call',
+              id: 'code_call_1',
+              arguments: { code: 'print(1)' },
+            },
+            {
+              type: 'code_execution_result',
+              call_id: 'code_call_1',
+              result: '1\n',
+            },
+            {
+              type: 'model_output',
+              content: [{ type: 'text', text: 'One.' }],
+            },
+          ],
+        }),
+      );
+    },
+  });
+  const events = await collect(provider.complete({ ...fromChatProfile(), stream: false }));
+  assertEquals(href, INTERACTIONS_JSON_URL);
+  assertEquals(postedStream, false);
+  assertEquals(events.filter((e) => e.type === 'evidence').length, 2);
+  assertEquals(
+    events.some((e) => e.type === 'text' && e.text === 'One.'),
+    true,
+  );
+  assertEquals(
+    events.some((e) => e.type === 'done'),
+    true,
+  );
 });
 
 Deno.test('provider POSTs Interactions SSE on the resolved free key', async () => {
@@ -645,66 +692,68 @@ Deno.test('_internals.isDeltaEvent matches delta kinds only', () => {
 Deno.test('_internals.isCompleteEvent matches interaction completion kinds', () => {
   assertEquals(_internals.isCompleteEvent('interaction.complete'), true);
   assertEquals(_internals.isCompleteEvent('interaction.completed'), true);
-  assertEquals(_internals.isCompleteEvent('interaction.anything'), true);
+  assertEquals(_internals.isCompleteEvent('interaction.created'), false);
+  assertEquals(_internals.isCompleteEvent('interaction.status_update'), false);
   assertEquals(_internals.isCompleteEvent('content.delta'), false);
 });
 
-Deno.test('_internals.foldDeltaPayload accumulates text into the accumulator', () => {
-  const acc = { text: '' };
-  const events = _internals.foldDeltaPayload({ delta: { type: 'text', text: 'hello' } }, acc);
-  assertEquals(acc.text, 'hello');
+Deno.test('_internals.foldDeltaPayload accumulates text into the fold', () => {
+  const fold = _internals.newStreamFold();
+  const events = _internals.foldDeltaPayload({ delta: { type: 'text', text: 'hello' } }, fold);
+  assertEquals(fold.text, 'hello');
   assertEquals(events, [{ type: 'text', text: 'hello' }]);
 
-  const more = _internals.foldDeltaPayload({ delta: { type: 'text', text: ' world' } }, acc);
-  assertEquals(acc.text, 'hello world');
+  const more = _internals.foldDeltaPayload({ delta: { type: 'text', text: ' world' } }, fold);
+  assertEquals(fold.text, 'hello world');
   assertEquals(more, [{ type: 'text', text: ' world' }]);
 });
 
 Deno.test('_internals.foldPayload folds a delta event and accumulates text', () => {
-  const acc = { text: '' };
+  const fold = _internals.newStreamFold();
   const events = _internals.foldPayload(
     { event_type: 'content.delta', delta: { type: 'text', text: 'hi' } },
-    acc,
+    fold,
   );
-  assertEquals(acc.text, 'hi');
+  assertEquals(fold.text, 'hi');
   assertEquals(events, [{ type: 'text', text: 'hi' }]);
 });
 
 Deno.test('_internals.foldPayload folds a complete event', () => {
-  const acc = { text: 'already streamed' };
+  const fold = _internals.newStreamFold();
+  fold.text = 'already streamed';
   const events = _internals.foldPayload(
     { event_type: 'interaction.complete', interaction: {} },
-    acc,
+    fold,
   );
   assertEquals(Array.isArray(events), true);
 });
 
 Deno.test('_internals.foldPayload extracts direct usage metadata not covered by delta/complete events', () => {
-  const acc = { text: '' };
+  const fold = _internals.newStreamFold();
   const events = _internals.foldPayload(
     {
       event_type: 'unknown.kind',
       usage_metadata: { prompt_token_count: 3, candidates_token_count: 7 },
     },
-    acc,
+    fold,
   );
   const tokens = events.find((e: { type: string }) => e.type === 'tokens');
   assertEquals(tokens !== undefined, true);
 });
 
 Deno.test('_internals.foldPayload extracts direct grounding metadata not covered by delta/complete events', () => {
-  const acc = { text: '' };
+  const fold = _internals.newStreamFold();
   const groundingMetadata = { groundingChunks: [{ web: { uri: 'https://example.com' } }] };
   const events = _internals.foldPayload(
     { event_type: 'unknown.kind', grounding_metadata: groundingMetadata },
-    acc,
+    fold,
   );
   const grounding = events.find((e: { type: string }) => e.type === 'grounding');
   assertEquals(grounding !== undefined, true);
 });
 
 Deno.test('_internals.foldPayload emits grounding + evidence for Interactions google_search_result', () => {
-  const acc = { text: '' };
+  const fold = _internals.newStreamFold();
   const chipHtml = '<div class="chip">photosynthesis</div>';
   const events = _internals.foldPayload(
     {
@@ -714,7 +763,7 @@ Deno.test('_internals.foldPayload emits grounding + evidence for Interactions go
         result: [{ search_suggestions: chipHtml }],
       },
     },
-    acc,
+    fold,
   );
   const grounding = events.find((e: { type: string }) => e.type === 'grounding') as {
     grounding?: { searchHtml?: string };
@@ -725,6 +774,270 @@ Deno.test('_internals.foldPayload emits grounding + evidence for Interactions go
   assertEquals(grounding?.grounding?.searchHtml, chipHtml);
   assertEquals(evidence?.evidence?.provider, 'google');
   assertEquals(evidence?.evidence?.raw?.type, 'google_search_result');
+});
+
+Deno.test('_internals.foldPayload emits evidence for code_execution_call deltas', () => {
+  const fold = _internals.newStreamFold();
+  const events = _internals.foldPayload(
+    {
+      event_type: 'step.delta',
+      delta: {
+        type: 'code_execution_call',
+        arguments: { code: 'print(1)' },
+      },
+    },
+    fold,
+  );
+  const evidence = events.find((e: { type: string }) => e.type === 'evidence') as {
+    evidence?: { raw?: { type?: string }; kind?: string; code?: string };
+  };
+  assertEquals(evidence?.evidence?.raw?.type, 'code_execution_call');
+  assertEquals(evidence?.evidence?.kind, 'code_execution_call');
+  assertEquals(evidence?.evidence?.code, 'print(1)');
+});
+
+Deno.test('_internals.foldPayload streams code exec then skips duplicate steps on complete', () => {
+  const fold = _internals.newStreamFold();
+  _internals.foldPayload(
+    {
+      event_type: 'step.start',
+      index: 0,
+      step: {
+        type: 'code_execution_call',
+        id: 'code_call_1',
+        arguments: { code: 'print(2)' },
+      },
+    },
+    fold,
+  );
+  _internals.foldPayload(
+    {
+      event_type: 'step.delta',
+      index: 1,
+      delta: {
+        type: 'code_execution_result',
+        call_id: 'code_call_1',
+        result: '2\n',
+      },
+    },
+    fold,
+  );
+  const completed = _internals.foldPayload(
+    {
+      event_type: 'interaction.completed',
+      interaction: {
+        id: 'v1_code',
+        status: 'completed',
+        steps: [
+          {
+            type: 'code_execution_call',
+            id: 'code_call_1',
+            arguments: { code: 'print(2)' },
+          },
+          {
+            type: 'code_execution_result',
+            call_id: 'code_call_1',
+            result: '2\n',
+          },
+          {
+            type: 'model_output',
+            content: [{ type: 'text', text: 'done' }],
+          },
+        ],
+      },
+    },
+    fold,
+  );
+  const evidence = completed.filter((e: { type: string }) => e.type === 'evidence');
+  assertEquals(evidence.length, 0);
+  assertEquals(
+    completed.some((e: { type: string; text?: string }) => e.type === 'text' && e.text === 'done'),
+    true,
+  );
+});
+
+Deno.test('_internals.foldPayload replays batched steps when nothing streamed', () => {
+  const fold = _internals.newStreamFold();
+  const events = _internals.foldPayload(
+    {
+      event_type: 'interaction.completed',
+      interaction: {
+        id: 'v1_batch',
+        status: 'completed',
+        steps: [
+          {
+            type: 'code_execution_call',
+            id: 'code_call_9',
+            arguments: { code: 'print(3)' },
+          },
+          {
+            type: 'code_execution_result',
+            call_id: 'code_call_9',
+            result: '3\n',
+          },
+          {
+            type: 'model_output',
+            content: [
+              { type: 'text', text: 'Three.' },
+              { type: 'image', mime_type: 'image/png', data: 'img' },
+            ],
+          },
+        ],
+      },
+    },
+    fold,
+  );
+  assertEquals(events.filter((e: { type: string }) => e.type === 'evidence').length, 2);
+  assertEquals(
+    events.some((e: { type: string }) => e.type === 'media'),
+    true,
+  );
+  assertEquals(
+    events.some((e: { type: string; text?: string }) => e.type === 'text' && e.text === 'Three.'),
+    true,
+  );
+});
+
+Deno.test('_internals.foldPayload emits code exec on step.stop when no delta arrived', () => {
+  const fold = _internals.newStreamFold();
+  const events = _internals.foldPayload(
+    {
+      event_type: 'step.stop',
+      index: 0,
+      step: {
+        type: 'code_execution_result',
+        call_id: 'code_call_stop',
+        result: 'ok\n',
+        is_error: false,
+      },
+    },
+    fold,
+  );
+  const evidence = events.find((e: { type: string }) => e.type === 'evidence') as {
+    evidence?: { kind?: string; result?: string; isError?: boolean };
+  };
+  assertEquals(evidence?.evidence?.kind, 'code_execution_result');
+  assertEquals(evidence?.evidence?.result, 'ok\n');
+  assertEquals(evidence?.evidence?.isError, false);
+});
+
+Deno.test('_internals.foldPayload emits tools on interaction.status_update requires_action', () => {
+  const fold = _internals.newStreamFold();
+  const events = _internals.foldPayload(
+    {
+      event_type: 'interaction.status_update',
+      interaction: {
+        id: 'v1_status',
+        status: 'requires_action',
+        steps: [
+          {
+            type: 'function_call',
+            id: 'call_status',
+            name: 'lookup_order',
+            arguments: { orderId: '7' },
+          },
+        ],
+      },
+    },
+    fold,
+  );
+  const tool = events.find((e: { type: string }) => e.type === 'tool') as {
+    tool?: { name?: string; id?: string };
+  };
+  assertEquals(tool?.tool?.name, 'lookup_order');
+  assertEquals(tool?.tool?.id, 'call_status');
+  assertEquals(
+    events.some((e: { type: string }) => e.type === 'done'),
+    false,
+  );
+});
+
+Deno.test('_internals.foldPayload emits tool events when interaction requires_action', () => {
+  const fold = _internals.newStreamFold();
+  const events = _internals.foldPayload(
+    {
+      event_type: 'interaction.completed',
+      interaction: {
+        id: 'v1_tool',
+        status: 'requires_action',
+        steps: [
+          {
+            type: 'function_call',
+            id: 'call_abc',
+            name: 'lookup_order',
+            arguments: { orderId: '42' },
+          },
+        ],
+      },
+    },
+    fold,
+  );
+  const tool = events.find((e: { type: string }) => e.type === 'tool') as {
+    tool?: { name?: string; arguments?: Record<string, unknown>; id?: string };
+  };
+  assertEquals(tool?.tool?.name, 'lookup_order');
+  assertEquals(tool?.tool?.id, 'call_abc');
+  assertEquals(tool?.tool?.arguments, { orderId: '42' });
+});
+
+Deno.test('_internals.foldStepStart ignores empty steps and seeds function_call', () => {
+  const fold = _internals.newStreamFold();
+  assertEquals(_internals.foldStepStart({ event_type: 'step.start' }, fold), []);
+  assertEquals(
+    _internals.foldStepStart(
+      { event_type: 'step.start', index: 0, step: { type: 'thought' } },
+      fold,
+    ),
+    [],
+  );
+  assertEquals(
+    _internals.foldStepStart(
+      {
+        event_type: 'step.start',
+        index: 1,
+        step: { type: 'function_call', id: 'call_1', name: 'lookup_order' },
+      },
+      fold,
+    ),
+    [],
+  );
+  assertEquals(
+    _internals.foldStepStart(
+      { event_type: 'step.start', index: 2, step: { type: 'code_execution_call' } },
+      fold,
+    ),
+    [],
+  );
+  const started = _internals.foldStepStart(
+    {
+      event_type: 'step.start',
+      index: 3,
+      step: { type: 'code_execution_call', arguments: 'print(1)' },
+    },
+    fold,
+  );
+  assertEquals(started[0]?.evidence?.code, 'print(1)');
+});
+
+Deno.test('_internals.foldDeltaPayload accumulates function arguments and media', () => {
+  const fold = _internals.newStreamFold();
+  assertEquals(_internals.foldDeltaPayload({ event_type: 'step.delta' }, fold), []);
+  _internals.foldDeltaPayload(
+    { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '{"a":' } },
+    fold,
+  );
+  _internals.foldDeltaPayload(
+    { event_type: 'step.delta', index: 0, delta: { type: 'arguments', arguments: '1}' } },
+    fold,
+  );
+  const media = _internals.foldDeltaPayload(
+    {
+      event_type: 'step.delta',
+      delta: { type: 'image', mime_type: 'image/png', data: 'img' },
+    },
+    fold,
+  );
+  assertEquals(media[0]?.type, 'media');
 });
 
 Deno.test('_internals.withTap wraps the transport fetch without mutating other fields', () => {

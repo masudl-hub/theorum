@@ -14,12 +14,13 @@ environment variables and does not ship `.env` files.
 
 ## Ownership
 
-Owns every module under `src/providers/` **except** OpenRouter-specific modules
-in [`OPENROUTER.md`](./OPENROUTER.md).
+Owns every module under `src/providers/`.
 
-| Module | Role (internal) |
+| Module | Role |
 | --- | --- |
 | `create-provider.ts` | Public factory + lazy OpenRouter chat wrapper |
+| `openrouter.ts` | OpenRouter chat adapter (internal; lazy-loaded) |
+| `openrouter-payload.ts` | OpenRouter payload + model resolution (internal) |
 | `provider.ts` | Google Interactions streaming adapter |
 | `interactions.ts` | Interactions payload / step wiring |
 | `speech.ts` | OpenRouter `/audio/speech` + Interactions audio paths |
@@ -65,6 +66,39 @@ Errors:
 OpenRouter Vercel AI SDK loads **only** on first `complete` for `openAi` +
 `openrouter` chat. Google and local never import it.
 
+## OpenRouter
+
+Internal adapter behind `createProvider` for `openAi` + `openrouter` chat. Hosts
+use `createProvider(profile, { openRouter })` — there is no separate public
+OpenRouter entrypoint.
+
+`OpenRouterConfig` (via `CreateProviderOptions.openRouter`):
+
+| Field | Role |
+| --- | --- |
+| `apiKey` | Bearer credential |
+| `baseUrl` | Optional API base override |
+| `siteUrl` / `siteName` | Optional HTTP-Referer / X-Title style metadata |
+| `fetch` | Optional custom fetch |
+| `modelMap` | Optional map from THEORUM model id → OpenRouter model string |
+| `voice` | Optional fallback when `outputs.speech.voice` omitted |
+
+`resolveOpenRouterModel(modelId, customMap?, wire?)` precedence:
+
+| Step | Source |
+| --- | --- |
+| 1 | `customMap[modelId]` |
+| 2 | `wire.openRouterId` |
+| 3 | `wire.apiId` when it contains `/` |
+| 4 | `google/${wire.apiId}` when `apiId` set |
+| 5 | Pass-through model id string |
+
+`toOpenRouterPayload` maps `ProviderCompleteRequest` → OpenAI chat-completions
+body (messages, tools, structured output, thinking / `reasoning.effort`).
+
+`createOpenRouterProvider(config)` (internal) streams normalized `TurnEvent`s;
+terminal `done.stop` via `turnStopFromOpenRouter`.
+
 ## Google Interactions
 
 `createInteractionsProvider(geminiTransport)` streams normalized `TurnEvent`s.
@@ -75,7 +109,9 @@ OpenRouter Vercel AI SDK loads **only** on first `complete` for `openAi` +
 | Multimodal | `image` / `audio` / `video` / `document` parts |
 | Structured | `responseFormat` JSON schema when enforced |
 | Output modes | Image / speech / structured are mutually exclusive |
-| Tools | Catalog `interactionsType` + plugins |
+| Tools | Catalog `interactionsType` builtins + host `dynamicTools` (`type: function`) |
+| Code execution | Builtin `codeExecution` → `{ type: "code_execution" }`. Streamed `step.start` / `step.delta` / `step.stop`, `interaction.status_update` (`requires_action` for host tools), and batched `interaction.steps` become `evidence` (`kind`, `code`, `result`, `isError`, `raw`) plus `media` for sandbox images. Search/maps/`url_context` steps in `steps[]` are also `evidence`. Structured `responseFormat` is still attached when both are requested. |
+| Stream vs batch | Default `stream: true` (`?alt=sse`). `TurnRequest.stream: false` POSTs JSON and yields the same `TurnEvent` types from `steps[]`. |
 | Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / maps tool payloads (`search_suggestions` chips, annotations). Emits `grounding` (normalized) plus `evidence` with the raw tool payload so hosts can decide what to surface. |
 | Stop | `turnStopFromInteractionStatus` on terminal status |
 
@@ -166,11 +202,20 @@ From `src/providers/mod.ts` only:
         { "kind": "contract_test", "path": "tests/providers/create-provider.test.ts" }
       ]
     },
+    "OpenRouter": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/openrouter.ts" },
+        { "kind": "source", "path": "src/providers/openrouter-payload.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter-payload.test.ts" }
+      ]
+    },
     "Google Interactions": {
       "supports": [
         { "kind": "source", "path": "src/providers/provider.ts" },
         { "kind": "source", "path": "src/providers/interactions.ts" },
-        { "kind": "contract_test", "path": "tests/providers/interactions.test.ts" }
+        { "kind": "contract_test", "path": "tests/providers/interactions.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/provider.test.ts" }
       ]
     },
     "Local provider": {

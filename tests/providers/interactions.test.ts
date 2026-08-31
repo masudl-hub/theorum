@@ -335,6 +335,92 @@ Deno.test('applyOptionalRequestFields maps builtins to their Interactions wire t
   assertEquals(camel.tools, [{ type: 'google_search' }, { type: 'url_context' }]);
 });
 
+Deno.test('applyOptionalRequestFields merges codeExecution builtin with dynamic function tools', () => {
+  const req = baseReq({
+    builtins: ['codeExecution', 'googleSearch'],
+    dynamicTools: [
+      {
+        name: 'lookup_order',
+        description: 'Fetch order state',
+        parameters: {
+          type: 'object',
+          properties: { orderId: { type: 'string' } },
+          required: ['orderId'],
+        },
+      },
+    ],
+  });
+  const camel: Record<string, unknown> = {};
+  applyOptionalRequestFields(req, camel);
+  assertEquals(camel.tools, [
+    { type: 'code_execution' },
+    { type: 'google_search' },
+    {
+      type: 'function',
+      name: 'lookup_order',
+      description: 'Fetch order state',
+      parameters: {
+        type: 'object',
+        properties: { orderId: { type: 'string' } },
+        required: ['orderId'],
+      },
+    },
+  ]);
+});
+
+Deno.test('toGoogleValue preserves JSON Schema property names inside parameters', () => {
+  const result = toGoogleValue({
+    tools: [
+      {
+        type: 'function',
+        name: 'lookup_order',
+        parameters: {
+          type: 'object',
+          properties: { orderId: { type: 'string' } },
+          required: ['orderId'],
+        },
+      },
+    ],
+  }) as Record<string, unknown>;
+  const tools = result.tools as Record<string, unknown>[];
+  const params = tools[0]?.parameters as Record<string, unknown>;
+  assertEquals(params.properties, { orderId: { type: 'string' } });
+  assertEquals(params.required, ['orderId']);
+});
+
+Deno.test('inputStepsFromRequest uses interactionOnlyInput when provided', () => {
+  const req = baseReq({
+    history: [{ role: 'user', content: 'old' }],
+    input: [{ type: 'text', text: 'ignored' }],
+    interactionOnlyInput: [
+      {
+        type: 'function_result',
+        name: 'lookup_order',
+        call_id: 'call_1',
+        result: [{ type: 'text', text: 'ok' }],
+      },
+    ],
+  });
+  const steps = inputStepsFromRequest(req);
+  assertEquals(steps.length, 1);
+  assertEquals(steps[0]?.type, 'function_result');
+});
+
+Deno.test('historyStep maps tool role messages to function_result steps', () => {
+  const step = historyStep({
+    role: 'tool',
+    name: 'lookup_order',
+    tool_call_id: 'call_1',
+    content: 'done',
+  });
+  assertEquals(step, {
+    type: 'function_result',
+    name: 'lookup_order',
+    call_id: 'call_1',
+    result: [{ type: 'text', text: 'done' }],
+  });
+});
+
 Deno.test('applyOptionalRequestFields throws for a builtin with no Interactions wire type', () => {
   const req = baseReq({ builtins: ['notRegisteredTool'] });
   assertThrows(() => applyOptionalRequestFields(req, {}), TheorumError);
@@ -388,4 +474,20 @@ Deno.test('toInteractionsBody builds a full snake_case wire body', () => {
   assertEquals(Array.isArray(body.response_format), true);
   const input = body.input as Array<{ type: string; content: unknown[] }>;
   assertEquals(input[0]?.type, 'user_input');
+});
+
+Deno.test('toInteractionsBody sets stream false when requested', () => {
+  const body = toInteractionsBody(baseReq({ stream: false }));
+  assertEquals(body.stream, false);
+});
+
+Deno.test('toInteractionsBody sends code_execution together with structured response_format', () => {
+  const body = toInteractionsBody(
+    baseReq({
+      builtins: ['codeExecution'],
+      structured: 'chatTurn',
+    }),
+  );
+  assertEquals(body.tools, [{ type: 'code_execution' }]);
+  assertEquals(Array.isArray(body.response_format), true);
 });

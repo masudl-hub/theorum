@@ -1,7 +1,12 @@
 import { TheorumError } from '../guardrails/error.ts';
 import { getTool } from '../kernel/registry/catalog.ts';
 import { getStructured } from '../kernel/registry/schemas.ts';
-import type { InteractionPart, ProviderCompleteRequest } from '../kernel/types.ts';
+import type {
+  DynamicToolDeclaration,
+  InteractionPart,
+  ProviderCompleteRequest,
+  TurnHistoryMessage,
+} from '../kernel/types.ts';
 import { exposeForTests } from './expose-for-tests.ts';
 
 function camelToSnake(key: string): string {
@@ -17,7 +22,7 @@ function toGoogleValue(value: unknown): unknown {
     for (const [key, nested] of Object.entries(value)) {
       // JSON Schema property names must stay as authored (e.g. correctAnswer in
       // both properties and required). Snake-casing breaks Gemini validation.
-      if (key === 'schema') {
+      if (key === 'schema' || key === 'parameters') {
         out[camelToSnake(key)] = nested;
         continue;
       }
@@ -37,17 +42,23 @@ function wirePart(part: InteractionPart): Record<string, string> {
 
 const USER_INPUT = 'user_input';
 
-function userInputStep(parts: InteractionPart[]): {
-  type: string;
-  content: Record<string, string>[];
-} {
+function userInputStep(parts: InteractionPart[]): Record<string, unknown> {
   return { type: USER_INPUT, content: parts.map(wirePart) };
 }
 
-function historyStep(msg: import('../kernel/types.ts').TurnHistoryMessage): {
-  type: string;
-  content: Record<string, string>[];
-} {
+function functionResultStep(msg: TurnHistoryMessage): Record<string, unknown> {
+  return {
+    type: 'function_result',
+    name: msg.name ?? '',
+    call_id: msg.tool_call_id ?? '',
+    result: [{ type: 'text', text: msg.content ?? '' }],
+  };
+}
+
+function historyStep(msg: TurnHistoryMessage): Record<string, unknown> {
+  if (msg.role === 'tool') {
+    return functionResultStep(msg);
+  }
   const isAssistant = msg.role === 'assistant';
   // Google Interactions input steps: assistant history is `model_output` (not `model_turn`).
   const type = isAssistant ? 'model_output' : 'user_input';
@@ -112,11 +123,35 @@ function attachSpeechConfig(
   }
 }
 
-function inputStepsFromRequest(req: ProviderCompleteRequest): {
-  type: string;
-  content: Record<string, string>[];
-}[] {
-  const inputSteps: { type: string; content: Record<string, string>[] }[] = [];
+function wireInteractionsFunctionTool(decl: DynamicToolDeclaration): Record<string, unknown> {
+  return {
+    type: 'function',
+    name: decl.name,
+    description: decl.description ?? '',
+    parameters: decl.parameters ?? { type: 'object', properties: {} },
+  };
+}
+
+function wireInteractionsTools(req: ProviderCompleteRequest): Record<string, unknown>[] {
+  const tools: Record<string, unknown>[] = [];
+  for (const id of req.builtins) {
+    const type = getTool(id)?.interactionsType;
+    if (!type) {
+      throw new TheorumError(`Builtin '${id}' has no Interactions wire type`);
+    }
+    tools.push({ type });
+  }
+  for (const decl of req.dynamicTools ?? []) {
+    tools.push(wireInteractionsFunctionTool(decl));
+  }
+  return tools;
+}
+
+function inputStepsFromRequest(req: ProviderCompleteRequest): Record<string, unknown>[] {
+  if (req.interactionOnlyInput && req.interactionOnlyInput.length > 0) {
+    return req.interactionOnlyInput;
+  }
+  const inputSteps: Record<string, unknown>[] = [];
   for (const h of req.history ?? []) {
     inputSteps.push(historyStep(h));
   }
@@ -139,14 +174,9 @@ function applyOptionalRequestFields(
   if (req.system) {
     camel.systemInstruction = req.system;
   }
-  if (req.builtins.length > 0) {
-    camel.tools = req.builtins.map((id) => {
-      const type = getTool(id)?.interactionsType;
-      if (!type) {
-        throw new TheorumError(`Builtin '${id}' has no Interactions wire type`);
-      }
-      return { type };
-    });
+  const tools = wireInteractionsTools(req);
+  if (tools.length > 0) {
+    camel.tools = tools;
   }
 }
 
@@ -164,7 +194,7 @@ function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unkn
   }
   return {
     model: req.apiId,
-    stream: true,
+    stream: req.stream !== false,
     input: inputStepsFromRequest(req),
     generationConfig,
   };
@@ -172,7 +202,7 @@ function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unkn
 
 /** Interactions REST body for one complete() call (Google snake_case keys). */
 function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
-  if (systemHoldsUserInput(req.system, req.input)) {
+  if (!req.interactionOnlyInput?.length && systemHoldsUserInput(req.system, req.input)) {
     throw new TheorumError('user input cannot be placed in the system block');
   }
   const camel = baseInteractionsBody(req);

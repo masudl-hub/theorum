@@ -43,6 +43,19 @@ function processTestEvent(event: TurnEvent, acc: TestExecutionAccumulator): void
     console.log(
       `\n  ⚡ [Tool Dispatched] ${event.tool.name}(${JSON.stringify(event.tool.arguments ?? {})})`,
     );
+  } else if (event.type === 'evidence' && event.evidence) {
+    const e = event.evidence;
+    if (e.kind === 'code_execution_call') {
+      const preview = (e.code ?? '').replaceAll('\n', ' ').slice(0, 80);
+      console.log(`\n  🐍 [code_execution_call] ${preview || e.id || ''}`);
+    } else if (e.kind === 'code_execution_result') {
+      const preview = (e.result ?? '').replaceAll('\n', ' ').slice(0, 80);
+      console.log(
+        `\n  🐍 [code_execution_result] isError=${String(e.isError)} ${preview}`,
+      );
+    } else if (e.kind) {
+      console.log(`\n  📎 [evidence] ${e.kind}`);
+    }
   } else if (event.type === 'structured') {
     console.log(`\n  ✓ [Structured Schema Validated]`);
   } else if (event.type === 'media') {

@@ -1,8 +1,8 @@
 # Host (`theorum/host`)
 
-Optional Deno HTTP helpers for host applications. **Not** part of the turn
-kernel — import only when you want shared reply/status glue and cutout-trace
-flushing without reimplementing it per route.
+Optional helpers for host applications. **Not** part of the turn kernel —
+import when you want shared reply/status glue, cutout-trace flushing, or live
+structured-output preview without reimplementing it per route.
 
 ## Export
 
@@ -17,6 +17,7 @@ flushing without reimplementing it per route.
 | --- | --- |
 | `src/host/reply.ts` | JSON responses + HTTP status constants |
 | `src/host/mint-trace.ts` | Cutout mint trace flush helpers |
+| `src/host/readStreamingJsonStringField.ts` | Incomplete JSON string preview |
 | `src/host/mod.ts` | Public barrel |
 
 ## HTTP replies
@@ -54,10 +55,31 @@ Quota busy responses typically use `HTTP_BUSY` after `takeSlot` returns `busy`.
 Use when your Deno HTTP host records mint/cutout telemetry alongside THEORUM
 turns. Skip entirely for non-HTTP or non-Deno hosts.
 
+## Structured JSON preview
+
+`readStreamingJsonStringField(jsonText, key)` reads one string field from
+**incomplete** JSON while structured output streams as text deltas.
+
+```ts
+import { readStreamingJsonStringField } from "theorum/host";
+
+const preview = readStreamingJsonStringField(buffer, "mermaid");
+// returns decoded prefix even before closing quote
+```
+
+| Behavior | Detail |
+| --- | --- |
+| Locator | `"key": "` pattern |
+| Escapes | `\n`, `\t`, `\uXXXX`, … |
+| Incomplete buffer | Returns prefix for live UI preview |
+| Missing key | `null` |
+
+Does not validate full JSON documents.
+
 ## Exported API
 
 Live list: `src/host/mod.ts` (`json`, status constants, `caughtStatus`,
-`flushMintTrace`, `CutoutTape`).
+`flushMintTrace`, `CutoutTape`, `readStreamingJsonStringField`).
 
 ```theorum-evidence
 {
@@ -84,6 +106,12 @@ Live list: `src/host/mod.ts` (`json`, status constants, `caughtStatus`,
       "supports": [
         { "kind": "source", "path": "src/host/mint-trace.ts" },
         { "kind": "contract_test", "path": "tests/host/host.test.ts" }
+      ]
+    },
+    "Structured JSON preview": {
+      "supports": [
+        { "kind": "source", "path": "src/host/readStreamingJsonStringField.ts" },
+        { "kind": "contract_test", "path": "tests/host/readStreamingJsonStringField.test.ts" }
       ]
     },
     "Exported API": {

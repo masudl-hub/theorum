@@ -18,14 +18,12 @@
     ".": "./mod.ts",
     "./kernel": "./src/kernel/mod.ts",
     "./providers": "./src/providers/mod.ts",
-    "./openrouter": "./src/providers/openrouter-mod.ts",
     "./guardrails": "./src/guardrails/mod.ts",
     "./observability": "./src/observability/mod.ts",
     "./host": "./src/host/mod.ts",
     "./cli": "./src/cli/index.ts",
     "./presets": "./src/presets/mod.ts",
-    "./presets/google": "./src/presets/google.ts",
-    "./streaming": "./src/streaming/mod.ts"
+    "./presets/google": "./src/presets/google.ts"
   },
   "publish": {
     "exclude": [

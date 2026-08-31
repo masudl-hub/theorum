@@ -36,12 +36,14 @@ theorum <command> [options]
 | `help` | Usage |
 
 Exit code `1` on failed `test` runs. `run` requires `--profile` (or `-p`).
+Both `test` and `run` print Google `code_execution_*` (and other) `evidence`
+events when a host-supplied provider yields them — hosts still must pass an
+explicit `ModelProvider` (the CLI never reads API keys).
 
 ```bash
 theorum test --profile my.agent --matrix
 theorum run --profile my.agent --prompt "ping"
 ```
-
 ## Matrix and fixtures
 
 | Module | Role |

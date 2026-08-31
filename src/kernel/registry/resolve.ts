@@ -227,6 +227,7 @@ function resolveTurn(req: TurnRequest): {
       openRouterId: spec.openRouterId,
       previousInteractionId: safe.previousInteractionId,
       store: safe.store,
+      stream: safe.stream,
       thinking: resolveThinking(profile, spec, thinkingOn, safe.select),
       summaries: resolveSummaries(profile, spec, thinkingOn),
       maxOutputTokens: spec.maxOutputTokens,

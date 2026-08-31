@@ -25,7 +25,7 @@ Deterministic document-health lint for THEORUM. No waivers. No LLM.
 | Rule | Behavior |
 | --- | --- |
 | Full ownership | Every production-root file has exactly one `owns` entry |
-| Doc freshness | Changed code → owning doc appears in git diff |
+| Doc freshness | Changed *existing* code → owning doc appears in git diff (deletions skipped) |
 | Section freshness | Watches/`section_triggers` → specific `##` headings must change |
 | Owned fallback | Owned files → at least one behavioral section hunk |
 | Evidence | ≥2 supports; behavioral sections require `contract_test` |
@@ -37,7 +37,7 @@ Deterministic document-health lint for THEORUM. No waivers. No LLM.
 | --- | --- |
 | `mod.ts` | Package barrel |
 | `package.json` | Published exports |
-| `src/**/*.ts` | Kernel + adapters |
+| `src/**/*.ts` | Kernel + adapters (live tree only; deleted paths skip freshness) |
 | `scripts/docs-truth/**/*.mjs` | Docs-truth linter |
 
 ## CI and hooks

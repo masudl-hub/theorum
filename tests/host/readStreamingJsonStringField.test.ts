@@ -1,6 +1,6 @@
 import '../fixtures/test-host.ts';
+import { readStreamingJsonStringField } from '../../src/host/readStreamingJsonStringField.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { readStreamingJsonStringField } from '../../src/streaming/readStreamingJsonStringField.ts';
 
 Deno.test('readStreamingJsonStringField decodes escaped partial message text', () => {
   assertEquals(

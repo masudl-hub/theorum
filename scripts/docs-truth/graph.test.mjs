@@ -9,14 +9,14 @@ test('pathRuleMatches supports trailing slash and globs', () => {
   assert.equal(pathRuleMatches('src/**/stop.ts', 'src/kernel/stop.ts'), true);
 });
 
-test('owns_except carves openrouter out of providers', async () => {
+test('providers owns openrouter adapter modules', async () => {
   const { default: graph } = await import('../../docs/_map.mjs');
-  const providersOwners = entriesForFile(graph, normalizePath('src/providers/openrouter.ts'), {
+  const openrouterOwners = entriesForFile(graph, normalizePath('src/providers/openrouter.ts'), {
     ownsOnly: true,
   });
   assert.deepEqual(
-    providersOwners.map(([id]) => id),
-    ['openrouter'],
+    openrouterOwners.map(([id]) => id),
+    ['providers'],
   );
 
   const localOwners = entriesForFile(graph, normalizePath('src/providers/local.ts'), {

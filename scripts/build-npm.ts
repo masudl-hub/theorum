@@ -10,14 +10,12 @@ await build({
     { name: '.', path: './mod.ts' },
     { name: './kernel', path: './src/kernel/mod.ts' },
     { name: './providers', path: './src/providers/mod.ts' },
-    { name: './openrouter', path: './src/providers/openrouter-mod.ts' },
     { name: './guardrails', path: './src/guardrails/mod.ts' },
     { name: './observability', path: './src/observability/mod.ts' },
     { name: './host', path: './src/host/mod.ts' },
     { name: './cli', path: './src/cli/index.ts' },
     { name: './presets', path: './src/presets/mod.ts' },
     { name: './presets/google', path: './src/presets/google.ts' },
-    { name: './streaming', path: './src/streaming/mod.ts' },
     {
       kind: 'bin',
       name: 'theorum',
@@ -69,14 +67,12 @@ await build({
     const contracts: Array<[string, string]> = [
       ['src/kernel/CONTRACT.md', 'docs/kernel.md'],
       ['src/providers/CONTRACT.md', 'docs/providers.md'],
-      ['src/providers/OPENROUTER.md', 'docs/openrouter.md'],
       ['src/guardrails/CONTRACT.md', 'docs/guardrails.md'],
       ['src/observability/CONTRACT.md', 'docs/observability.md'],
       ['src/host/CONTRACT.md', 'docs/host.md'],
       ['src/cli/CONTRACT.md', 'docs/cli.md'],
       ['src/presets/CONTRACT.md', 'docs/presets.md'],
       ['src/presets/GOOGLE.md', 'docs/presets-google.md'],
-      ['src/streaming/CONTRACT.md', 'docs/streaming.md'],
     ];
     for (const [from, to] of contracts) {
       await Deno.copyFile(from, `${outDir}/${to}`);

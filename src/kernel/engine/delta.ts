@@ -1,5 +1,11 @@
 import { turnStopFromInteractionStatus } from '../stop.ts';
-import type { GroundingEvent, GroundingSource, TurnEvent, TurnTokens } from '../types.ts';
+import type {
+  GroundingEvent,
+  GroundingSource,
+  ProviderEvidenceEvent,
+  TurnEvent,
+  TurnTokens,
+} from '../types.ts';
 import { asRecord } from './record.ts';
 
 function deltaText(delta: Record<string, unknown>): string {
@@ -55,12 +61,200 @@ function eventsFromAudio(delta: Record<string, unknown>): TurnEvent[] {
   return [];
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+  return undefined;
+}
+
+function isCodeExecutionType(type: string): boolean {
+  return type === 'code_execution_call' || type === 'code_execution_result';
+}
+
+function isGoogleBuiltinStepType(type: string): boolean {
+  return type.startsWith('google_') || type === 'url_context_call' || type === 'url_context_result';
+}
+
+function googleBuiltinEvidence(raw: Record<string, unknown>): TurnEvent {
+  const type = String(raw.type ?? '');
+  return {
+    type: 'evidence',
+    evidence: {
+      provider: 'google',
+      raw,
+      ...(type ? { kind: type } : {}),
+    },
+  };
+}
+
+function mergeSandboxString(prev: unknown, next: unknown): string | undefined {
+  if (typeof next !== 'string') {
+    return typeof prev === 'string' ? prev : undefined;
+  }
+  if (typeof prev !== 'string' || !prev) {
+    return next;
+  }
+  if (next.startsWith(prev) || prev.endsWith(next)) {
+    return next.length >= prev.length ? next : prev;
+  }
+  return prev + next;
+}
+
+function argumentsField(record: Record<string, unknown> | undefined): unknown {
+  if (!record) {
+    return undefined;
+  }
+  return record.arguments;
+}
+
+function mergedArgObject(
+  prevArgs: Record<string, unknown> | undefined,
+  incomingArgs: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const language = incomingArgs?.language;
+  return {
+    ...prevArgs,
+    ...incomingArgs,
+    code: mergeSandboxString(prevArgs?.code, incomingArgs?.code),
+    language: language === undefined ? prevArgs?.language : language,
+  };
+}
+
+function mergeStringArguments(prev: unknown, next: unknown): unknown {
+  if (typeof next === 'string') {
+    return mergeSandboxString(prev, next);
+  }
+  if (typeof prev === 'string') {
+    return mergeSandboxString(prev, next);
+  }
+  if (next !== undefined) {
+    return next;
+  }
+  return prev;
+}
+
+function mergeCodeExecutionArguments(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown>,
+): unknown {
+  const prevArgs = asRecord(argumentsField(existing));
+  const incomingArgs = asRecord(incoming.arguments);
+  if (prevArgs) {
+    return mergedArgObject(prevArgs, incomingArgs);
+  }
+  if (incomingArgs) {
+    return mergedArgObject(prevArgs, incomingArgs);
+  }
+  return mergeStringArguments(argumentsField(existing), incoming.arguments);
+}
+
+/** Merge a later code-exec delta/step onto an earlier snapshot (partial code/stdout). */
+function mergeCodeExecutionPayload(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...existing, ...incoming };
+  const argumentsValue = mergeCodeExecutionArguments(existing, incoming);
+  if (argumentsValue !== undefined) {
+    next.arguments = argumentsValue;
+  }
+  const result = mergeSandboxString(existing?.result, incoming.result);
+  if (result !== undefined) {
+    next.result = result;
+  }
+  return next;
+}
+
+function codeFromArguments(args: unknown): { code?: string; language?: string } {
+  if (typeof args === 'string') {
+    return { code: args };
+  }
+  const rec = asRecord(args);
+  if (!rec) {
+    return {};
+  }
+  return {
+    ...(typeof rec.code === 'string' ? { code: rec.code } : {}),
+    ...(typeof rec.language === 'string' ? { language: rec.language } : {}),
+  };
+}
+
+function sandboxReportedError(raw: Record<string, unknown>): boolean | undefined {
+  if (raw.is_error === undefined && raw.isError === undefined) {
+    return undefined;
+  }
+  return raw.is_error === true || raw.isError === true;
+}
+
+function applyCodeExecutionFields(
+  evidence: ProviderEvidenceEvent,
+  raw: Record<string, unknown>,
+): void {
+  const type = String(raw.type ?? '');
+  if (isCodeExecutionType(type)) {
+    evidence.kind = type;
+  }
+  const fromArgs = codeFromArguments(raw.arguments);
+  if (fromArgs.code) {
+    evidence.code = fromArgs.code;
+  }
+  if (fromArgs.language) {
+    evidence.language = fromArgs.language;
+  }
+  if (typeof raw.result === 'string') {
+    evidence.result = raw.result;
+  }
+  const isError = sandboxReportedError(raw);
+  if (isError !== undefined) {
+    evidence.isError = isError;
+  }
+  const id = nonEmptyString(raw.id);
+  if (id) {
+    evidence.id = id;
+  }
+  const callId = nonEmptyString(raw.call_id ?? raw.callId);
+  if (callId) {
+    evidence.callId = callId;
+  }
+}
+
+/** Normalize a Google `code_execution_*` step/delta into an `evidence` event. */
+function codeExecutionEvidence(raw: Record<string, unknown>): TurnEvent {
+  const evidence: ProviderEvidenceEvent = { provider: 'google', raw };
+  applyCodeExecutionFields(evidence, raw);
+  return { type: 'evidence', evidence };
+}
+
+/** Stable key so streamed deltas and batched `steps[]` do not double-emit. */
+function codeExecutionStepKey(raw: Record<string, unknown>, index?: number): string {
+  const type = String(raw.type ?? 'code_execution');
+  const id = nonEmptyString(raw.id) ?? nonEmptyString(raw.call_id ?? raw.callId);
+  if (id) {
+    return `${type}:${id}`;
+  }
+  const fromArgs = codeFromArguments(raw.arguments);
+  if (fromArgs.code) {
+    return `${type}:code:${fromArgs.code}`;
+  }
+  if (typeof raw.result === 'string') {
+    return `${type}:result:${raw.result}`;
+  }
+  if (raw.result !== undefined) {
+    return `${type}:result:${JSON.stringify(raw.result)}`;
+  }
+  return `${type}:idx:${String(index ?? '')}`;
+}
+
 function eventsFromDelta(deltaValue: unknown): TurnEvent[] {
   const delta = asRecord(deltaValue);
   if (!delta) {
     return [];
   }
   const deltaType = String(delta.type ?? '');
+  if (isCodeExecutionType(deltaType)) {
+    return [codeExecutionEvidence(delta)];
+  }
   if (deltaType === 'thought_summary' || deltaType === 'thought') {
     return eventIfText('thought', delta);
   }
@@ -96,41 +290,114 @@ function mediaFromOutputItem(item: unknown): TurnEvent | undefined {
   return mediaFromRecord(rec);
 }
 
-function mediaFromOutputs(outputs: unknown): TurnEvent | undefined {
+function mediaEventsFromOutputs(outputs: unknown): TurnEvent[] {
   if (!Array.isArray(outputs)) {
-    return undefined;
+    return [];
   }
+  const events: TurnEvent[] = [];
   for (const item of outputs) {
     const media = mediaFromOutputItem(item);
     if (media) {
-      return media;
+      events.push(media);
     }
   }
-  return undefined;
+  return events;
 }
 
-function mediaFromComplete(event: Record<string, unknown>): TurnEvent | undefined {
+function mediaEventsFromComplete(event: Record<string, unknown>): TurnEvent[] {
   const interaction = asRecord(event.interaction) ?? event;
+  const events: TurnEvent[] = [];
   const directImage = asRecord(interaction.output_image);
   if (directImage) {
     const media = mediaFromRecord(directImage);
     if (media) {
-      return media;
+      events.push(media);
     }
   }
   const directAudio = asRecord(interaction.output_audio);
   if (directAudio) {
     const media = mediaFromRecord(directAudio);
     if (media) {
-      return media;
-    }
-    // Google TTS convenience field: base64 PCM without mime.
-    const { data } = directAudio;
-    if (typeof data === 'string' && data) {
-      return { type: 'media', media: { mimeType: 'audio/pcm', data } };
+      events.push(media);
+    } else {
+      const { data } = directAudio;
+      if (typeof data === 'string' && data) {
+        events.push({ type: 'media', media: { mimeType: 'audio/pcm', data } });
+      }
     }
   }
-  return mediaFromOutputs(interaction.outputs);
+  if (events.length === 0) {
+    events.push(...mediaEventsFromOutputs(interaction.outputs));
+  }
+  return events;
+}
+
+function eventsFromModelOutputContent(
+  step: Record<string, unknown>,
+  alreadyText: boolean,
+): TurnEvent[] {
+  const events: TurnEvent[] = [];
+  const content = step.content;
+  if (!Array.isArray(content)) {
+    return events;
+  }
+  for (const block of content) {
+    const rec = asRecord(block);
+    if (!rec) {
+      continue;
+    }
+    const type = String(rec.type ?? '');
+    if (type === 'text' && !alreadyText) {
+      events.push(...eventIfText('text', rec));
+    }
+    if (type === 'image' || type === 'media') {
+      events.push(...eventsFromImage(rec));
+    }
+    if (type === 'audio' || type === 'output_audio') {
+      events.push(...eventsFromAudio(rec));
+    }
+  }
+  return events;
+}
+
+function eventsFromInteractionStep(
+  step: Record<string, unknown>,
+  sawText: boolean,
+): { events: TurnEvent[]; sawText: boolean } {
+  const type = String(step.type ?? '');
+  if (isCodeExecutionType(type)) {
+    return { events: [codeExecutionEvidence(step)], sawText };
+  }
+  if (isGoogleBuiltinStepType(type)) {
+    return { events: [googleBuiltinEvidence(step)], sawText };
+  }
+  if (type !== 'model_output') {
+    return { events: [], sawText };
+  }
+  const fromOutput = eventsFromModelOutputContent(step, sawText);
+  return {
+    events: fromOutput,
+    sawText: sawText || fromOutput.some((item) => item.type === 'text'),
+  };
+}
+
+/**
+ * Replay a completed Interactions `steps[]` array (non-SSE or stream tail).
+ * Emits typed code-execution evidence plus model_output text/media.
+ */
+function eventsFromInteractionSteps(steps: unknown[], alreadyText: boolean): TurnEvent[] {
+  const events: TurnEvent[] = [];
+  let sawText = alreadyText;
+  for (const stepValue of steps) {
+    const step = asRecord(stepValue);
+    if (!step) {
+      continue;
+    }
+    const next = eventsFromInteractionStep(step, sawText);
+    events.push(...next.events);
+    sawText = next.sawText;
+  }
+  return events;
 }
 
 function sourceFromMaps(maps: Record<string, unknown>): GroundingSource | undefined {
@@ -181,13 +448,6 @@ function searchHtml(metadata: Record<string, unknown>): string | undefined {
   const renderedContent = searchEntryPoint?.renderedContent ?? searchEntryPoint?.rendered_content;
   if (typeof renderedContent === 'string' && renderedContent.trim()) {
     return renderedContent;
-  }
-  return undefined;
-}
-
-function nonEmptyString(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim()) {
-    return value;
   }
   return undefined;
 }
@@ -437,6 +697,14 @@ const TOOL_KEYS = [
   'toolUse',
 ] as const;
 
+const INTERMEDIATE_KEYS = [
+  'total_intermediate_tokens',
+  'totalIntermediateTokens',
+  'intermediate_tokens',
+  'intermediateTokens',
+  'intermediate',
+] as const;
+
 const TOTAL_KEYS = [
   'total_tokens',
   'totalTokens',
@@ -467,9 +735,18 @@ function extractUsageTokens(raw: unknown): TurnTokens | undefined {
   const output = pickNumericField(r, OUTPUT_KEYS);
   const thinking = pickNumericField(r, THINKING_KEYS);
   const toolUse = pickNumericField(r, TOOL_KEYS);
-  const total = pickNumericField(r, TOTAL_KEYS) || input + output + thinking + toolUse;
-  if (input > 0 || output > 0 || thinking > 0 || toolUse > 0 || total > 0) {
-    return { input, output, thinking, toolUse, total };
+  const intermediate = pickNumericField(r, INTERMEDIATE_KEYS);
+  const total =
+    pickNumericField(r, TOTAL_KEYS) || input + output + thinking + toolUse + intermediate;
+  if (input > 0 || output > 0 || thinking > 0 || toolUse > 0 || intermediate > 0 || total > 0) {
+    return {
+      input,
+      output,
+      thinking,
+      toolUse,
+      total,
+      ...(intermediate > 0 ? { intermediate } : {}),
+    };
   }
   return undefined;
 }
@@ -506,12 +783,23 @@ function extractTokenEvent(
 function eventsFromComplete(event: Record<string, unknown>, alreadyText: boolean): TurnEvent[] {
   const interaction = asRecord(event.interaction) ?? event;
   const events: TurnEvent[] = [];
-  const outputText = interaction.output_text;
-  if (!alreadyText && typeof outputText === 'string' && outputText) {
-    events.push({ type: 'text', text: outputText });
+  let sawText = alreadyText;
+  const steps = interaction.steps;
+  if (Array.isArray(steps)) {
+    const fromSteps = eventsFromInteractionSteps(steps, sawText);
+    events.push(...fromSteps);
+    if (fromSteps.some((item) => item.type === 'text')) {
+      sawText = true;
+    }
   }
-  const media = mediaFromComplete(event);
-  if (media) events.push(media);
+  const outputText = interaction.output_text;
+  if (!sawText && typeof outputText === 'string' && outputText) {
+    events.push({ type: 'text', text: outputText });
+    sawText = true;
+  }
+  if (!events.some((item) => item.type === 'media')) {
+    events.push(...mediaEventsFromComplete(event));
+  }
   const tokenEvent = extractTokenEvent(event, interaction);
   if (tokenEvent) events.push(tokenEvent);
   const groundingEvent = groundingFromEvent(event);
@@ -557,10 +845,17 @@ function tryStructured(text: string): TurnEvent | undefined {
 }
 
 export {
+  codeExecutionEvidence,
+  codeExecutionStepKey,
   eventsFromComplete,
   eventsFromDelta,
+  eventsFromInteractionSteps,
   extractTokenEvent,
   extractUsageTokens,
+  googleBuiltinEvidence,
   groundingFromEvent,
+  isCodeExecutionType,
+  isGoogleBuiltinStepType,
+  mergeCodeExecutionPayload,
   tryStructured,
 };

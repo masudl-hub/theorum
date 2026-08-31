@@ -602,6 +602,8 @@ export async function lintDocsTruth({
 
   for (const changedFile of normalizedChanged) {
     if (!isProductionFile(graph, changedFile)) continue;
+    // Deletions show up in git diffs; ownership applies to the live tree only.
+    if (!(await pathExists(repoRoot, changedFile))) continue;
 
     const matching = entriesForFile(graph, changedFile);
     if (matching.length === 0) {

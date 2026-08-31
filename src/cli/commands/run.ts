@@ -18,6 +18,17 @@ function handleRunEvent(event: TurnEvent): void {
     Deno.stdout.write(new TextEncoder().encode(event.text));
   } else if (event.type === 'tool' && event.tool) {
     console.log(`\n\x1b[33m⚡ [Tool Call] ${event.tool.name}\x1b[0m:`, event.tool.arguments);
+  } else if (event.type === 'evidence' && event.evidence) {
+    const e = event.evidence;
+    if (e.kind === 'code_execution_call') {
+      console.log(`\n\x1b[36m🐍 [code_execution_call]\x1b[0m\n${e.code ?? ''}`);
+    } else if (e.kind === 'code_execution_result') {
+      console.log(
+        `\n\x1b[36m🐍 [code_execution_result]\x1b[0m isError=${String(e.isError)}\n${e.result ?? ''}`,
+      );
+    } else if (e.kind) {
+      console.log(`\n\x1b[36m📎 [evidence]\x1b[0m ${e.kind}`);
+    }
   } else if (event.type === 'structured' && event.structured) {
     console.log('\n\x1b[32m✓ [Structured Output]\x1b[0m:');
     console.log(JSON.stringify(event.structured, null, 2));

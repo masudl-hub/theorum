@@ -10,7 +10,6 @@
     "tests/providers/**/*.ts",
     "tests/observability/**/*.ts",
     "tests/host/**/*.ts",
-    "tests/streaming/**/*.ts",
     "tests/fixtures/**/*.ts",
     "tests/fixtures/**/*.js"
   ],

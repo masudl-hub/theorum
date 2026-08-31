@@ -957,12 +957,12 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
   );
 
   let callCount = 0;
-  const historyLog: import('../../src/kernel/types.ts').TurnHistoryMessage[][] = [];
+  const requestLog: import('../../src/kernel/types.ts').ProviderCompleteRequest[] = [];
 
   const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
     async *complete(req) {
       callCount++;
-      historyLog.push([...(req.history ?? [])]);
+      requestLog.push(req);
       if (callCount === 1) {
         yield {
           type: 'tool',
@@ -971,6 +971,11 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
             arguments: { sensor: 'soil' },
             id: 'call_sensor_1',
           },
+        };
+        yield {
+          type: 'tokens',
+          tokens: { input: 1, output: 0, total: 1 },
+          interactionId: 'v1_sensor',
         };
       } else {
         yield {
@@ -1017,14 +1022,135 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
     true,
   );
 
-  // Check history on step 2
+  // Interactions continuation uses function_result input + previous_interaction_id.
+  const step2 = requestLog[1];
+  assertEquals(step2?.previousInteractionId, 'v1_sensor');
+  assertEquals(step2?.interactionOnlyInput, [
+    {
+      type: 'function_result',
+      name: 'fetch_sensor',
+      call_id: 'call_sensor_1',
+      result: [{ type: 'text', text: 'Sensor raw value: 22%' }],
+    },
+  ]);
+  assertEquals(step2?.history, []);
+  assertEquals(step2?.input, []);
+});
+
+Deno.test('runTurn sends every Interactions function_result in one continuation', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'host_assistant_multi_fn',
+      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 3 },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  let callCount = 0;
+  const requestLog: import('../../src/kernel/types.ts').ProviderCompleteRequest[] = [];
+
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete(req) {
+      callCount++;
+      requestLog.push(req);
+      if (callCount === 1) {
+        yield {
+          type: 'tool',
+          tool: { name: 'fetch_sensor', arguments: { sensor: 'soil' }, id: 'call_a' },
+        };
+        yield {
+          type: 'tool',
+          tool: { name: 'lookup_order', arguments: { orderId: '9' }, id: 'call_b' },
+        };
+        yield {
+          type: 'tokens',
+          tokens: { input: 1, output: 0, total: 1 },
+          interactionId: 'v1_multi',
+        };
+      } else {
+        yield { type: 'text', text: 'both tools returned' };
+      }
+    },
+  };
+
+  for await (const _ev of runTurn(
+    {
+      profile: 'host_assistant_multi_fn',
+      dynamicTools: [
+        { name: 'fetch_sensor', handler: () => ({ status: 'ok', finding: '22%' }) },
+        { name: 'lookup_order', handler: () => ({ status: 'ok', finding: 'shipped' }) },
+      ],
+      input: { text: 'Check both' },
+    },
+    mockProvider,
+  )) {
+    // drain
+  }
+
+  assertEquals(callCount, 2);
+  assertEquals(requestLog[1]?.interactionOnlyInput, [
+    {
+      type: 'function_result',
+      name: 'fetch_sensor',
+      call_id: 'call_a',
+      result: [{ type: 'text', text: '22%' }],
+    },
+    {
+      type: 'function_result',
+      name: 'lookup_order',
+      call_id: 'call_b',
+      result: [{ type: 'text', text: 'shipped' }],
+    },
+  ]);
+});
+
+Deno.test('runTurn falls back to function_result history when Interactions id is missing', async () => {
+  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+  registerProfile(
+    defineProfile({
+      id: 'host_assistant_history_fallback',
+      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 2 },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
+
+  let callCount = 0;
+  const historyLog: import('../../src/kernel/types.ts').TurnHistoryMessage[][] = [];
+
+  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+    async *complete(req) {
+      callCount++;
+      historyLog.push([...(req.history ?? [])]);
+      if (callCount === 1) {
+        yield {
+          type: 'tool',
+          tool: { name: 'fetch_sensor', arguments: { sensor: 'soil' }, id: 'call_sensor_1' },
+        };
+      } else {
+        yield { type: 'text', text: 'fallback ok' };
+      }
+    },
+  };
+
+  for await (const _ev of runTurn(
+    {
+      profile: 'host_assistant_history_fallback',
+      dynamicTools: [{ name: 'fetch_sensor', handler: () => ({ status: 'ok', finding: '22%' }) }],
+      input: { text: 'Check soil' },
+    },
+    mockProvider,
+  )) {
+    // drain
+  }
+
+  assertEquals(callCount, 2);
   const step2History = historyLog[1] ?? [];
-  assertEquals(step2History.length, 2);
-  assertEquals(step2History[0]?.role, 'assistant');
-  assertEquals(step2History[0]?.tool_calls?.[0]?.function.name, 'fetch_sensor');
-  assertEquals(step2History[1]?.role, 'tool');
-  assertEquals(step2History[1]?.tool_call_id, 'call_sensor_1');
-  assertEquals(step2History[1]?.content, 'Sensor raw value: 22%');
+  assertEquals(step2History.length, 1);
+  assertEquals(step2History[0]?.role, 'tool');
+  assertEquals(step2History[0]?.tool_call_id, 'call_sensor_1');
 });
 
 Deno.test('guardrails.canary=false omits canary generation and system binding', async () => {
@@ -1169,9 +1295,15 @@ Deno.test('dynamic tool exception is safely caught and converted to error findin
             id: 'call_crash_1',
           },
         };
+        yield {
+          type: 'tokens',
+          tokens: { input: 1, output: 0, total: 1 },
+          interactionId: 'v1_crash',
+        };
       } else {
-        const lastMsg = req.history?.at(-1);
-        receivedToolError = String(lastMsg?.content ?? '');
+        const resultStep = req.interactionOnlyInput?.[0];
+        const blocks = resultStep?.result as Array<{ text?: string }> | undefined;
+        receivedToolError = String(blocks?.[0]?.text ?? '');
         yield { type: 'text', text: 'Handled error gracefully.' };
       }
     },

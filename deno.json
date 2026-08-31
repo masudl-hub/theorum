@@ -66,6 +66,8 @@
     "check": "deno check mod.ts",
     "verify:publish": "deno run --allow-read scripts/verify-publish-bundle.ts",
     "lint": "npm run lint",
+    "lint:docs": "npm run lint:docs",
+    "hooks:install": "npm run hooks:install",
     "verify:live": "deno run --allow-net scripts/verify-live.ts"
   }
 }

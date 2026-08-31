@@ -380,13 +380,14 @@ Package docs are co-located with each public export (plus this README for `.`):
 | [`src/presets/GOOGLE.md`](src/presets/GOOGLE.md) | `theorum/presets/google` |
 | [`src/streaming/CONTRACT.md`](src/streaming/CONTRACT.md) | `theorum/streaming` |
 
-Document health is enforced by `npm run lint:docs` (`docs/_map.mjs`):
+Document health is enforced by `npm run lint:docs` — the **first** step of
+`npm run lint` / `deno task lint` (`docs/_map.mjs`):
 
 - Full production-file ownership (`mod.ts`, `src/**/*.ts`, `package.json`, docs-truth scripts)
 - Export parity with `package.json` and export-drift vs entry `mod.ts` files
 - Doc + **section** freshness on every code change (no Export-only gaming)
 - Behavioral sections require `contract_test` evidence (≥2 supports each)
-- Install `npm run hooks:install` for pre-commit `lint:docs`
+- Pre-commit runs `lint:docs` automatically (`prepare` installs the hook on `npm install`)
 
 ---
 

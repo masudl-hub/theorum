@@ -42,8 +42,14 @@ Deterministic document-health lint for THEORUM. No waivers. No LLM.
 
 ## CI and hooks
 
-- CI: `npm run lint:docs` with `THEORUM_DOCS_BASE=origin/<base>`
-- Local: `npm run hooks:install` installs pre-commit → `lint:docs`
+| Layer | Command |
+| --- | --- |
+| `npm run lint` | Runs `lint:docs` first, then biome / ast-grep / fallow |
+| `deno task lint` | Same as `npm run lint` |
+| CI | `npm run lint:docs` with `THEORUM_DOCS_BASE=origin/<base>` |
+| Pre-commit | `npm run lint:docs` (auto-installed by `prepare` on `npm install`) |
+
+Re-install manually: `npm run hooks:install`
 
 ```theorum-evidence
 {

@@ -55,6 +55,7 @@
     "docs:inventory": "node ./scripts/docs-truth/cli.mjs inventory",
     "docs:freshness": "node ./scripts/docs-truth/cli.mjs freshness",
     "hooks:install": "node ./scripts/hooks/install.mjs",
+    "prepare": "node ./scripts/hooks/install.mjs",
     "lint": "npm run lint:docs && npm run lint:biome && npm run lint:ast-grep && npm run lint:fallow"
   },
   "devDependencies": {

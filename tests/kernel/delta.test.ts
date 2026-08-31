@@ -98,6 +98,60 @@ Deno.test('delta.ts: groundingFromEvent parses web, maps, rendered HTML, and nes
   assertGroundingSources(groundingEv.grounding.sources);
 });
 
+Deno.test('delta.ts: groundingFromEvent wraps Interactions google_search_result search_suggestions', () => {
+  const chipHtml =
+    '<div class="container"><a class="chip" href="https://www.google.com/search?q=photosynthesis">photosynthesis</a></div>';
+  const event = {
+    event_type: 'step.delta',
+    delta: {
+      type: 'google_search_result',
+      result: [{ search_suggestions: chipHtml }],
+      annotations: [
+        {
+          type: 'url_citation',
+          title: 'PubMed review',
+          url: 'https://pubmed.example/psii',
+        },
+        {
+          type: 'place_citation',
+          name: 'Thylakoid Lab',
+          uri: 'https://maps.google.com/?q=lab',
+        },
+      ],
+    },
+  };
+
+  const groundingEv = groundingFromEvent(event);
+  assertExists(groundingEv);
+  assertEquals(groundingEv.type, 'grounding');
+  assertEquals(groundingEv.grounding?.searchHtml, chipHtml);
+  assertEquals(groundingEv.grounding?.sources.length, 2);
+  assertEquals(groundingEv.grounding?.sources[0], {
+    type: 'web',
+    title: 'PubMed review',
+    uri: 'https://pubmed.example/psii',
+  });
+  assertEquals(groundingEv.grounding?.sources[1], {
+    type: 'maps',
+    title: 'Thylakoid Lab',
+    uri: 'https://maps.google.com/?q=lab',
+  });
+  // Raw Interactions tool payload is preserved for hosts.
+  assertEquals(groundingEv.grounding?.metadata?.type, 'google_search_result');
+});
+
+Deno.test('delta.ts: groundingFromEvent reads search_suggestions from step.content blocks', () => {
+  const html = '<div class="chip">calvin cycle</div>';
+  const groundingEv = groundingFromEvent({
+    step: {
+      type: 'google_search_result',
+      content: [{ searchSuggestions: html }],
+    },
+  });
+  assertExists(groundingEv);
+  assertEquals(groundingEv.grounding?.searchHtml, html);
+});
+
 function assertGroundingSources(sources: GroundingSource[]): void {
   const [first, second, third, fourth, fifth] = sources;
   assertExists(first);

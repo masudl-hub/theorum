@@ -17,6 +17,7 @@ import {
   groundingFromEvent,
   tryStructured,
 } from '../kernel/engine/delta.ts';
+import { asRecord } from '../kernel/engine/record.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../kernel/types.ts';
 import { exposeForTests } from './expose-for-tests.ts';
 import { tapFetch } from './google-tap.ts';
@@ -134,7 +135,34 @@ function foldPayload(event: Record<string, unknown>, acc: { text: string }): Tur
   if (groundingEvent && !events.some((e) => e.type === 'grounding')) {
     events.push(groundingEvent);
   }
+  const evidenceEvent = evidenceFromGooglePayload(event);
+  if (evidenceEvent && !events.some((e) => e.type === 'evidence')) {
+    events.push(evidenceEvent);
+  }
   return events;
+}
+
+/** Preserve raw Google Interactions tool payloads so hosts can inspect everything returned. */
+function evidenceFromGooglePayload(event: Record<string, unknown>): TurnEvent | undefined {
+  for (const key of ['delta', 'step'] as const) {
+    const payload = asRecord(event[key]);
+    if (!payload) {
+      continue;
+    }
+    const type = String(payload.type ?? '');
+    if (
+      type === 'google_search_result' ||
+      type === 'google_maps' ||
+      type === 'google_maps_result' ||
+      type.startsWith('google_')
+    ) {
+      return {
+        type: 'evidence',
+        evidence: { provider: 'google', raw: payload },
+      };
+    }
+  }
+  return undefined;
 }
 
 function withTap(req: ProviderCompleteRequest, transport: GeminiTransport): GeminiTransport {
@@ -213,5 +241,6 @@ exposeForTests('provider', {
   isCompleteEvent,
   foldDeltaPayload,
   foldPayload,
+  evidenceFromGooglePayload,
   withTap,
 });

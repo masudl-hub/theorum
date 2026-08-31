@@ -102,7 +102,7 @@ different transport than the primary turn.
 | `tool` | Tool call envelope (`ok` / `error` / `pause`) |
 | `structured` | Parsed JSON object when schema enforced |
 | `media` | Generated image/audio bytes + mime |
-| `grounding` | Search/maps grounding metadata |
+| `grounding` | Search/maps grounding metadata (classic `grounding_metadata` and Interactions tool results such as `google_search_result.search_suggestions`) |
 | `evidence` | Provider-native evidence attachments |
 | `tokens` | `input` / `output` / `total` usage (billing; may gate `meter: 'input'`) |
 | `done` | Terminal: `stop`, `tokens`, `compaction`, final text pointer |

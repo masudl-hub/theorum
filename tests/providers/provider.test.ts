@@ -703,6 +703,30 @@ Deno.test('_internals.foldPayload extracts direct grounding metadata not covered
   assertEquals(grounding !== undefined, true);
 });
 
+Deno.test('_internals.foldPayload emits grounding + evidence for Interactions google_search_result', () => {
+  const acc = { text: '' };
+  const chipHtml = '<div class="chip">photosynthesis</div>';
+  const events = _internals.foldPayload(
+    {
+      event_type: 'step.delta',
+      delta: {
+        type: 'google_search_result',
+        result: [{ search_suggestions: chipHtml }],
+      },
+    },
+    acc,
+  );
+  const grounding = events.find((e: { type: string }) => e.type === 'grounding') as {
+    grounding?: { searchHtml?: string };
+  };
+  const evidence = events.find((e: { type: string }) => e.type === 'evidence') as {
+    evidence?: { provider?: string; raw?: { type?: string } };
+  };
+  assertEquals(grounding?.grounding?.searchHtml, chipHtml);
+  assertEquals(evidence?.evidence?.provider, 'google');
+  assertEquals(evidence?.evidence?.raw?.type, 'google_search_result');
+});
+
 Deno.test('_internals.withTap wraps the transport fetch without mutating other fields', () => {
   const calls: string[] = [];
   const transport = {

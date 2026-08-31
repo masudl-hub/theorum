@@ -185,6 +185,106 @@ function searchHtml(metadata: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+  return undefined;
+}
+
+function searchSuggestionsFromRecord(record: Record<string, unknown>): string | undefined {
+  return nonEmptyString(record.search_suggestions ?? record.searchSuggestions);
+}
+
+function firstSearchSuggestions(items: unknown): string | undefined {
+  if (!Array.isArray(items)) {
+    return undefined;
+  }
+  for (const item of items) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+    const html = searchSuggestionsFromRecord(record);
+    if (html) {
+      return html;
+    }
+  }
+  return undefined;
+}
+
+/** Interactions streams search chips as `search_suggestions` HTML, not classic entry points. */
+function searchSuggestionsHtml(step: Record<string, unknown>): string | undefined {
+  return (
+    searchSuggestionsFromRecord(step) ??
+    firstSearchSuggestions(step.result) ??
+    firstSearchSuggestions(step.content)
+  );
+}
+
+function sourceFromAnnotation(ann: unknown): GroundingSource | undefined {
+  const record = asRecord(ann);
+  if (!record) {
+    return undefined;
+  }
+  const uri = nonEmptyString(record.url ?? record.uri);
+  if (!uri) {
+    return undefined;
+  }
+  const kind = String(record.type ?? '');
+  const title = nonEmptyString(record.title ?? record.name) ?? uri;
+  if (kind === 'place_citation') {
+    return { type: 'maps', uri, title };
+  }
+  if (kind === 'url_citation' || kind === 'citation' || !kind) {
+    return { type: 'web', uri, title };
+  }
+  return undefined;
+}
+
+function appendAnnotationSources(into: GroundingSource[], annotations: unknown): void {
+  for (const source of sourcesFromAnnotations(annotations)) {
+    pushUniqueSource(into, source);
+  }
+}
+
+function sourcesFromAnnotations(annotations: unknown): GroundingSource[] {
+  if (!Array.isArray(annotations)) {
+    return [];
+  }
+  const sources: GroundingSource[] = [];
+  for (const ann of annotations) {
+    pushUniqueSource(sources, sourceFromAnnotation(ann));
+  }
+  return sources;
+}
+
+/**
+ * Wrap Interactions tool-result steps (google_search_result, maps, etc.) into grounding.
+ * Preserves the raw step on `metadata` so hosts can inspect everything Gemini returned.
+ */
+function groundingFromInteractionsTool(step: Record<string, unknown>): GroundingEvent | undefined {
+  const sources: GroundingSource[] = [];
+  appendAnnotationSources(sources, step.annotations);
+  if (Array.isArray(step.content)) {
+    for (const block of step.content) {
+      const record = asRecord(block);
+      if (record) {
+        appendAnnotationSources(sources, record.annotations);
+      }
+    }
+  }
+  const html = searchSuggestionsHtml(step);
+  if (!html && sources.length === 0) {
+    return undefined;
+  }
+  return {
+    metadata: step,
+    ...(html ? { searchHtml: html } : {}),
+    sources,
+  };
+}
+
 function sourcesFromChunks(chunks: unknown[]): GroundingSource[] {
   const sources: GroundingSource[] = [];
   for (const chunk of chunks) {
@@ -265,6 +365,8 @@ function groundingFromStep(stepValue: unknown): GroundingEvent | undefined {
       );
     }
   }
+  // Interactions search/maps tool results: chips + citations live on the step/delta itself.
+  grounding = mergeGrounding(grounding, groundingFromInteractionsTool(step));
   return grounding;
 }
 

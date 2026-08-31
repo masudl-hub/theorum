@@ -76,6 +76,7 @@ OpenRouter Vercel AI SDK loads **only** on first `complete` for `openAi` +
 | Structured | `responseFormat` JSON schema when enforced |
 | Output modes | Image / speech / structured are mutually exclusive |
 | Tools | Catalog `interactionsType` + plugins |
+| Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / maps tool payloads (`search_suggestions` chips, annotations). Emits `grounding` (normalized) plus `evidence` with the raw tool payload so hosts can decide what to surface. |
 | Stop | `turnStopFromInteractionStatus` on terminal status |
 
 ## Local provider

@@ -14,7 +14,7 @@ import {
 import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
-import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
+import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions.ts';
 
 const CANARY_RE = /^theo-[0-9a-f]{32}$/;
 
@@ -49,7 +49,6 @@ function chatCanaryWire() {
   const body = toInteractionsBody({
     model: generation.model,
     apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -122,7 +121,6 @@ Deno.test('toInteractionsBody rejects user payload copied into system', () => {
       toInteractionsBody({
         model: generation.model,
         apiId: generation.apiId,
-        openRouterId: generation.openRouterId,
         thinking: generation.thinking,
         summaries: generation.summaries,
         maxOutputTokens: generation.maxOutputTokens,

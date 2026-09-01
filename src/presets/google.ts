@@ -12,6 +12,7 @@
 
 import { registerTools } from '../kernel/registry/catalog.ts';
 import type { ProfileImageSpec, ProfileSpeechSpec, ToolCatalogEntry } from '../kernel/types.ts';
+import { GOOGLE_SPEECH_VOICES, type GoogleSpeechVoice } from './google/speech-voices.ts';
 
 /** Google Interactions / Gemini grounding builtins. */
 const GOOGLE_BUILTIN_TOOLS: Record<string, ToolCatalogEntry> = {
@@ -50,42 +51,6 @@ const GOOGLE_IMAGE_INPUT_MIMES = [
 
 /** Common voice/audio input MIME allowlist for Gemini multimodal. */
 const GOOGLE_VOICE_INPUT_MIMES = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4'] as const;
-
-/** Common Gemini TTS voice names for `outputs.speech.voice`. */
-const GOOGLE_SPEECH_VOICES = [
-  'Zephyr',
-  'Puck',
-  'Charon',
-  'Kore',
-  'Fenrir',
-  'Leda',
-  'Orus',
-  'Aoede',
-  'Callirrhoe',
-  'Autonoe',
-  'Enceladus',
-  'Iapetus',
-  'Umbriel',
-  'Algieba',
-  'Despina',
-  'Erinome',
-  'Algenib',
-  'Rasalgethi',
-  'Laomedeia',
-  'Achernar',
-  'Alnilam',
-  'Schedar',
-  'Gacrux',
-  'Pulcherrima',
-  'Achird',
-  'Zubenelgenubi',
-  'Vindemiatrix',
-  'Sadachbia',
-  'Sadaltager',
-  'Sulafat',
-] as const;
-
-type GoogleSpeechVoice = (typeof GOOGLE_SPEECH_VOICES)[number];
 
 /**
  * `outputs.speech` pins narrowed to Google TTS vocabulary.

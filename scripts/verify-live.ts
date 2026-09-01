@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run --allow-net
 
 import type { ProviderCompleteRequest } from '../src/kernel/types.ts';
-import { createOpenRouterProvider } from '../src/providers/openrouter.ts';
+import { createOpenRouterProvider } from '../src/providers/openrouter/chat.ts';
 
 function valueAfterFlag(flag: string): string | undefined {
   const idx = Deno.args.indexOf(flag);
@@ -39,7 +39,7 @@ const req: ProviderCompleteRequest = {
   model,
   apiId,
   thinking: 'low',
-  summaries: 'none',
+  summaries: undefined,
   maxOutputTokens: 200,
   temperature: 0.2,
   system: 'You are a precise agent kernel verification assistant.',
@@ -52,7 +52,6 @@ const req: ProviderCompleteRequest = {
   builtins: [],
   structured: null,
   image: null,
-  geminiBucket: 'freeA',
 };
 
 try {

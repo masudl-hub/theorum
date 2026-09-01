@@ -1,0 +1,263 @@
+# Providers (`theorum/providers`)
+
+Single door for constructing a `ModelProvider` bound to a profile. Credentials
+and runtime endpoints are always host-supplied arguments — THEORUM does not read
+environment variables and does not ship `.env` files.
+
+## Export
+
+| Field | Value |
+| --- | --- |
+| Import | `theorum/providers` / `jsr:@theorum/core/providers` |
+| Module | `src/providers/mod.ts` |
+| Local subpath | `theorum/providers/local` → `src/providers/local/mod.ts` |
+| Also on | Root `theorum` re-exports `createProvider` |
+
+## Ownership
+
+Owns every module under `src/providers/`.
+
+| Module | Role |
+| --- | --- |
+| `create-provider.ts` | Public factory; lazy-loads every adapter on first `complete` |
+| `types.ts` | Host option bags (`OpenAiGatewayConfig`, `LocalProviderConfig`) |
+| `openrouter/chat.ts` | OpenRouter chat adapter (internal; lazy-loaded) |
+| `openrouter/openai/compat.ts` | Shared OpenAI REST wire format (messages, tools, headers) |
+| `openrouter/openai/sdk-messages.ts` | THEORUM → AI SDK `ModelMessage[]` (OpenRouter chat) |
+| `openrouter/openai/chat-payload.ts` | OpenAI chat payload + OpenRouter plugins (internal) |
+| `openrouter/speech.ts` | OpenAI `/audio/speech` transport (openrouter speech role) |
+| `google/google-interactions.ts` | Google Interactions streaming adapter |
+| `google/interactions.ts` | Interactions payload / step wiring |
+| `google/keys.ts` | Gemini vault transport types |
+| `google/urls.ts` | Interactions API endpoint constants |
+| `local/local.ts` | OpenAI-compat SSE for Ollama / llama.cpp / vLLM / LM Studio |
+| `local/mod.ts` | Subpath export for direct local adapter access |
+| `shared/sse.ts` | SSE line parser |
+| `shared/pcm.ts` | PCM → WAV for Interactions speech output |
+| `shared/upstream-tape.ts` / `shared/upstream-tap.ts` | Test / tap hooks (not public exports) |
+| `expose-for-tests.ts` | `THEORUM_TEST_INTERNALS=1` gated test surface |
+
+## Package boundary
+
+| Rule | Detail |
+| --- | --- |
+| No `.env` in repo | Hosts pass credentials explicitly |
+| No ambient env reads | `OLLAMA_HOST` resolved by host → `local.baseUrl` |
+| No key templates | Business apps own secret storage |
+| Traces | Host-injected on `runTurn`, not here |
+| Pairs | `PROTOCOL_PROVIDERS` / `isValidPair` in `src/kernel/schema.ts` — `createProvider` does not invent extra routes |
+
+## createProvider
+
+```ts
+const provider = createProvider(profile, {
+  gemini: { vault: { freeA, freeB, freeC, paid }, fetch? },
+  openAiGateway: { apiKey, baseUrl?, siteUrl?, siteName?, fetch?, voice? },
+  local: { baseUrl?, fetch? },
+})
+```
+
+Legal pairs are `PROTOCOL_PROVIDERS` in `src/kernel/schema.ts` (`isValidPair`).
+Routing table:
+
+| protocol | provider | Requires | Transport |
+| --- | --- | --- | --- |
+| `geminiInteractions` | `google` | `options.gemini` | Interactions API (chat / image / speech) |
+| `openAi` | `openrouter` | `options.openAiGateway` | Lazy chat adapter or `speech.ts` when `outputs.speech` |
+| `openAi` | `local` | optional `options.local` | `POST /v1/chat/completions` SSE |
+
+Errors:
+
+- Missing credential block → `TheorumError` naming the required option.
+- Unsupported pair → `TheorumError` with protocol/provider in the message.
+
+OpenRouter Vercel AI SDK loads **only** on first `complete` for `openAi` +
+`openrouter` chat. Google and local never import it.
+
+## OpenRouter
+
+Internal adapter behind `createProvider` for `openAi` + `openrouter` chat. Hosts
+use `createProvider(profile, { openAiGateway })` — there is no separate public
+OpenRouter entrypoint.
+
+`OpenAiGatewayConfig` (via `CreateProviderOptions.openAiGateway`):
+
+| Field | Role |
+| --- | --- |
+| `apiKey` | Bearer credential |
+| `baseUrl` | Optional API base override |
+| `siteUrl` / `siteName` | Optional HTTP-Referer / X-Title style metadata |
+| `fetch` | Optional custom fetch |
+| `voice` | Optional fallback when `outputs.speech.voice` omitted |
+
+Chat and speech requests use `ProviderCompleteRequest.apiId` on the wire — same
+field as Google Interactions and local OpenAI-compat paths.
+
+`toOpenAiChatPayload` maps `ProviderCompleteRequest` → OpenAI chat-completions
+body (messages, tools, structured output, thinking / `reasoning.effort`).
+
+`createOpenRouterProvider(config)` (internal) streams normalized `TurnEvent`s;
+terminal `done.stop` via `turnStopFromOpenAiFinishReason`.
+
+## Google Interactions
+
+`createInteractionsProvider(geminiTransport)` streams normalized `TurnEvent`s.
+
+| Concern | Behavior |
+| --- | --- |
+| History | `user_input` / `model_output` steps |
+| Multimodal | `image` / `audio` / `video` / `document` parts |
+| Structured | `responseFormat` JSON schema when enforced |
+| Output modes | Image / speech / structured are mutually exclusive |
+| Tools | Catalog `interactionsType` builtins + host `dynamicTools` (`type: function`) |
+| Code execution | Builtin `codeExecution` → `{ type: "code_execution" }`. Streamed `step.start` / `step.delta` / `step.stop`, `interaction.status_update` (`requires_action` for host tools), and batched `interaction.steps` become `evidence` (`kind`, `code`, `result`, `isError`, `raw`) plus `media` for sandbox images. Search/maps/`url_context` steps in `steps[]` are also `evidence`. Structured `responseFormat` is still attached when both are requested. |
+| Stream vs batch | Default `stream: true` (`?alt=sse`). `TurnRequest.stream: false` POSTs JSON and yields the same `TurnEvent` types from `steps[]`. |
+| Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / maps tool payloads (`search_suggestions` chips, annotations). Emits `grounding` (normalized) plus `evidence` with the raw tool payload so hosts can decide what to surface. |
+| Stop | `turnStopFromInteractionStatus` on terminal status |
+
+## Local provider
+
+Import `theorum/providers/local` for `createLocalProvider` /
+`DEFAULT_LOCAL_BASE_URL` (`http://127.0.0.1:11434`). Hosts resolve `OLLAMA_HOST`
+(or similar) themselves and pass `baseUrl` here — THEORUM does not read
+environment variables for local endpoints. The `local/local.ts` module header
+points at this contract (`docs/contracts/providers.md`).
+
+```ts
+local: {
+  baseUrl: "http://127.0.0.1:11434", // no trailing slash
+  fetch: customFetch,
+}
+```
+
+- Raw `fetch` + `sse.ts` — no SDK.
+- Accumulates streaming tool calls; maps `finish_reason` through
+  `turnStopFromOpenAiFinishReason`.
+- Supports multimodal user content when the server accepts OpenAI-style parts.
+
+## Speech roles
+
+When `profile.outputs.speech` is defined and protocol/provider is
+`openAi`/`openrouter`, `createProvider` returns `createSpeechProvider`
+(`openrouter/speech.ts` — OpenAI `/audio/speech`). When protocol/provider is
+`geminiInteractions`/`google`, the same `createInteractionsProvider`
+(`google/google-interactions.ts` / `google/interactions.ts`) handles speech via `responseFormat: audio` +
+`speechConfig`.
+
+| Transport | Module | Path / mechanism | Notes |
+| --- | --- | --- | --- |
+| OpenAI | `openrouter/speech.ts` | `/audio/speech` | `mp3` allowed via `response_format` |
+| Interactions | `google/google-interactions.ts` / `google/interactions.ts` | `responseFormat: { type: 'audio' }` | PCM → WAV; `mp3` rejected at resolve |
+
+Fallback `openAiGateway.voice` when `outputs.speech.voice` omitted.
+
+## Gemini transport
+
+```ts
+createProvider(profile, {
+  gemini: { vault: { freeA, freeB, freeC, paid } },
+})
+```
+
+| Piece | Role |
+| --- | --- |
+| `GeminiTransport` | Vault + optional `fetch` |
+| Buckets | `freeA`, `freeB`, `freeC`, `paid` |
+| Selection | `model.key` / `ModelSpec.key` / `keyBuiltins` |
+
+Overflow to `paid` is host policy, not inferred here.
+
+## Exported API
+
+From `src/providers/mod.ts`:
+
+| Export | Kind |
+| --- | --- |
+| `createProvider` | function |
+| `CreateProviderOptions` | type |
+| `GeminiTransport`, `GeminiVault` | types |
+| `LocalProviderConfig`, `OpenAiGatewayConfig` | types |
+
+From `src/providers/local/mod.ts` (`theorum/providers/local`):
+
+| Export | Kind |
+| --- | --- |
+| `createLocalProvider` | function |
+| `DEFAULT_LOCAL_BASE_URL` | const |
+
+```theorum-evidence
+{
+  "sections": {
+    "Export": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/mod.ts" },
+        { "kind": "config", "path": "package.json" }
+      ]
+    },
+    "Ownership": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/mod.ts" },
+        { "kind": "graph", "path": "docs/_map.mjs" }
+      ]
+    },
+    "Package boundary": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/create-provider.ts" },
+        { "kind": "contract_test", "path": "tests/providers/create-provider.test.ts" }
+      ]
+    },
+    "createProvider": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/create-provider.ts" },
+        { "kind": "contract_test", "path": "tests/providers/create-provider.test.ts" }
+      ]
+    },
+    "OpenRouter": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/openrouter/chat.ts" },
+        { "kind": "source", "path": "src/providers/openrouter/openai/chat-payload.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter/chat.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter/openai/chat-payload.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter/openai/compat.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter/openai/sdk-messages.test.ts" }
+      ]
+    },
+    "Google Interactions": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/google/google-interactions.ts" },
+        { "kind": "source", "path": "src/providers/google/interactions.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/interactions.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/google-interactions.test.ts" }
+      ]
+    },
+    "Local provider": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/local/local.ts" },
+        { "kind": "source", "path": "src/providers/local/mod.ts" },
+        { "kind": "contract_test", "path": "tests/providers/local/local.test.ts" }
+      ]
+    },
+    "Speech roles": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/openrouter/speech.ts" },
+        { "kind": "source", "path": "src/providers/google/google-interactions.ts" },
+        { "kind": "source", "path": "src/providers/google/interactions.ts" },
+        { "kind": "contract_test", "path": "tests/providers/openrouter/speech.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/speech-interactions.test.ts" }
+      ]
+    },
+    "Gemini transport": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/google/keys.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/keys.test.ts" }
+      ]
+    },
+    "Exported API": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/mod.ts" },
+        { "kind": "contract_test", "path": "tests/providers/create-provider.test.ts" }
+      ]
+    }
+  }
+}
+```

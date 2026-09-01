@@ -10,6 +10,7 @@ await build({
     { name: '.', path: './mod.ts' },
     { name: './kernel', path: './src/kernel/mod.ts' },
     { name: './providers', path: './src/providers/mod.ts' },
+    { name: './providers/local', path: './src/providers/local/mod.ts' },
     { name: './guardrails', path: './src/guardrails/mod.ts' },
     { name: './observability', path: './src/observability/mod.ts' },
     { name: './host', path: './src/host/mod.ts' },
@@ -61,21 +62,13 @@ await build({
   postBuild: async () => {
     await Deno.copyFile('README.md', `${outDir}/README.md`);
     await Deno.copyFile('LICENSE', `${outDir}/LICENSE`);
-    // Co-located contracts ship inside esm/src via the normal dnt copy of src/.
-    // Also mirror them under docs/ for npm consumers who browse the tarball root.
-    await Deno.mkdir(`${outDir}/docs`, { recursive: true });
-    const contracts: Array<[string, string]> = [
-      ['src/kernel/CONTRACT.md', 'docs/kernel.md'],
-      ['src/providers/CONTRACT.md', 'docs/providers.md'],
-      ['src/guardrails/CONTRACT.md', 'docs/guardrails.md'],
-      ['src/observability/CONTRACT.md', 'docs/observability.md'],
-      ['src/host/CONTRACT.md', 'docs/host.md'],
-      ['src/cli/CONTRACT.md', 'docs/cli.md'],
-      ['src/presets/CONTRACT.md', 'docs/presets.md'],
-      ['src/presets/GOOGLE.md', 'docs/presets-google.md'],
-    ];
-    for (const [from, to] of contracts) {
-      await Deno.copyFile(from, `${outDir}/${to}`);
+
+    // Repo contracts / docs-truth must not ship. dnt may copy co-located *.md
+    // under esm/src — strip them from the npm tree.
+    for await (const file of walkFiles(`${outDir}`)) {
+      if (file.endsWith('.md') && !file.endsWith(`${outDir}/README.md`)) {
+        await Deno.remove(file);
+      }
     }
 
     // npm publish rejects bin paths with a leading "./" and silently drops them.
@@ -94,3 +87,14 @@ await build({
     await Deno.writeTextFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   },
 });
+
+async function* walkFiles(dir: string): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(dir)) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory) {
+      yield* walkFiles(path);
+    } else if (entry.isFile) {
+      yield path;
+    }
+  }
+}

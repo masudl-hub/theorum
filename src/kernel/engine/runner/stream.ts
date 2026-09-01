@@ -66,17 +66,17 @@ async function* yieldProviderEvents(args: {
   generation: ResolvedGeneration;
   system: string;
   provider: ModelProvider;
-  gemini: Record<string, unknown>[];
+  upstream: Record<string, unknown>[];
   signal?: AbortSignal;
 }): AsyncGenerator<TurnEvent> {
-  const { profile, generation, system, provider, gemini, signal } = args;
+  const { profile, generation, system, provider, upstream, signal } = args;
   const { canary } = generation;
   throwIfAborted(signal);
   for await (const event of provider.complete({
     ...providerCompleteRequest(generation, system),
     signal,
-    tapGemini: (row) => {
-      gemini.push(row);
+    tapUpstream: (row) => {
+      upstream.push(row);
     },
   })) {
     throwIfAborted(signal);

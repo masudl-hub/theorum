@@ -75,7 +75,6 @@ const gemini31FlashLiteImage: ModelSpec = {
 
 const gemini31FlashTts: ModelSpec = {
   apiId: 'gemini-3.1-flash-tts-preview',
-  openRouterId: 'google/gemini-3.1-flash-tts-preview',
   thinking: { on: 'minimal', off: 'minimal' },
   thinkingLevels: ['minimal'],
   summaries: { on: 'none', off: 'none' },
@@ -85,8 +84,7 @@ const gemini31FlashTts: ModelSpec = {
 };
 
 const sonar: ModelSpec = {
-  apiId: 'sonar',
-  openRouterId: 'perplexity/sonar',
+  apiId: 'perplexity/sonar',
   thinking: { on: 'high', off: 'low' },
   thinkingLevels: [...PRO_THINKING],
   summaries: { on: 'none', off: 'none' },

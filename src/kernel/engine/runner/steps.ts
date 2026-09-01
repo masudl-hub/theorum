@@ -24,10 +24,6 @@ function isStepLimitReached(step: number, maxSteps: number): boolean {
   return step >= maxSteps;
 }
 
-function isGeminiInteractions(profile: Profile): boolean {
-  return profile.model.protocol === 'geminiInteractions' && profile.model.provider === 'google';
-}
-
 function generationForProviderStep(
   generation: ResolvedGeneration,
   state: StepExecutionState,
@@ -58,7 +54,7 @@ async function* executeAutonomousStep(
     generation: ResolvedGeneration;
     system: string;
     provider: ModelProvider;
-    gemini: Record<string, unknown>[];
+    upstream: Record<string, unknown>[];
     signal?: AbortSignal;
   },
   state: StepExecutionState,
@@ -67,7 +63,7 @@ async function* executeAutonomousStep(
     holdUserVisible: false,
   },
 ): AsyncGenerator<TurnEvent, { pendingTools: TurnEvent[]; latestStructured?: unknown }> {
-  const { profile, generation, system, provider, gemini, signal } = args;
+  const { profile, generation, system, provider, upstream, signal } = args;
   const genForStep = generationForProviderStep(generation, state);
   const pendingTools: TurnEvent[] = [];
   let latestStructured: unknown;
@@ -77,7 +73,7 @@ async function* executeAutonomousStep(
     generation: genForStep,
     system,
     provider,
-    gemini,
+    upstream,
     signal,
   })) {
     captureInteractionId(event, state);
@@ -196,7 +192,7 @@ async function* handlePendingDynamicTools(
   state: StepExecutionState,
 ): AsyncGenerator<TurnEvent, boolean> {
   let hasRunnableHandler = false;
-  const useInteractionsContinuation = isGeminiInteractions(profile);
+  const useInteractionsContinuation = generation.transport === 'interactions';
   for (const toolEv of pendingTools) {
     const tool = toolEv.tool;
     if (!tool) {
@@ -245,10 +241,10 @@ async function* executeAttempt(args: {
   generation: ResolvedGeneration;
   system: string;
   provider: ModelProvider;
-  gemini: Record<string, unknown>[];
+  upstream: Record<string, unknown>[];
   state: StepExecutionState;
 }): AsyncGenerator<TurnEvent, { pendingTools: TurnEvent[]; latestStructured?: unknown }> {
-  const { profile, generation, system, provider, gemini, state } = args;
+  const { profile, generation, system, provider, upstream, state } = args;
   let latestStructured: unknown;
   let pendingTools: TurnEvent[] = [];
   let stepInAttempt = 0;
@@ -260,7 +256,7 @@ async function* executeAttempt(args: {
     stepInAttempt++;
     state.stepCount++;
     const stepResult = yield* executeAutonomousStep(
-      { profile, generation, system, provider, gemini, signal: args.safe.signal },
+      { profile, generation, system, provider, upstream, signal: args.safe.signal },
       state,
       { holdLate, holdUserVisible },
     );

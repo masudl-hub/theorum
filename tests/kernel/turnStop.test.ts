@@ -10,16 +10,16 @@ import {
   shouldAutoContinue,
   turnStopFromClientStreamEnd,
   turnStopFromInteractionStatus,
-  turnStopFromOpenRouter,
+  turnStopFromOpenAiFinishReason,
 } from '../../src/kernel/stop.ts';
 
-Deno.test('turnStopFromOpenRouter maps normalized reasons', () => {
-  assertEquals(turnStopFromOpenRouter('stop').kind, 'completed');
-  assertEquals(turnStopFromOpenRouter('length').kind, 'length');
-  assertEquals(turnStopFromOpenRouter('error').kind, 'provider_error');
-  assertEquals(turnStopFromOpenRouter('stop', 'network_error').kind, 'provider_error');
-  assertEquals(turnStopFromOpenRouter('tool_calls').kind, 'tool');
-  assertEquals(turnStopFromOpenRouter('content_filter').kind, 'filtered');
+Deno.test('turnStopFromOpenAiFinishReason maps normalized reasons', () => {
+  assertEquals(turnStopFromOpenAiFinishReason('stop').kind, 'completed');
+  assertEquals(turnStopFromOpenAiFinishReason('length').kind, 'length');
+  assertEquals(turnStopFromOpenAiFinishReason('error').kind, 'provider_error');
+  assertEquals(turnStopFromOpenAiFinishReason('stop', 'network_error').kind, 'provider_error');
+  assertEquals(turnStopFromOpenAiFinishReason('tool_calls').kind, 'tool');
+  assertEquals(turnStopFromOpenAiFinishReason('content_filter').kind, 'filtered');
 });
 
 Deno.test('turnStopFromInteractionStatus maps terminal statuses', () => {

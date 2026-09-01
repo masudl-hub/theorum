@@ -8,6 +8,7 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
+import { MEDIA_INPUT_KINDS } from '../schema.ts';
 import type {
   BuiltinToolId,
   Catalog,
@@ -64,43 +65,6 @@ function resetTools(): void {
   }
   Object.assign(CATALOG.tools, HARNESS_TOOLS);
 }
-
-/** MIME essence → normalized media part category (shared ingress map). */
-const MEDIA_INPUT_KINDS: Record<string, MediaInputKind> = {
-  'image/png': 'image',
-  'image/jpeg': 'image',
-  'image/jpg': 'image',
-  'image/webp': 'image',
-  'image/heic': 'image',
-  'image/heif': 'image',
-  'audio/wav': 'audio',
-  'audio/x-wav': 'audio',
-  'audio/mpeg': 'audio',
-  'audio/mp3': 'audio',
-  'audio/aiff': 'audio',
-  'audio/aac': 'audio',
-  'audio/ogg': 'audio',
-  'audio/flac': 'audio',
-  'audio/webm': 'audio',
-  'audio/mp4': 'audio',
-  'audio/pcm': 'audio',
-  'video/mp4': 'video',
-  'video/mpeg': 'video',
-  'video/quicktime': 'video',
-  'video/x-msvideo': 'video',
-  'video/x-flv': 'video',
-  'video/mpg': 'video',
-  'video/webm': 'video',
-  'video/wmv': 'video',
-  'video/x-ms-wmv': 'video',
-  'video/3gpp': 'video',
-  'application/pdf': 'document',
-  'text/plain': 'document',
-  'text/csv': 'document',
-  'text/markdown': 'document',
-  'text/html': 'document',
-  'application/json': 'document',
-};
 
 function mimeEssence(mime: string): string {
   const [base] = mime.split(';');

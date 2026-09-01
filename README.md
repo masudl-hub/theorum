@@ -84,7 +84,7 @@ flowchart TD
     Runner --> TraceSink
 ```
 
-Hosts bind transports with `createProvider(profile, { gemini, openRouter })`. One door; protocol/provider (and speech role) pick the adapter.
+Hosts bind transports with `createProvider(profile, { gemini, openAiGateway })`. One door; protocol/provider (and speech role) pick the adapter.
 
 ### Turn Lifecycle
 
@@ -157,7 +157,6 @@ const profile = defineProfile({
     config: {
       hostFastModel: {
         apiId: "perplexity/sonar",
-        openRouterId: "perplexity/sonar",
         thinking: { on: "high", off: "minimal" },
         thinkingLevels: ["minimal", "low", "medium", "high"],
         summaries: { on: "auto", off: "none" },
@@ -244,7 +243,6 @@ const guardedProfile = defineProfile({
     config: {
       hostFastModel: {
         apiId: "perplexity/sonar",
-        openRouterId: "perplexity/sonar",
         thinking: { on: "high", off: "minimal" },
         thinkingLevels: ["minimal", "low", "medium", "high"],
         summaries: { on: "auto", off: "none" },
@@ -289,7 +287,7 @@ import { createProvider, runTurn } from "jsr:@theorum/core";
 
 const provider = createProvider(profile, {
   gemini: { vault: hostGeminiKeyVault, fetch },
-  openRouter: { apiKey: hostSecrets.openRouterApiKey },
+  openAiGateway: { apiKey: hostSecrets.openRouterApiKey },
   // openAi + local — optional; default baseUrl http://127.0.0.1:11434
   local: { baseUrl: hostResolvedLocalBaseUrl },
 });
@@ -299,7 +297,7 @@ for await (const event of runTurn({ profile: profile.id, input: { text: "…" } 
 }
 ```
 
-`createProvider` routes from `profile.model.protocol` / `provider`. Speech roles use the same call — Interactions when Google, `/audio/speech` when openAi/openrouter (same `openRouter` credentials).
+`createProvider` routes from `profile.model.protocol` / `provider`. Speech roles use the same call — Interactions when Google, `/audio/speech` when openAi/openrouter (same `openAiGateway` credentials).
 
 | Profile | Transport |
 | :--- | :--- |
@@ -310,12 +308,13 @@ for await (const event of runTurn({ profile: profile.id, input: { text: "…" } 
 
 Local adapters take an optional `baseUrl` (default `http://127.0.0.1:11434`). THEORUM does not read `OLLAMA_HOST`; hosts that honor that env should resolve it and pass `local.baseUrl`. History `parts` (including images) are mapped on the wire; `done` events include a normalized `stop` from the OpenAI `finish_reason`.
 
-OpenRouter uses Vercel AI SDK Core inside THEORUM's provider adapter. That stack
-loads **lazily on the first `complete` call** for `openAi` + `openrouter` chat —
-not when importing THEORUM, and not for Google or local providers. The adapter
-still emits THEORUM `TurnEvent` values and preserves raw provider evidence for
-citations/provenance where the normalized SDK stream does not expose enough detail.
-Use `createProvider` for all OpenRouter turns; the adapter and payload helpers
+OpenRouter uses Vercel AI SDK Core inside THEORUM's provider adapter. Provider
+adapters load **lazily on the first `complete` call** for the selected transport —
+not when importing THEORUM. Importing `createProvider` alone does not pull in
+Google Interactions, OpenRouter/AI SDK, speech, or local adapter graphs.
+The OpenRouter adapter still emits THEORUM `TurnEvent` values and preserves raw
+provider evidence for citations/provenance where the normalized SDK stream does
+not expose enough detail. Use `createProvider` for all turns; adapter modules
 stay internal to the providers package.
 
 ---
@@ -326,7 +325,8 @@ stay internal to the providers package.
 | :--- | :--- |
 | `jsr:@theorum/core` / `theorum` | Main kernel API: profiles, schemas, runner, core types, provider constructors. |
 | `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile/turn types, tool catalog, `requireModelSpec`, thinking clamps over host model maps. |
-| `jsr:@theorum/core/providers` / `theorum/providers` | `createProvider` + Gemini vault types. |
+| `jsr:@theorum/core/providers` / `theorum/providers` | `createProvider` + Gemini vault types + host option bags. |
+| `jsr:@theorum/core/providers/local` / `theorum/providers/local` | Direct local OpenAI-compat adapter (`createLocalProvider`, `DEFAULT_LOCAL_BASE_URL`). |
 | `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
 | `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
 | `jsr:@theorum/core/host` / `theorum/host` | Optional Deno HTTP helpers (`json`, status mapping, cutout mint flush). |
@@ -349,31 +349,41 @@ Named exports from the root barrel (same symbols hosts get from `theorum` /
 | Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
 | Runner | `runTurn` |
 | Catalog | `CATALOG`, `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
+| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_PERMISSION_TIERS` |
 | Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn` |
 | Structured | `getStructured`, `registerStructured`, `executeTool` |
-| Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenRouter` |
+| Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenAiFinishReason` |
 | Observability | `jsonlSink`, `memorySink`, `noopSink`, `resolveTraceDir`, `sinkFromDir`, `writeTrace`, `TraceRecord` |
-| Providers | `CreateProviderOptions`, `GeminiTransport`, `GeminiVault`, `LocalProviderConfig`, `createLocalProvider`, `createProvider`, `DEFAULT_LOCAL_BASE_URL` |
+| Providers | `CreateProviderOptions`, `GeminiTransport`, `GeminiVault`, `LocalProviderConfig`, `OpenAiGatewayConfig`, `createProvider` (local: `theorum/providers/local` → `createLocalProvider`, `DEFAULT_LOCAL_BASE_URL`) |
 
 Kernel types re-exported through this barrel follow `export type *` from
-`src/kernel/types.ts` (see `src/kernel/CONTRACT.md`).
+`src/kernel/types.ts` (behavioral detail for contributors: repo
+`docs/contracts/kernel.md`).
 
 ---
 
 ## Documentation
 
-Package docs are co-located with each public export (plus this README for `.`):
+THEORUM keeps **package docs** and **repo contracts** separate.
 
-| Doc | Export |
+| Surface | What it is | In the published package? |
+| --- | --- | --- |
+| **This README** | How hosts use THEORUM (API, boundaries, examples) | Yes |
+| **Repo contracts** (`docs/contracts/*.md`) | Maintainer ownership + behavioral specs for docs-truth | **No** — GitHub / clone only |
+| **Docs-truth** (`docs/DOCS_TRUTH.md`, `docs/_map.mjs`) | Lint graph that enforces those contracts | **No** |
+
+On GitHub, module contracts:
+
+| Doc (repo only) | Export |
 | :--- | :--- |
-| [`src/kernel/CONTRACT.md`](src/kernel/CONTRACT.md) | `theorum/kernel` — profiles, runner, compaction, stop/resume |
-| [`src/providers/CONTRACT.md`](src/providers/CONTRACT.md) | `theorum/providers` — `createProvider`, secrets boundary |
-| [`src/guardrails/CONTRACT.md`](src/guardrails/CONTRACT.md) | `theorum/guardrails` |
-| [`src/observability/CONTRACT.md`](src/observability/CONTRACT.md) | `theorum/observability` |
-| [`src/host/CONTRACT.md`](src/host/CONTRACT.md) | `theorum/host` |
-| [`src/cli/CONTRACT.md`](src/cli/CONTRACT.md) | `theorum/cli` |
-| [`src/presets/CONTRACT.md`](src/presets/CONTRACT.md) | `theorum/presets` |
-| [`src/presets/GOOGLE.md`](src/presets/GOOGLE.md) | `theorum/presets/google` |
+| [`docs/contracts/kernel.md`](docs/contracts/kernel.md) | `theorum/kernel` |
+| [`docs/contracts/providers.md`](docs/contracts/providers.md) | `theorum/providers` |
+| [`docs/contracts/guardrails.md`](docs/contracts/guardrails.md) | `theorum/guardrails` |
+| [`docs/contracts/observability.md`](docs/contracts/observability.md) | `theorum/observability` |
+| [`docs/contracts/host.md`](docs/contracts/host.md) | `theorum/host` |
+| [`docs/contracts/cli.md`](docs/contracts/cli.md) | `theorum/cli` |
+| [`docs/contracts/presets.md`](docs/contracts/presets.md) | `theorum/presets` |
+| [`docs/contracts/presets-google.md`](docs/contracts/presets-google.md) | `theorum/presets/google` |
 
 Document health is enforced by `npm run lint:docs` — the **first** step of
 `npm run lint` / `deno task lint` (`docs/_map.mjs`):
@@ -382,6 +392,7 @@ Document health is enforced by `npm run lint:docs` — the **first** step of
 - Export parity with `package.json` and export-drift vs entry `mod.ts` files
 - Doc + **section** freshness on every code change (no Export-only gaming)
 - Behavioral sections require `contract_test` evidence (≥2 supports each)
+- Publish gates keep `docs/` and `src/**/*.md` out of npm/JSR (`verify-publish-bundle`)
 - Pre-commit runs `lint:docs` automatically (`prepare` installs the hook on `npm install`)
 
 ---
@@ -439,9 +450,15 @@ env_files_in_package = false
 ambient_secret_reads = false
 business_logic_in_kernel = false
 provider_keys_host_owned = true
+provider_adapters_lazy = true
 trace_sinks_host_injected = true
 realtime_duplex_voice = "out of scope"
 ```
+
+Provider adapters (Google Interactions, OpenRouter/AI SDK, speech, local) load
+only on the first `complete` for that transport — `createProvider` import stays
+light. `trace-attach` lazy-loads Interactions wire helpers only for
+`geminiInteractions` traces.
 
 If an app needs domain rules, platform delivery policy, product copy, database access, or session memory, that belongs outside THEORUM.
 

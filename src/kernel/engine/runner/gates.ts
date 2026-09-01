@@ -246,10 +246,10 @@ async function* executeSingleAttemptCycle(args: {
   profile: Profile;
   system: string;
   provider: ModelProvider;
-  gemini: Record<string, unknown>[];
+  upstream: Record<string, unknown>[];
   maxRetries: number;
 }): AsyncGenerator<TurnEvent, AttemptStepAction> {
-  const { flow, state, profile, system, provider, gemini, maxRetries } = args;
+  const { flow, state, profile, system, provider, upstream, maxRetries } = args;
   const validation = profile.outputs.validation;
   const egress = profile.guardrails.egress;
 
@@ -260,7 +260,7 @@ async function* executeSingleAttemptCycle(args: {
     generation: flow.currentGen,
     system,
     provider,
-    gemini,
+    upstream,
     state,
   });
 
@@ -300,7 +300,7 @@ async function* runAttemptsWithValidation(
   generation: ResolvedGeneration,
   system: string,
   provider: ModelProvider,
-  gemini: Record<string, unknown>[],
+  upstream: Record<string, unknown>[],
   state: StepExecutionState,
 ): AsyncGenerator<TurnEvent> {
   const maxRetries = Math.max(
@@ -321,7 +321,7 @@ async function* runAttemptsWithValidation(
       profile,
       system,
       provider,
-      gemini,
+      upstream,
       maxRetries,
     });
     if (step.status === 'terminal' || step.status === 'success') {

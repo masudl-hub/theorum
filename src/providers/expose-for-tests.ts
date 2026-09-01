@@ -5,6 +5,21 @@
  * @module
  */
 
+/** Subprocess import-isolation probes (`THEORUM_IMPORT_PROBE=1`) log `LOADED:<label>`. */
+export function markModuleLoad(label: string): void {
+  try {
+    const d = (globalThis as Record<string, unknown>).Deno as {
+      env?: { get(key: string): string | undefined };
+      stdout?: { writeSync(data: Uint8Array): void };
+    } | undefined;
+    if (d?.env?.get('THEORUM_IMPORT_PROBE') === '1' && d.stdout?.writeSync) {
+      d.stdout.writeSync(new TextEncoder().encode(`LOADED:${label}\n`));
+    }
+  } catch {
+    // Non-Deno runtime or missing --allow-env.
+  }
+}
+
 export function exposeForTests(bucket: string, api: Record<string, unknown>): void {
   let enabled = false;
   try {

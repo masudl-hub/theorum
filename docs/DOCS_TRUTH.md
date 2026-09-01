@@ -31,6 +31,28 @@ Deterministic document-health lint for THEORUM. No waivers. No LLM.
 | Evidence | ≥2 supports; behavioral sections require `contract_test` |
 | Export drift | Entry `mod.ts` export names appear in owner contract |
 
+## Package vs repo documentation
+
+Two documentation surfaces. Do not mix them in the publish tarball.
+
+| Surface | Lives in | Ships in package? | Maintained by |
+| --- | --- | --- | --- |
+| **Package docs** | `README.md` (consumer how-to) | Yes | docs-truth entry `package` — export tables, public API, boundary |
+| **Repo contracts** | `docs/contracts/*.md`, `docs/DOCS_TRUTH.md`, `docs/_map.mjs` | **No** | docs-truth module entries — ownership, freshness, evidence |
+
+Publish gates:
+
+| Gate | Rule |
+| --- | --- |
+| `package.json` `files` | Must not include `docs/` |
+| `.npmignore` | Excludes `docs/` and `src/**/*.md` |
+| `deno.json` `publish.exclude` | Includes `docs/` and `src/**/*.md` |
+| `scripts/verify-publish-bundle.ts` | Asserts the above before publish |
+| `scripts/build-npm.ts` | Strips residual `*.md` from the dnt output tree (except root README) |
+
+Contracts live under `docs/contracts/` (repo-only). Module code under `src/` stays
+owned by those contracts for freshness — change code, update the matching contract.
+
 ## Production roots
 
 | Root | Files |
@@ -72,6 +94,14 @@ Re-install manually: `npm run hooks:install`
     "Rules": {
       "supports": [
         { "kind": "source", "path": "scripts/docs-truth/graph.mjs" },
+        { "kind": "contract_test", "path": "scripts/docs-truth/graph.test.mjs" }
+      ]
+    },
+    "Package vs repo documentation": {
+      "supports": [
+        { "kind": "config", "path": "package.json" },
+        { "kind": "config", "path": "deno.json" },
+        { "kind": "config", "path": ".npmignore" },
         { "kind": "contract_test", "path": "scripts/docs-truth/graph.test.mjs" }
       ]
     },

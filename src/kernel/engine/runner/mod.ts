@@ -13,6 +13,7 @@ import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { noopSink, type TraceSink, writeTrace } from '../../../observability/trace.ts';
 import { buildRecord } from '../../../observability/trace-record.ts';
 import { pickSystemRole, resolveTurn } from '../../registry/resolve.ts';
+import type { Protocol } from '../../schema.ts';
 import { CONTINUE_INSTRUCTION } from '../../stop.ts';
 import type {
   CompactionSignal,
@@ -142,9 +143,9 @@ async function* emitTurn(args: {
   generation: ResolvedGeneration;
   system: string;
   provider: ModelProvider;
-  gemini: Record<string, unknown>[];
+  upstream: Record<string, unknown>[];
 }): AsyncGenerator<TurnEvent> {
-  const { safe, profile, generation, system, provider, gemini } = args;
+  const { safe, profile, generation, system, provider, upstream } = args;
   if (safe.toolInvoke) {
     yield* invokeFromUi(profile, safe);
     return;
@@ -158,7 +159,7 @@ async function* emitTurn(args: {
     attemptEvents: [],
   };
 
-  yield* runAttemptsWithValidation(safe, profile, generation, system, provider, gemini, state);
+  yield* runAttemptsWithValidation(safe, profile, generation, system, provider, upstream, state);
 
   if (!state.sawTokensEvent) {
     yield* calculateFallbackTokens(safe, system, state.allEmittedEvents);
@@ -179,8 +180,9 @@ type TraceCtx = {
   canary: string;
   system?: string;
   generation?: ResolvedGeneration;
+  protocol?: Protocol;
   safe?: TurnRequest;
-  gemini: Record<string, unknown>[];
+  upstream: Record<string, unknown>[];
   thrown?: unknown;
 };
 
@@ -194,10 +196,11 @@ async function flushTurnTrace(sink: TraceSink, ctx: TraceCtx): Promise<void> {
       model: ctx.model,
       bucket: ctx.bucket,
       thrown: ctx.thrown,
-      gemini: ctx.gemini,
+      upstreamLog: ctx.upstream,
       canary: ctx.canary,
       system: ctx.system,
       generation: ctx.generation,
+      protocol: ctx.protocol,
       sanitizedReq: ctx.safe,
     }),
   );
@@ -214,7 +217,7 @@ async function* runTurn(
     seen: [],
     started: Date.now(),
     canary: '',
-    gemini: [],
+    upstream: [],
   };
   try {
     yield* runTurnBody(ctx, provider);
@@ -233,6 +236,7 @@ async function* runTurnBody(ctx: TraceCtx, provider: ModelProvider): AsyncGenera
   ctx.model = gen.model;
   ctx.bucket = gen.geminiBucket;
   ctx.canary = gen.canary;
+  ctx.protocol = profile.model.protocol;
 
   const isCompacting = ctx.req.metadata?._compacting === true;
   const compactionSpec = isCompacting ? undefined : getCompactionSpec(profile, gen.model);
@@ -280,7 +284,7 @@ async function* streamTurnEvents(
     generation: gen,
     system: ctx.system,
     provider,
-    gemini: ctx.gemini,
+    upstream: ctx.upstream,
   })) {
     const out = await maybeAttachAfter(event, ctx, gen, compactionSpec, isCompacting);
     ctx.seen.push(out);

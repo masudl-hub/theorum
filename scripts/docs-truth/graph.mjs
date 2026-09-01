@@ -346,7 +346,8 @@ function validateEvidenceSupport({ docPath, support, graphPath, graph, errors })
       /CONTRACT\.md$/.test(supportPath) ||
       /GOOGLE\.md$/.test(supportPath) ||
       /OPENROUTER\.md$/.test(supportPath) ||
-      /DOCS_TRUTH\.md$/.test(supportPath);
+      /DOCS_TRUTH\.md$/.test(supportPath) ||
+      supportPath.startsWith('docs/contracts/');
     if (!ok) {
       errors.push(`${docPath}: doc evidence path not allowed: ${supportPath}`);
     }

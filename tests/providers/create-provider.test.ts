@@ -57,7 +57,7 @@ Deno.test('createProvider returns a provider when gemini transport is supplied',
   assertEquals(typeof provider.complete, 'function');
 });
 
-Deno.test('createProvider throws when openRouter config is missing for openAi/openrouter', () => {
+Deno.test('createProvider throws when openAiGateway config is missing for openAi/openrouter', () => {
   const profile = baseProfile({ protocol: 'openAi', provider: 'openrouter' }, false);
   let thrown: unknown;
   try {
@@ -68,19 +68,19 @@ Deno.test('createProvider throws when openRouter config is missing for openAi/op
   assertEquals(thrown instanceof TheorumError, true);
   assertEquals(
     (thrown as Error).message,
-    'createProvider requires openRouter config for openAi/openrouter',
+    'createProvider requires openAiGateway config for openAi/openrouter',
   );
 });
 
 Deno.test('createProvider returns a chat provider for openAi/openrouter non-speech profile', () => {
   const profile = baseProfile({ protocol: 'openAi', provider: 'openrouter' }, false);
-  const provider = createProvider(profile, { openRouter: { apiKey: 'key' } });
+  const provider = createProvider(profile, { openAiGateway: { apiKey: 'key' } });
   assertEquals(typeof provider.complete, 'function');
 });
 
 Deno.test('createProvider returns a speech provider for openAi/openrouter speech profile', () => {
   const profile = baseProfile({ protocol: 'openAi', provider: 'openrouter' }, true);
-  const provider = createProvider(profile, { openRouter: { apiKey: 'key', voice: 'Kore' } });
+  const provider = createProvider(profile, { openAiGateway: { apiKey: 'key', voice: 'Kore' } });
   assertEquals(typeof provider.complete, 'function');
 });
 
@@ -107,15 +107,37 @@ Deno.test('createProvider routes openAi/local without requiring options.local', 
   assertEquals(typeof withUrl.complete, 'function');
 });
 
-Deno.test('create-provider loads OpenRouter adapter only via dynamic import', async () => {
+Deno.test('create-provider has no eager adapter imports', async () => {
   const src = await Deno.readTextFile(
     new URL('../../src/providers/create-provider.ts', import.meta.url),
   );
-  assertEquals(/from\s+['"]\.\/openrouter\.ts['"]/.test(src), false);
-  assertEquals(src.includes("import('./openrouter.ts')"), true);
+  assertEquals(/from\s+['"]\.\/openrouter\//.test(src), false);
+  assertEquals(/from\s+['"]\.\/local\/local\.ts['"]/.test(src), false);
+  assertEquals(/from\s+['"]\.\/google\/google-interactions\.ts['"]/.test(src), false);
+  assertEquals(src.includes("import('./openrouter/chat.ts')"), true);
+  assertEquals(src.includes("import('./google/google-interactions.ts')"), true);
+  assertEquals(src.includes("import('./openrouter/speech.ts')"), true);
+  assertEquals(src.includes("import('./local/local.ts')"), true);
+});
+
+Deno.test('create-provider loads OpenRouter adapter only via dynamic import', async () => {
   // Sync createProvider for openrouter chat must not touch the Vercel graph.
   // This file's suite runs without --allow-sys; an eager openrouter import would throw.
   const profile = baseProfile({ protocol: 'openAi', provider: 'openrouter' }, false);
-  const provider = createProvider(profile, { openRouter: { apiKey: 'key' } });
+  const provider = createProvider(profile, { openAiGateway: { apiKey: 'key' } });
+  assertEquals(typeof provider.complete, 'function');
+});
+
+Deno.test('create-provider loads Google adapter only via dynamic import', () => {
+  const profile = baseProfile({ protocol: 'geminiInteractions', provider: 'google' }, false);
+  const provider = createProvider(profile, {
+    gemini: { vault: { freeA: 'a', freeB: 'b', freeC: 'c', paid: 'p' } },
+  });
+  assertEquals(typeof provider.complete, 'function');
+});
+
+Deno.test('create-provider loads local adapter only via dynamic import', () => {
+  const profile = baseProfile({ protocol: 'openAi', provider: 'local' }, false);
+  const provider = createProvider(profile, {});
   assertEquals(typeof provider.complete, 'function');
 });

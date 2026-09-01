@@ -5,28 +5,28 @@ function providerCompleteRequest(
   generation: ResolvedGeneration,
   system: string,
 ): ProviderCompleteRequest {
+  const isInteractions = generation.transport === 'interactions';
   return {
     model: generation.model,
     apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
-    previousInteractionId: generation.previousInteractionId,
-    store: generation.store,
-    stream: generation.stream,
+    previousInteractionId: isInteractions ? generation.previousInteractionId : undefined,
+    store: isInteractions ? generation.store : undefined,
+    stream: isInteractions ? generation.stream : undefined,
     thinking: generation.thinking,
-    summaries: generation.summaries,
+    summaries: isInteractions ? generation.summaries : undefined,
     maxOutputTokens: generation.maxOutputTokens,
     temperature: generation.temperature,
     builtins: generation.builtins,
     system,
     input: generation.input,
     history: generation.history,
-    interactionOnlyInput: generation.interactionOnlyInput,
+    interactionOnlyInput: isInteractions ? generation.interactionOnlyInput : undefined,
     dynamicTools: generation.dynamicTools,
     dynamicToolLoader: generation.dynamicToolLoader,
     structured: generation.structured,
     image: generation.image,
     speech: generation.speech,
-    geminiBucket: generation.geminiBucket,
+    geminiBucket: isInteractions ? generation.geminiBucket : undefined,
   };
 }
 

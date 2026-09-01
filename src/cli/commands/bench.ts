@@ -122,7 +122,7 @@ async function measureRawProvider(provider: ModelProvider): Promise<TimingResult
     model: 'bench-model',
     apiId: 'bench-model',
     thinking: 'none',
-    summaries: 'none',
+    summaries: undefined,
     maxOutputTokens: 4096,
     temperature: 0,
     builtins: [],

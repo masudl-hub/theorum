@@ -8,8 +8,47 @@
  * @module
  */
 
-/** Model reasoning effort level normalized across provider adapters. */
-export type ThinkingLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+import type {
+  CompactionMeter,
+  CompactionTiming,
+  ControlId,
+  EgressOnBlock,
+  FieldMeta,
+  GeminiBucket,
+  GeminiFreeBucket,
+  MediaInputKind,
+  Protocol,
+  Provider,
+  SchemaEnforcement,
+  SpeechAudioFormat,
+  StreamMode,
+  SummaryMode,
+  ThinkingLevel,
+  ToolLoadTier,
+  ToolPermissionTier,
+  TurnStopKind,
+} from './schema.ts';
+
+export type {
+  CompactionMeter,
+  CompactionTiming,
+  ControlId,
+  EgressOnBlock,
+  FieldMeta,
+  GeminiBucket,
+  GeminiFreeBucket,
+  MediaInputKind,
+  Protocol,
+  Provider,
+  SchemaEnforcement,
+  SpeechAudioFormat,
+  StreamMode,
+  SummaryMode,
+  ThinkingLevel,
+  ToolLoadTier,
+  ToolPermissionTier,
+  TurnStopKind,
+};
 
 /** Any host-declared model id. */
 export type ModelId = string;
@@ -26,21 +65,11 @@ export type ToolId = BuiltinToolId | CustomToolId;
 /** Id of a host-registered structured output schema. */
 export type StructuredSchemaId = string;
 
-/** Normalized multimodal part category (image, audio, video, document). */
-export type MediaInputKind = 'image' | 'audio' | 'video' | 'document';
-
 /** Host-owned profile identifier. */
 export type ProfileId = string;
 
-/** Named Gemini key bucket used by host-provided transports. */
-export type GeminiBucket = 'freeA' | 'freeB' | 'freeC' | 'paid';
-/** Gemini bucket that may overflow to the paid bucket after quota backoff. */
-export type GeminiFreeBucket = Exclude<GeminiBucket, 'paid'>;
-
 /** Message role accepted by provider history mappers. */
 export type ChatRole = 'system' | 'user' | 'assistant';
-/** Profile-level control a caller may toggle at turn time. */
-export type ControlId = 'thinking';
 
 /**
  * Image-role output pins owned by the host profile.
@@ -81,15 +110,14 @@ export interface ThinkingMap {
 
 /** Provider summary behavior used when a boolean thinking control is on or off. */
 export interface SummaryMap {
-  on: 'auto' | 'none';
-  off: 'auto' | 'none';
+  on: SummaryMode;
+  off: SummaryMode;
 }
 
 /** Host-declared metadata THEORUM needs to call a model safely. */
 export interface ModelSpec {
+  /** Provider wire model id for the configured provider. */
   apiId: string;
-  /** Provider-native id for OpenRouter-compatible gateways. Defaults to `google/${apiId}`. */
-  openRouterId?: string;
   thinking: ThinkingMap;
   /** Levels this model accepts. Illegal values are clamped via `thinkingLevels`. */
   thinkingLevels: ThinkingLevel[];
@@ -110,17 +138,6 @@ export interface ModelSpec {
   /** Optional compaction policy for this model's context window. */
   compaction?: CompactionSpec;
 }
-
-/**
- * What the compaction threshold meters.
- *
- * - `'history'` (default) — conversational history only (`TurnInput.historyTokens`
- *   or a local estimate of `history`). Excludes system, tool schemas, and this
- *   turn's attachments.
- * - `'input'` — full-prompt provider input tokens (`TurnInput.inputTokens` for
- *   `timing: 'before'`, this turn's `tokens.input` for `timing: 'after'`).
- */
-export type CompactionMeter = 'history' | 'input';
 
 /**
  * Context supplied to a custom compaction trigger.
@@ -170,7 +187,7 @@ export interface CompactionSpec {
    * - `'before'`: kernel compacts synchronously before the turn; user pays latency on this turn.
    * - `'after'`: kernel signals in the `done` event; host runs compaction asynchronously.
    */
-  timing: 'before' | 'after';
+  timing: CompactionTiming;
   /**
    * Threshold meter. Defaults to `'history'`.
    * Use `'input'` when the host prefers provider full-prompt usage (after
@@ -203,7 +220,7 @@ export interface ToolCatalogEntry {
 
 /** Host-registered structured output schema and enforcement mode. */
 export interface StructuredSpec {
-  enforced: 'responseFormat' | 'prompt';
+  enforced: SchemaEnforcement;
   jsonSchema?: Record<string, unknown>;
 }
 
@@ -261,14 +278,6 @@ export interface ProfileValidationSpec {
 }
 
 /**
- * Audio container for speech generation output.
- * - `openAi` speech (`/audio/speech`): sent as wire `response_format`.
- * - `geminiInteractions`: only `pcm` (or omit). Google returns PCM; THEORUM emits WAV.
- *   `mp3` is rejected at resolve.
- */
-export type SpeechAudioFormat = 'pcm' | 'mp3';
-
-/**
  * Speech-role output pins owned by the host profile.
  * The speech model itself lives in `model.allow` / `model.config`.
  * Namespaced under `outputs.speech` so `voice` here is the TTS voice id,
@@ -285,17 +294,12 @@ export interface ProfileSpeechSpec {
 
 /** Stream delivery controls enforced by the kernel. */
 export interface ProfileStreamingSpec {
-  mode?: 'sse' | 'buffered';
+  mode?: StreamMode;
   streamThoughts?: boolean;
   gateMedia?: boolean;
 }
 
-export type {
-  ProfileResumeSpec,
-  TurnContinueFrom,
-  TurnStop,
-  TurnStopKind,
-} from './stop.ts';
+export type { ProfileResumeSpec, TurnContinueFrom, TurnStop } from './stop.ts';
 
 import type { ProfileResumeSpec, TurnContinueFrom, TurnStop } from './stop.ts';
 
@@ -324,7 +328,7 @@ export type EgressEnforcer = (
 /** Profile egress policy for rejection, retry, or refusal behavior. */
 export interface ProfileEgressSpec {
   enforce: EgressEnforcer;
-  onBlock?: 'reject_to_agent' | 'refuse_to_user';
+  onBlock?: EgressOnBlock;
   maxRetries?: number;
   repairGuidance?: string;
 }
@@ -341,8 +345,8 @@ export interface ProfileGuardrailsSpec {
 
 /** Model, provider, thinking, and step bounds for a profile. */
 export interface ProfileModelSpec {
-  protocol: 'geminiInteractions' | 'openAi';
-  provider: 'google' | 'openrouter' | 'local';
+  protocol: Protocol;
+  provider: Provider;
   /** Ids this profile may select. Each id must exist in `config`. */
   allow: ModelId[];
   /** Host-owned wire config keyed by the same ids used in `allow` / `select`. */
@@ -441,11 +445,6 @@ export interface TurnHistoryMessage {
   name?: string;
   metadata?: Record<string, unknown>;
 }
-
-/** Tool visibility tier used by host dynamic-loading strategies. */
-export type ToolLoadTier = 'T0' | 'T1' | 'T2';
-/** Execution authorization tier for dynamic tools. */
-export type ToolPermissionTier = 'auto' | 'session_consent' | 'always_confirm';
 
 /** Context supplied to a dynamic tool authorization hook. */
 export interface DynamicToolExecutionContext {
@@ -580,22 +579,26 @@ export interface ProjectedProfile {
 /** Provider selection and generation knobs shared before and after resolution. */
 export interface ProviderGenerationConfig {
   model: ModelId;
-  /** Provider-native model id taken from the profile model spec. */
+  /** Provider wire model id taken from the profile model spec. */
   apiId: string;
-  openRouterId?: string;
   previousInteractionId?: string;
   store?: boolean;
   /** Google Interactions: omit or `true` for SSE; `false` for a single JSON interaction. */
   stream?: boolean;
   thinking: ThinkingLevel;
-  summaries: 'auto' | 'none';
+  summaries: SummaryMode;
   maxOutputTokens: number;
   temperature: number;
   builtins: BuiltinToolId[];
 }
 
+/** Resolved provider transport derived once in `resolveTurn`. */
+export type ProviderTransport = 'interactions' | 'openAiCompat';
+
 /** Fully-resolved provider request state created from a `TurnRequest`. */
 export interface ResolvedGeneration extends ProviderGenerationConfig {
+  /** Resolved transport — `'interactions'` for Google Gemini, `'openAiCompat'` otherwise. */
+  transport: ProviderTransport;
   custom: CustomToolId[];
   dynamicTools?: DynamicToolDeclaration[];
   dynamicToolLoader?: DynamicToolLoader;
@@ -719,14 +722,27 @@ export interface TurnEvent {
   stop?: TurnStop;
 }
 
-/** Provider-neutral request object sent from the kernel to a model adapter. */
-export interface ProviderCompleteRequest extends ProviderGenerationConfig {
+/**
+ * Provider-neutral request object sent from the kernel to a model adapter.
+ *
+ * Several fields are **Interactions-only** and omitted for non-Google providers:
+ * `previousInteractionId`, `store`, `stream`, `summaries`,
+ * `interactionOnlyInput`, `geminiBucket`.
+ * Adapters must tolerate their absence.
+ */
+export interface ProviderCompleteRequest extends Omit<ProviderGenerationConfig, 'summaries'> {
+  /**
+   * Interactions-only: thinking-summary behavior.
+   * Omitted (undefined) for non-Google providers.
+   */
+  summaries?: SummaryMode;
   system: string;
   input: InteractionPart[];
   history?: TurnHistoryMessage[];
   /**
    * Interactions-only: when set, sent as the request `input` array instead of
    * history + user parts (e.g. a lone `function_result` continuation step).
+   * Omitted for non-Google providers.
    */
   interactionOnlyInput?: Record<string, unknown>[];
   dynamicTools?: DynamicToolDeclaration[];
@@ -736,11 +752,11 @@ export interface ProviderCompleteRequest extends ProviderGenerationConfig {
   speech?: ProfileSpeechSpec;
   /**
    * Gemini vault slot for Google Interactions transport only.
-   * Required when completing via Google Interactions.
+   * Required when completing via Google Interactions; omitted otherwise.
    */
   geminiBucket?: GeminiBucket;
   /** Scrubbed SSE / HTTP rows for traces. */
-  tapGemini?: (row: Record<string, unknown>) => void;
+  tapUpstream?: (row: Record<string, unknown>) => void;
   /** Host abort signal — adapters should pass this into fetch / SDK calls. */
   signal?: AbortSignal;
 }

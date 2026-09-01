@@ -1,21 +1,15 @@
 /**
  * Normalized turn stop reasons and resume policy.
  *
- * Providers map Interactions `status` / OpenRouter `finish_reason` into `TurnStop`.
+ * Providers map Interactions `status` / OpenAI `finish_reason` into `TurnStop`.
  * Hosts classify client SSE drops via `turnStopFromClientStreamEnd`.
  *
  * @module
  */
 
-/** Why a turn ended (provider-neutral). */
-export type TurnStopKind =
-  | 'completed'
-  | 'length'
-  | 'tool'
-  | 'filtered'
-  | 'provider_error'
-  | 'cancelled'
-  | 'stream_incomplete';
+import type { TurnStopKind } from './schema.ts';
+
+export type { TurnStopKind };
 
 /** Normalized stop attached to terminal `done` events and host continue requests. */
 export interface TurnStop {
@@ -97,8 +91,8 @@ export function shouldAutoContinue(
   return list.includes(stop.kind) && isResumeableStop(stop);
 }
 
-/** OpenRouter normalized `finish_reason` (+ optional `native_finish_reason`). */
-export function turnStopFromOpenRouter(
+/** OpenAI-compatible normalized `finish_reason` (+ optional `native_finish_reason`). */
+export function turnStopFromOpenAiFinishReason(
   finishReason: string | null | undefined,
   nativeFinishReason?: string | null,
 ): TurnStop {
@@ -108,14 +102,10 @@ export function turnStopFromOpenRouter(
   if (effective === 'network_error' || effective.includes('network')) {
     return { kind: 'provider_error', native };
   }
-  return openRouterFinishKind((finishReason || '').toLowerCase(), effective, native);
+  return openAiFinishKind((finishReason || '').toLowerCase(), effective, native);
 }
 
-function openRouterFinishKind(
-  finish: string,
-  effective: string,
-  native: string | undefined,
-): TurnStop {
+function openAiFinishKind(finish: string, effective: string, native: string | undefined): TurnStop {
   if (finish === 'stop') {
     return /error|fail/.test(effective)
       ? { kind: 'provider_error', native }

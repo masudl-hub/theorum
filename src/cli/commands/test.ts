@@ -50,9 +50,7 @@ function processTestEvent(event: TurnEvent, acc: TestExecutionAccumulator): void
       console.log(`\n  🐍 [code_execution_call] ${preview || e.id || ''}`);
     } else if (e.kind === 'code_execution_result') {
       const preview = (e.result ?? '').replaceAll('\n', ' ').slice(0, 80);
-      console.log(
-        `\n  🐍 [code_execution_result] isError=${String(e.isError)} ${preview}`,
-      );
+      console.log(`\n  🐍 [code_execution_result] isError=${String(e.isError)} ${preview}`);
     } else if (e.kind) {
       console.log(`\n  📎 [evidence] ${e.kind}`);
     }

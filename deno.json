@@ -18,6 +18,7 @@
     ".": "./mod.ts",
     "./kernel": "./src/kernel/mod.ts",
     "./providers": "./src/providers/mod.ts",
+    "./providers/local": "./src/providers/local/mod.ts",
     "./guardrails": "./src/guardrails/mod.ts",
     "./observability": "./src/observability/mod.ts",
     "./host": "./src/host/mod.ts",
@@ -31,9 +32,11 @@
       ".fallowrc.jsonc",
       ".github/",
       ".gitignore",
+      ".npmignore",
       "ast-grep-rules/",
       "biome.json",
       "deno.lock",
+      "docs/",
       "knip.json",
       "stryker.config.json",
       "stryker.log",
@@ -48,6 +51,7 @@
       "package-lock.json",
       "scripts/",
       "sgconfig.yml",
+      "src/**/*.md",
       "tests/"
     ]
   },
@@ -60,7 +64,7 @@
   },
   "tasks": {
     "theorum": "deno run --allow-read --allow-write --allow-net src/cli/index.ts",
-    "test": "deno test --allow-read --allow-write --allow-net --allow-env --allow-sys --ignore=npm/ tests/",
+    "test": "deno test --allow-read --allow-write --allow-net --allow-env --allow-sys --allow-run --ignore=npm/ tests/",
     "check": "deno check mod.ts",
     "verify:publish": "deno run --allow-read scripts/verify-publish-bundle.ts",
     "lint": "npm run lint",

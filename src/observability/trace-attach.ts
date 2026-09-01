@@ -1,9 +1,9 @@
 import { providerCompleteRequest } from '../kernel/registry/provider-request.ts';
-import type { ResolvedGeneration, TurnRequest } from '../kernel/types.ts';
-import { tapeGemini } from '../providers/gemini-tape.ts';
-import { toInteractionsBody } from '../providers/interactions.ts';
+import type { Protocol } from '../kernel/schema.ts';
+import type { ResolvedGeneration, TurnEvent, TurnRequest } from '../kernel/types.ts';
+import { tapeUpstream } from '../providers/shared/upstream-tape.ts';
 import type { TraceRecord } from './trace-record.ts';
-import { httpStatus } from './trace-usage.ts';
+import { httpStatus, openAiFinishReason, tokensFromEvents } from './trace-usage.ts';
 
 function attachResolved(
   record: TraceRecord,
@@ -56,41 +56,70 @@ function attachResolved(
 async function attachTape(
   record: TraceRecord,
   args: {
-    gemini?: unknown;
+    upstream?: unknown;
     canary?: string;
     system?: string;
     generation?: ResolvedGeneration;
+    protocol?: Protocol;
   },
 ): Promise<void> {
-  const { gemini, canary, system, generation } = args;
-  if (gemini !== undefined) {
-    record.gemini = await tapeGemini(gemini, canary ?? '');
+  const { upstream, canary, system, generation, protocol } = args;
+  if (upstream !== undefined) {
+    record.upstreamLog = await tapeUpstream(upstream, canary ?? '');
   }
-  if (generation && system !== undefined) {
-    record.wire = await tapeGemini(
+  if (generation && system !== undefined && protocol === 'geminiInteractions') {
+    const { toInteractionsBody } = await import('../providers/google/interactions.ts');
+    record.wire = await tapeUpstream(
       toInteractionsBody(providerCompleteRequest(generation, system)),
       canary ?? '',
     );
   }
 }
 
-function attachUsage(
+function attachUsageTokens(
   record: TraceRecord,
-  gemini: unknown,
   done: Record<string, unknown> | undefined,
+  events?: TurnEvent[],
 ): void {
   if (done?.usage !== undefined) {
     record.usage = done.usage;
+    return;
   }
-  const upStatus = httpStatus(gemini);
-  if (upStatus !== undefined || done) {
-    record.upstream = {
-      status: upStatus,
-      id: done?.id,
-      finish: done?.status,
-      serviceTier: done?.service_tier ?? done?.serviceTier,
-    };
+  if (!events) {
+    return;
   }
+  const tokens = tokensFromEvents(events);
+  if (tokens) {
+    record.usage = tokens;
+  }
+}
+
+function attachUpstreamSummary(
+  record: TraceRecord,
+  upstream: unknown,
+  done: Record<string, unknown> | undefined,
+): void {
+  const upStatus = httpStatus(upstream);
+  const finishReason = openAiFinishReason(upstream);
+  if (upStatus === undefined && !done && finishReason === undefined) {
+    return;
+  }
+  record.upstream = {
+    status: upStatus,
+    id: done?.id,
+    finish: done?.status ?? finishReason,
+    serviceTier: done?.service_tier ?? done?.serviceTier,
+  };
+}
+
+function attachUsage(
+  record: TraceRecord,
+  upstream: unknown,
+  done: Record<string, unknown> | undefined,
+  events?: TurnEvent[],
+): void {
+  attachUsageTokens(record, done, events);
+  attachUpstreamSummary(record, upstream, done);
 }
 
 export { attachResolved, attachTape, attachUsage };

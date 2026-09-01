@@ -15,6 +15,11 @@ const ENTRY_MODS = [
   { export: '.', mod: 'mod.ts', docFromEntry: 'package' },
   { export: './kernel', mod: 'src/kernel/mod.ts', docFromEntry: 'kernel' },
   { export: './providers', mod: 'src/providers/mod.ts', docFromEntry: 'providers' },
+  {
+    export: './providers/local',
+    mod: 'src/providers/local/mod.ts',
+    docFromEntry: 'providers-local',
+  },
   { export: './guardrails', mod: 'src/guardrails/mod.ts', docFromEntry: 'guardrails' },
   { export: './observability', mod: 'src/observability/mod.ts', docFromEntry: 'observability' },
   { export: './host', mod: 'src/host/mod.ts', docFromEntry: 'host' },

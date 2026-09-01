@@ -182,7 +182,9 @@ const asserted: CaseResult[] = [];
 console.log(`\n${'='.repeat(70)}\n CLI MATRIX via testProfileCommand\n${'='.repeat(70)}`);
 console.log(
   'matrix combos:',
-  synthesizeMatrixCombos(getProfile(PROFILE)).map((c) => c.name).join(' | '),
+  synthesizeMatrixCombos(getProfile(PROFILE))
+    .map((c) => c.name)
+    .join(' | '),
 );
 const matrixOk = await testProfileCommand(PROFILE, {
   matrix: true,
@@ -305,7 +307,8 @@ asserted.push(
       if (got.results.length < 2) return `expected >=2 results, got ${got.results.length}`;
       const joined = `${got.text}\n${got.results.map((r) => r?.result ?? '').join('\n')}`;
       if (!joined.includes('323')) return `missing 323 in ${JSON.stringify(joined).slice(0, 200)}`;
-      if (!joined.includes('40320')) return `missing 40320 in ${JSON.stringify(joined).slice(0, 200)}`;
+      if (!joined.includes('40320'))
+        return `missing 40320 in ${JSON.stringify(joined).slice(0, 200)}`;
       return undefined;
     },
   ),

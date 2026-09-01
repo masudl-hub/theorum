@@ -5,7 +5,7 @@ import { wrapUserData } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
-import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
+import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions.ts';
 import { CHAT_MEDIA_LIMITS, modelAllow } from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
@@ -92,7 +92,6 @@ function googleImageBody() {
   return toInteractionsBody({
     model: generation.model,
     apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,

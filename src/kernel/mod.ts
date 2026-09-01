@@ -48,6 +48,40 @@ export {
 export { projectProfile, resolveTurn } from './registry/resolve.ts';
 export { getStructured, registerStructured } from './registry/schemas.ts';
 export { executeTool } from './registry/tools.ts';
+export {
+  ATTACHMENT_ACCEPT_MIMES,
+  COMPACTION_METERS,
+  COMPACTION_TIMINGS,
+  CONTROL_IDS,
+  catalogPathFor,
+  coerceProtocol,
+  coerceProvider,
+  DYNAMIC_FIELD_PARENTS,
+  EGRESS_ON_BLOCK,
+  EXTRA_FIELDS,
+  fieldMeta,
+  GEMINI_BUCKETS,
+  GEMINI_FREE_BUCKETS,
+  isValidPair,
+  MEDIA_INPUT_KIND_VALUES,
+  MEDIA_INPUT_KINDS,
+  MEDIA_WILDCARDS,
+  PROFILE_FIELDS,
+  PROTOCOL_PROVIDERS,
+  PROTOCOLS,
+  PROVIDERS,
+  protocolsFor,
+  providersFor,
+  SCHEMA_ENFORCEMENTS,
+  SPEECH_AUDIO_FORMATS,
+  STREAM_MODES,
+  SUMMARY_MODES,
+  THINKING_LEVELS,
+  TOOL_LOAD_TIERS,
+  TOOL_PERMISSION_TIERS,
+  TURN_STOP_KINDS,
+  VOICE_ACCEPT_MIMES,
+} from './schema.ts';
 export type { ProfileResumeSpec, TurnContinueFrom, TurnStop, TurnStopKind } from './stop.ts';
 export {
   AUTO_CONTINUE_DELAY_MS,
@@ -60,6 +94,6 @@ export {
   shouldAutoContinue,
   turnStopFromClientStreamEnd,
   turnStopFromInteractionStatus,
-  turnStopFromOpenRouter,
+  turnStopFromOpenAiFinishReason,
 } from './stop.ts';
 export type * from './types.ts';

@@ -17,6 +17,7 @@ import type {
   ModelSpec,
   Profile,
   ProjectedProfile,
+  ProviderTransport,
   ResolvedGeneration,
   StructuredSchemaId,
   ThinkingLevel,
@@ -219,12 +220,16 @@ function resolveTurn(req: TurnRequest): {
     profile.model.provider === 'google'
       ? resolveGeminiBucket(profile.model.key ?? 'freeA', spec, builtins)
       : undefined;
+  const transport: ProviderTransport =
+    profile.model.protocol === 'geminiInteractions' && profile.model.provider === 'google'
+      ? 'interactions'
+      : 'openAiCompat';
   return {
     profile,
     generation: {
       model,
       apiId: spec.apiId,
-      openRouterId: spec.openRouterId,
+      transport,
       previousInteractionId: safe.previousInteractionId,
       store: safe.store,
       stream: safe.stream,

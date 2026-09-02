@@ -203,7 +203,13 @@ Deno.test('jsonResponseFormat wraps a schema in a text/json response format entr
 Deno.test('attachResponseFormat throws when speech and image are both requested', () => {
   const req = baseReq({
     speech: { voice: 'Kore' },
-    image: { type: 'image', mimeType: 'image/png', aspectRatio: '1:1', size: '1K', includeText: false },
+    image: {
+      type: 'image',
+      mimeType: 'image/png',
+      aspectRatio: '1:1',
+      size: '1K',
+      includeText: false,
+    },
   });
   assertThrows(() => attachResponseFormat(req, {}), TheorumError);
 });

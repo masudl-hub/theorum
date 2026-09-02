@@ -7,7 +7,13 @@ import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
-import { CHAT_MEDIA_LIMITS, HOST_MODELS, IMAGE_ASPECT_RATIOS, IMAGE_SIZES, modelAllow } from '../fixtures/models.ts';
+import {
+  CHAT_MEDIA_LIMITS,
+  HOST_MODELS,
+  IMAGE_ASPECT_RATIOS,
+  IMAGE_SIZES,
+  modelAllow,
+} from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];

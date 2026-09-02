@@ -17,9 +17,7 @@
     "npm:@openrouter/ai-sdk-provider@3": "3.0.0_ai@7.0.84__zod@3.25.76_zod@3.25.76",
     "npm:ai@7": "7.0.84_zod@3.25.76",
     "npm:fallow@3.17.0": "3.17.0",
-    "npm:gpt-tokenizer@4": "4.0.0",
-    "npm:zod-to-json-schema@^3.24.0": "3.25.2_zod@3.25.76",
-    "npm:zod@^3.24.0": "3.25.76"
+    "npm:gpt-tokenizer@4": "4.0.0"
   },
   "jsr": {
     "@david/code-block-writer@13.0.3": {
@@ -438,12 +436,6 @@
     "undici@7.29.0": {
       "integrity": "sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw=="
     },
-    "zod-to-json-schema@3.25.2_zod@3.25.76": {
-      "integrity": "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==",
-      "dependencies": [
-        "zod"
-      ]
-    },
     "zod@3.25.76": {
       "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="
     }
@@ -455,8 +447,7 @@
       "npm:@openrouter/ai-sdk-provider@3",
       "npm:ai@7",
       "npm:gpt-tokenizer@4",
-      "npm:zod-to-json-schema@^3.24.0",
-      "npm:zod@^3.24.0"
+      "npm:zod@^4.1.8"
     ],
     "packageJson": {
       "dependencies": [
@@ -466,8 +457,7 @@
         "npm:@stryker-mutator/core@10",
         "npm:ai@7",
         "npm:fallow@3.17.0",
-        "npm:gpt-tokenizer@4",
-        "npm:zod-to-json-schema@^3.24.0"
+        "npm:gpt-tokenizer@4"
       ]
     }
   }

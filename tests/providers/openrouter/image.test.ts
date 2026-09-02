@@ -6,12 +6,8 @@ import { createImageProvider, streamImage } from '../../../src/providers/openrou
 import '../../../src/providers/openrouter/openai/image-payload.ts';
 import { testInternals } from '../../fixtures/testInternals.js';
 
-const {
-  buildImagesPayload,
-  outputFormatFromMime,
-  wireInputReferences,
-  imageToolParameters,
-} = testInternals('openai/image-payload');
+const { buildImagesPayload, outputFormatFromMime, wireInputReferences, imageToolParameters } =
+  testInternals('openai/image-payload');
 
 const {
   buildInterleavedChatPayload,
@@ -98,10 +94,7 @@ Deno.test('buildInterleavedChatPayload attaches the OpenRouter image generation 
 
 Deno.test('mediaFromImagesResponse reads b64_json and media_type', () => {
   assertEquals(
-    mediaFromImagesResponse(
-      { data: [{ b64_json: 'abc', media_type: 'image/webp' }] },
-      'image/png',
-    ),
+    mediaFromImagesResponse({ data: [{ b64_json: 'abc', media_type: 'image/webp' }] }, 'image/png'),
     { mimeType: 'image/webp', data: 'abc' },
   );
 });

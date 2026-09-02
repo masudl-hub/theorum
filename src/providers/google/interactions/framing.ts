@@ -101,9 +101,7 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
       imageSize: req.image.size,
     };
     // Post–May 2026 Interactions API: object = image-only; array = text + image.
-    camel.responseFormat = req.image.includeText
-      ? [{ type: 'text' }, imageEntry]
-      : imageEntry;
+    camel.responseFormat = req.image.includeText ? [{ type: 'text' }, imageEntry] : imageEntry;
     return;
   }
   if (!req.structured) {

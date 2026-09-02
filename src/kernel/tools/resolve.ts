@@ -203,7 +203,8 @@ async function expandT1Policy(
       continue;
     }
     const tool = getTool(id);
-    if (tool?.loadTier !== 'T1') {
+    // T0 tools are already visible; t1Policy may promote T1/T2 gated tools at turn start.
+    if (!tool || tool.loadTier === 'T0') {
       continue;
     }
     if (tool.type === 'builtin') {

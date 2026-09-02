@@ -51,10 +51,7 @@ function wireInputReferences(input: InteractionPart[]): Record<string, unknown>[
   return references;
 }
 
-function attachImagePins(
-  payload: Record<string, unknown>,
-  image: ImageResponseFormat,
-): void {
+function attachImagePins(payload: Record<string, unknown>, image: ImageResponseFormat): void {
   payload.aspect_ratio = image.aspectRatio;
   payload.resolution = image.size;
   payload.output_format = outputFormatFromMime(image.mimeType);
@@ -89,15 +86,7 @@ function imageToolParameters(image: ImageResponseFormat): Record<string, unknown
   };
 }
 
-export {
-  attachImagePins,
-  buildImagesPayload,
-  extractPromptText,
-  imageToolParameters,
-  outputFormatFromMime,
-  wireInputReference,
-  wireInputReferences,
-};
+export { buildImagesPayload, extractPromptText, imageToolParameters };
 
 exposeForTests('openai/image-payload', {
   extractPromptText,

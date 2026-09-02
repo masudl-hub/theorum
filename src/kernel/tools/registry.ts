@@ -22,9 +22,9 @@ function normalizeFunction<TIn = unknown, TOut = unknown>(
     output: z.ZodType<TOut>;
   },
 ): FunctionToolDef<TIn, TOut> {
-  const inputSchema = jsonSchemaFromZod(def.input);
+  const inputSchema = jsonSchemaFromZod(def.input, 'input');
   validateToolInputSchema(inputSchema);
-  const outputSchema = jsonSchemaFromZod(def.output);
+  const outputSchema = jsonSchemaFromZod(def.output, 'output');
   validateToolOutputSchema(outputSchema);
   return {
     ...def,

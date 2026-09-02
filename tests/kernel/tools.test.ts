@@ -299,7 +299,7 @@ Deno.test('invokeTool for allowed T0 tool succeeds and ends completed', async ()
   assertEquals(events.at(-1)?.stop?.kind, 'completed');
 });
 
-Deno.test('catalog path filter excludes tools from snapshot', async () => {
+Deno.test('catalog path filter excludes tools from snapshot', () => {
   registerProfile(
     defineProfile({
       id: 'path_filter_probe',

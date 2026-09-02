@@ -184,3 +184,23 @@ Deno.test('cardSpans if (found) vs if (true) mutation: null match should not be 
   // Benign short number sequences should yield 0 spans (blobAt returns null)
   assertEquals(sensitiveSpans('1234').length, 0);
 });
+
+// ── IPV4 range boundary tests ────────────────────────────────────────────────
+
+Deno.test('sensitiveSpans detects IPV4 address with 250-255 octets', () => {
+  // Kills: 25[0-5] → 25[^0-5] mutations (both repeated and final group variants)
+  assertEquals(sensitiveSpans('addr: 255.0.0.255').length > 0, true);
+  assertEquals(sensitiveSpans('server: 250.251.252.253').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects IPV4 address with 200-249 octets', () => {
+  // Kills: 2[0-4]\d → 2[0-4]\D and [0-4] → [^0-4] mutations in 200-249 range
+  assertEquals(sensitiveSpans('host: 200.1.2.3').length > 0, true);
+  assertEquals(sensitiveSpans('ip: 240.10.20.30').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects IPV4 address with 100-199 three-digit first octet', () => {
+  // Kills: [01]?\d\d? → [01]?\d\D? mutation — 3-digit number starting with 1
+  assertEquals(sensitiveSpans('host: 123.45.67.89').length > 0, true);
+  assertEquals(sensitiveSpans('ip: 192.168.1.1').length > 0, true);
+});

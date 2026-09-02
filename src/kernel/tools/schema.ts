@@ -4,8 +4,7 @@
  * @module
  */
 
-import type { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { type ZodType, z } from 'zod';
 import { TheorumError } from '../../guardrails/error.ts';
 
 const GEMINI_SUPPORTED_SCHEMA_KEYS = [
@@ -189,10 +188,10 @@ function stripUnsupportedGeminiKeys(schema: JsonSchema): JsonSchema {
   return out;
 }
 
-function jsonSchemaFromZod(schema: z.ZodType | Parameters<typeof zodToJsonSchema>[0]): JsonSchema {
-  const json = zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0], {
+function jsonSchemaFromZod(schema: ZodType, io: 'input' | 'output' = 'output'): JsonSchema {
+  const json = z.toJSONSchema(schema, {
     target: 'openApi3',
-    $refStrategy: 'none',
+    io,
   }) as JsonSchema;
   delete json.$schema;
   if (!json.type) {

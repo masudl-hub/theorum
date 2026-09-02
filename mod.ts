@@ -120,6 +120,7 @@ export {
 } from './src/kernel/registry/profiles.ts';
 export { pickModel, projectProfile, resolveTurn } from './src/kernel/registry/resolve.ts';
 export { getStructured, registerStructured } from './src/kernel/registry/schemas.ts';
+export type { TurnStopKind } from './src/kernel/schema.ts';
 export {
   ATTACHMENT_ACCEPT_MIMES,
   COMPACTION_METERS,
@@ -159,7 +160,6 @@ export {
   TURN_STOP_KINDS,
   VOICE_ACCEPT_MIMES,
 } from './src/kernel/schema.ts';
-export type { TurnStopKind } from './src/kernel/schema.ts';
 export type {
   ProfileResumeSpec,
   TurnContinueFrom,

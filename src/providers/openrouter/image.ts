@@ -12,11 +12,7 @@
  */
 
 import { toErrorEvent } from '../../guardrails/error.ts';
-import type {
-  ModelProvider,
-  ProviderCompleteRequest,
-  TurnEvent,
-} from '../../kernel/types.ts';
+import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../kernel/types.ts';
 import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
 import { bytesToBase64 } from '../shared/pcm.ts';
 import type { OpenAiGatewayConfig } from '../types.ts';
@@ -152,6 +148,21 @@ function plainTextFromContent(content: unknown): string {
     .trim();
 }
 
+function httpImageUrlFromPart(entry: Record<string, unknown>): string | undefined {
+  if (entry.type !== 'image_url') {
+    return undefined;
+  }
+  const imageUrl = entry.image_url;
+  if (!imageUrl || typeof imageUrl !== 'object') {
+    return undefined;
+  }
+  const url = (imageUrl as Record<string, unknown>).url;
+  if (typeof url === 'string' && /^https?:\/\//.test(url)) {
+    return url;
+  }
+  return undefined;
+}
+
 function inlineImageUrls(content: unknown): string[] {
   if (!Array.isArray(content)) {
     return [];
@@ -161,35 +172,42 @@ function inlineImageUrls(content: unknown): string[] {
     if (!part || typeof part !== 'object') {
       continue;
     }
-    const entry = part as Record<string, unknown>;
-    if (entry.type !== 'image_url') {
-      continue;
-    }
-    const imageUrl = entry.image_url;
-    if (!imageUrl || typeof imageUrl !== 'object') {
-      continue;
-    }
-    const url = (imageUrl as Record<string, unknown>).url;
-    if (typeof url === 'string' && /^https?:\/\//.test(url)) {
+    const url = httpImageUrlFromPart(part as Record<string, unknown>);
+    if (url) {
       urls.push(url);
     }
   }
   return urls;
 }
 
+async function postJson(
+  config: ImageProviderConfig,
+  path: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const fetchFn = config.fetch ?? fetch;
+  const apiKey = config.apiKey?.trim() ?? '';
+  return await fetchFn(`${baseUrl(config)}${path}`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, config),
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+function imageHttpError(res: Response, label: string): TurnEvent | undefined {
+  if (res.status !== HTTP_OK) {
+    return toErrorEvent(`${label} HTTP ${String(res.status)}`);
+  }
+  return undefined;
+}
+
 async function requestImages(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig,
 ): Promise<Response> {
-  const fetchFn = config.fetch ?? fetch;
-  const url = `${baseUrl(config)}/images`;
-  const apiKey = config.apiKey?.trim() ?? '';
-  return await fetchFn(url, {
-    method: 'POST',
-    headers: buildHeaders(apiKey, config),
-    body: JSON.stringify(buildImagesPayload(req)),
-    signal: req.signal,
-  });
+  return await postJson(config, '/images', buildImagesPayload(req), req.signal);
 }
 
 function buildInterleavedChatPayload(req: ProviderCompleteRequest): Record<string, unknown> {
@@ -216,15 +234,7 @@ async function requestInterleavedChat(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig,
 ): Promise<Response> {
-  const fetchFn = config.fetch ?? fetch;
-  const url = `${baseUrl(config)}/chat/completions`;
-  const apiKey = config.apiKey?.trim() ?? '';
-  return await fetchFn(url, {
-    method: 'POST',
-    headers: buildHeaders(apiKey, config),
-    body: JSON.stringify(buildInterleavedChatPayload(req)),
-    signal: req.signal,
-  });
+  return await postJson(config, '/chat/completions', buildInterleavedChatPayload(req), req.signal);
 }
 
 async function* yieldInterleavedChat(
@@ -232,8 +242,9 @@ async function* yieldInterleavedChat(
   config: ImageProviderConfig,
 ): AsyncGenerator<TurnEvent> {
   const res = await requestInterleavedChat(req, config);
-  if (res.status !== HTTP_OK) {
-    yield toErrorEvent(`Image chat HTTP ${String(res.status)}`);
+  const httpErr = imageHttpError(res, 'Image chat');
+  if (httpErr) {
+    yield httpErr;
     return;
   }
 
@@ -288,8 +299,9 @@ async function* yieldImagesEndpoint(
   config: ImageProviderConfig,
 ): AsyncGenerator<TurnEvent> {
   const res = await requestImages(req, config);
-  if (res.status !== HTTP_OK) {
-    yield toErrorEvent(`Image HTTP ${String(res.status)}`);
+  const httpErr = imageHttpError(res, 'Image');
+  if (httpErr) {
+    yield httpErr;
     return;
   }
 

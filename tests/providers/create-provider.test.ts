@@ -161,7 +161,7 @@ Deno.test('create-provider has no eager adapter imports', async () => {
   assertEquals(src.includes("import('./local/local.ts')"), true);
 });
 
-Deno.test('create-provider loads OpenRouter adapter only via dynamic import', async () => {
+Deno.test('create-provider loads OpenRouter adapter only via dynamic import', () => {
   // Sync createProvider for openrouter chat must not touch the Vercel graph.
   // This file's suite runs without --allow-sys; an eager openrouter import would throw.
   const profile = baseProfile({ protocol: 'openAi', provider: 'openrouter' }, 'chat');

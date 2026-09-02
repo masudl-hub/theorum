@@ -315,7 +315,7 @@ async function collectToolEvents(gen: AsyncIterable<TurnEvent>): Promise<TurnEve
 }
 
 /** Invoke a registered tool through the host entrypoint. */
-async function invokeRegisteredTool(args: InvokeToolRequest): Promise<TurnEvent[]> {
+function invokeRegisteredTool(args: InvokeToolRequest): Promise<TurnEvent[]> {
   return collectToolEvents(invokeTool(args));
 }
 

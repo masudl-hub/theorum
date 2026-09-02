@@ -51,7 +51,7 @@ registerTool({
 });
 ```
 
-Add **`zod`** as a dependency (`^3.24` peer on npm).
+Add **`zod`** as a dependency (`^4.1.8` peer on npm). Tool wire schemas are derived at registration via Zod 4's native `z.toJSONSchema()` (`input` mode for parameters, `output` mode for result schemas).
 
 ### 2. Profile — allow customs; model lists builtins
 

@@ -56,7 +56,7 @@ await build({
     ],
     sideEffects: false,
     peerDependencies: {
-      zod: '^3.24.0',
+      zod: '^4.1.8',
     },
     repository: {
       type: 'git',

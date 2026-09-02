@@ -159,11 +159,11 @@ export {
   TURN_STOP_KINDS,
   VOICE_ACCEPT_MIMES,
 } from './src/kernel/schema.ts';
+export type { TurnStopKind } from './src/kernel/schema.ts';
 export type {
   ProfileResumeSpec,
   TurnContinueFrom,
   TurnStop,
-  TurnStopKind,
 } from './src/kernel/stop.ts';
 export {
   AUTO_CONTINUE_DELAY_MS,

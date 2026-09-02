@@ -203,7 +203,7 @@ Deno.test('jsonResponseFormat wraps a schema in a text/json response format entr
 Deno.test('attachResponseFormat throws when speech and image are both requested', () => {
   const req = baseReq({
     speech: { voice: 'Kore' },
-    image: { type: 'image', mimeType: 'image/png', aspectRatio: '1:1', size: '1K' },
+    image: { type: 'image', mimeType: 'image/png', aspectRatio: '1:1', size: '1K', includeText: false },
   });
   assertThrows(() => attachResponseFormat(req, {}), TheorumError);
 });
@@ -221,9 +221,15 @@ Deno.test('attachResponseFormat sets an audio response format for speech-only re
   assertEquals(camel.responseModalities, ['audio']);
 });
 
-Deno.test('attachResponseFormat sets an image response format', () => {
+Deno.test('attachResponseFormat sets an image-only response format by default', () => {
   const req = baseReq({
-    image: { type: 'image', mimeType: 'image/png', aspectRatio: '16:9', size: '2K' },
+    image: {
+      type: 'image',
+      mimeType: 'image/png',
+      aspectRatio: '16:9',
+      size: '2K',
+      includeText: false,
+    },
   });
   const camel: Record<string, unknown> = {};
   attachResponseFormat(req, camel);
@@ -233,7 +239,31 @@ Deno.test('attachResponseFormat sets an image response format', () => {
     aspectRatio: '16:9',
     imageSize: '2K',
   });
-  assertEquals(camel.responseModalities, ['text', 'image']);
+  assertEquals(Object.hasOwn(camel, 'responseModalities'), false);
+});
+
+Deno.test('attachResponseFormat sets text and image response formats when includeText is true', () => {
+  const req = baseReq({
+    image: {
+      type: 'image',
+      mimeType: 'image/png',
+      aspectRatio: '16:9',
+      size: '2K',
+      includeText: true,
+    },
+  });
+  const camel: Record<string, unknown> = {};
+  attachResponseFormat(req, camel);
+  assertEquals(camel.responseFormat, [
+    { type: 'text' },
+    {
+      type: 'image',
+      mimeType: 'image/png',
+      aspectRatio: '16:9',
+      imageSize: '2K',
+    },
+  ]);
+  assertEquals(Object.hasOwn(camel, 'responseModalities'), false);
 });
 
 Deno.test('attachResponseFormat leaves camel untouched when nothing is requested', () => {

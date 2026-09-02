@@ -103,6 +103,11 @@ export interface ProfileImageSpec {
   mimeType?: string;
   /** Cap on reference images in one turn. */
   maxInputImages?: number;
+  /**
+   * When true, request interleaved assistant text alongside generated images
+   * (Google: `response_format` array with text + image entries).
+   */
+  includeText?: boolean;
 }
 
 /** Public event types emitted by `runTurn` and provider adapters. */
@@ -454,6 +459,8 @@ export interface ImageResponseFormat {
   aspectRatio: string;
   /** Authoring / kernel name; adapters map to provider wire keys (e.g. Google `imageSize`). */
   size: string;
+  /** Request assistant text alongside generated images when the provider supports it. */
+  includeText: boolean;
 }
 
 /** Base64-encoded blob supplied by a host turn request. */

@@ -26,6 +26,8 @@ Owns every module under `src/providers/`.
 | `openrouter/openai/sdk-messages.ts` | THEORUM → AI SDK `ModelMessage[]` (OpenRouter chat) |
 | `openrouter/openai/chat-payload.ts` | OpenAI chat payload + OpenRouter plugins (internal) |
 | `openrouter/speech.ts` | OpenAI `/audio/speech` transport (openrouter speech role) |
+| `openrouter/image.ts` | OpenAI `/images` transport; chat + server tool when `includeText` |
+| `openrouter/openai/image-payload.ts` | OpenAI-compat `/images` body builder |
 | `google/interactions/stream.ts` | Google Interactions streaming adapter |
 | `google/interactions/framing.ts` | Interactions payload / step wiring |
 | `google/interactions/mod.ts` | Interactions subpath barrel |
@@ -67,8 +69,8 @@ Routing table:
 | protocol | provider | Requires | Transport |
 | --- | --- | --- | --- |
 | `geminiInteractions` | `google` | `options.gemini` | Interactions API (chat / image / speech) |
-| `openAi` | `openrouter` | `options.openAiGateway` | Lazy chat adapter or `speech.ts` when `outputs.speech` |
-| `openAi` | `local` | optional `options.local` | `POST /v1/chat/completions` SSE |
+| `openAi` | `openrouter` | `options.openAiGateway` | Lazy chat, `speech.ts`, or `image.ts` by output role |
+| `openAi` | `local` | optional `options.local` | `POST /v1/chat/completions` SSE (image roles rejected) |
 
 Errors:
 
@@ -112,7 +114,7 @@ terminal `done.stop` via `turnStopFromOpenAiFinishReason`.
 | History | `user_input` / `model_output` steps |
 | Multimodal | `image` / `audio` / `video` / `document` parts |
 | Structured | `responseFormat` JSON schema when enforced |
-| Output modes | responseFormat JSON schema, image, and speech are mutually exclusive; prompt-enforced structured schemas and free text are not |
+| Output modes | responseFormat JSON schema, image, and speech are mutually exclusive; prompt-enforced structured schemas and free text are not. Image profiles may opt into interleaved text via `outputs.image.includeText`. |
 | Tools | Registry builtins (`wire.interactions`) + function schemas from `generation.tools.wire` |
 | Code execution | Builtin `codeExecution` → `{ type: "code_execution" }`. Streamed `step.start` / `step.delta` / `step.stop`, `interaction.status_update` (`requires_action` for host tools), and batched `interaction.steps` become `evidence` (`kind`, `code`, `result`, `isError`, `raw`) plus `media` for sandbox images. Search/maps/`url_context` steps in `steps[]` are also `evidence`. Structured `responseFormat` is still attached when both are requested. |
 | Stream vs batch | Default `stream: true` (`?alt=sse`). `TurnRequest.stream: false` POSTs JSON and yields the same `TurnEvent` types from `steps[]`. |
@@ -153,6 +155,22 @@ local: {
 - Accumulates streaming tool calls; maps `finish_reason` through
   `turnStopFromOpenAiFinishReason`.
 - Supports multimodal user content when the server accepts OpenAI-style parts.
+
+## Image roles
+
+When `profile.outputs.image` is defined and protocol/provider is
+`openAi`/`openrouter`, `createProvider` returns `createImageProvider`
+(`openrouter/image.ts`). When protocol/provider is `geminiInteractions`/`google`,
+the same `createInteractionsProvider` handles image via polymorphic
+`responseFormat`.
+
+| Transport | Module | Path / mechanism | Notes |
+| --- | --- | --- | --- |
+| OpenAI | `openrouter/image.ts` | `POST /images` | Native image models; reference images via `input_references` |
+| OpenAI | `openrouter/image.ts` | `POST /chat/completions` + server tool | When `outputs.image.includeText`; yields interleaved `text` + `media` |
+| Interactions | `google/interactions/framing.ts` | `responseFormat` object or array | Image-only object; text + image array when `includeText` |
+
+`openAi`/`local` image roles are rejected at `createProvider`.
 
 ## Speech roles
 

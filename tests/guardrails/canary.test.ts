@@ -486,3 +486,33 @@ Deno.test('unlisted input.role is not interpolated into the system block', async
   assertEquals(system.includes(phrase), false);
   assertEquals(system.includes('Reply in the structured turn schema.'), true);
 });
+
+Deno.test('eventHasCanary detects canary in text field of a text event', () => {
+  const canary = mintCanary();
+  assertEquals(eventHasCanary({ type: 'text', text: canary }, canary), true);
+});
+
+Deno.test('createCanaryStreamGate: process+flush total emitted bytes equals input length', () => {
+  const canary = mintCanary();
+  const gate = createCanaryStreamGate(canary);
+  const text = 'safe text that is way longer than the canary overlap window and emits immediately';
+  const r1 = gate.process(text);
+  assertEquals(r1.leak, false);
+  const r2 = gate.flush();
+  assertEquals(r2.leak, false);
+  if (!r1.leak && !r2.leak) {
+    assertEquals(r1.emit.length + r2.emit.length, text.length);
+  }
+});
+
+Deno.test('createCanaryStreamGate: second flush after first gives empty emit', () => {
+  const canary = mintCanary();
+  const gate = createCanaryStreamGate(canary);
+  gate.process('safe content here');
+  gate.flush();
+  const r2 = gate.flush();
+  assertEquals(r2.leak, false);
+  if (!r2.leak) {
+    assertEquals(r2.emit, '');
+  }
+});

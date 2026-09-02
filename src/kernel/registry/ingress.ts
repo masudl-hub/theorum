@@ -88,8 +88,8 @@ function activePrimaryOutputModes(
 
 /**
  * Provider wire formats (JSON schema, image, speech) are mutually exclusive.
- * Prompt-enforced schemas and free text are not — image profiles may stream both
- * text and media when the provider supports it.
+ * Prompt-enforced schemas and free text are not. Image profiles opt into
+ * interleaved assistant text via `outputs.image.includeText`.
  */
 function assertOutputMode(profile: Profile, structuredId: string | null): void {
   const active = activePrimaryOutputModes(profile, structuredId);
@@ -157,6 +157,7 @@ function resolveImageFormat(
     mimeType: pins.mimeType ?? 'image/jpeg',
     aspectRatio,
     size,
+    includeText: pins.includeText === true,
   };
 }
 

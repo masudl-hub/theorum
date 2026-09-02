@@ -94,14 +94,16 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
     return;
   }
   if (req.image) {
-    camel.responseFormat = {
+    const imageEntry = {
       type: 'image',
       mimeType: req.image.mimeType,
       aspectRatio: req.image.aspectRatio,
       imageSize: req.image.size,
     };
-    // Image-capable models may interleave assistant text with generated images.
-    camel.responseModalities = ['text', 'image'];
+    // Post–May 2026 Interactions API: object = image-only; array = text + image.
+    camel.responseFormat = req.image.includeText
+      ? [{ type: 'text' }, imageEntry]
+      : imageEntry;
     return;
   }
   if (!req.structured) {

@@ -2,7 +2,7 @@
  * Host provider factory — the single public door for binding a profile to a transport.
  *
  * Routes from `profile.model.protocol` / `provider` (and whether the profile is
- * a speech role). Adapters under this folder are internal implementation.
+ * a speech or image role). Adapters under this folder are internal implementation.
  *
  * Every adapter graph is loaded only when that transport's first `complete` runs —
  * not when this module is imported.
@@ -28,7 +28,7 @@ export interface CreateProviderOptions {
   gemini?: GeminiTransport;
   /**
    * OpenAI-gateway credentials for `openAi` profiles (OpenRouter or compatible).
-   * Used for chat completions or `/audio/speech` when the profile is a speech role.
+   * Used for chat completions, `/images`, or `/audio/speech` depending on output role.
    * Optional `voice` is a fallback when `outputs.speech.voice` is omitted.
    */
   openAiGateway?: OpenAiGatewayConfig & { voice?: string };
@@ -38,6 +38,10 @@ export interface CreateProviderOptions {
 
 function isSpeechRole(profile: Profile): boolean {
   return profile.outputs.speech !== undefined;
+}
+
+function isImageRole(profile: Profile): boolean {
+  return profile.outputs.image !== undefined;
 }
 
 function lazyAdapter(load: () => Promise<ModelProvider>): ModelProvider {
@@ -71,6 +75,12 @@ function lazyGoogleLive(config: GeminiTransport): ModelProvider {
 function lazySpeech(config: OpenAiGatewayConfig & { voice?: string }): ModelProvider {
   return lazyAdapter(() =>
     import('./openrouter/speech.ts').then((m) => m.createSpeechProvider(config)),
+  );
+}
+
+function lazyImage(config: OpenAiGatewayConfig): ModelProvider {
+  return lazyAdapter(() =>
+    import('./openrouter/image.ts').then((m) => m.createImageProvider(config)),
   );
 }
 
@@ -115,10 +125,18 @@ export function createProvider(
     if (isSpeechRole(profile)) {
       return lazySpeech(options.openAiGateway);
     }
+    if (isImageRole(profile)) {
+      return lazyImage(options.openAiGateway);
+    }
     return lazyOpenRouterChat(options.openAiGateway);
   }
 
   if (protocol === 'openAi' && provider === 'local') {
+    if (isImageRole(profile)) {
+      throw new TheorumError(
+        'createProvider: outputs.image requires openrouter provider for openAi protocol',
+      );
+    }
     return lazyLocal(options.local);
   }
 
@@ -132,10 +150,12 @@ export function createProvider(
 
 exposeForTests('create-provider', {
   isSpeechRole,
+  isImageRole,
   createProvider,
   lazyOpenRouterChat,
   lazyGoogleInteractions,
   lazyGoogleLive,
   lazySpeech,
+  lazyImage,
   lazyLocal,
 });

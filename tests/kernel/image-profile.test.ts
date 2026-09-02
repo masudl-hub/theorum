@@ -7,7 +7,7 @@ import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
-import { CHAT_MEDIA_LIMITS, HOST_MODELS, modelAllow } from '../fixtures/models.ts';
+import { CHAT_MEDIA_LIMITS, HOST_MODELS, IMAGE_ASPECT_RATIOS, IMAGE_SIZES, modelAllow } from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -48,6 +48,7 @@ Deno.test('image oneshot uses image model and image response format', () => {
     mimeType: 'image/jpeg',
     aspectRatio: '1:1',
     size: '1K',
+    includeText: false,
   });
   assertEquals(generation.input, [
     { type: 'text', text: wrapUserData('sleepy fox') },
@@ -123,11 +124,68 @@ function assertImageWireBody(body: Record<string, unknown>): void {
   assertEquals(format[mimeKey], 'image/jpeg');
   assertEquals(format[camelToSnake('aspectRatio')], '1:1');
   assertEquals(format[camelToSnake('imageSize')], '1K');
-  assertEquals(body[camelToSnake('responseModalities')], ['text', 'image']);
+  assertEquals(Object.hasOwn(body, camelToSnake('responseModalities')), false);
+}
+
+function assertImageWithTextWireBody(body: Record<string, unknown>): void {
+  const format = body[camelToSnake('responseFormat')] as Record<string, unknown>[];
+  assertEquals(Array.isArray(format), true);
+  assertEquals(format[0], { type: 'text' });
+  assertEquals(format[1]?.type, 'image');
+  assertEquals(format[1]?.[camelToSnake('mimeType')], 'image/jpeg');
+  assertEquals(format[1]?.[camelToSnake('aspectRatio')], '1:1');
+  assertEquals(format[1]?.[camelToSnake('imageSize')], '1K');
+  assertEquals(Object.hasOwn(body, camelToSnake('responseModalities')), false);
 }
 
 Deno.test('interactions body places refs in input and image in response format', () => {
   assertImageWireBody(googleImageBody());
+});
+
+Deno.test('interactions body requests text and image when includeText is set', () => {
+  registerProfile({
+    id: 'image_with_text',
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini31FlashLiteImage'),
+    },
+    tools: { allow: [] },
+    inputs: {
+      text: true,
+      slots: { aspectRatio: [...IMAGE_ASPECT_RATIOS], size: [...IMAGE_SIZES] },
+    },
+    outputs: {
+      structured: null,
+      image: {
+        aspectRatio: '1:1',
+        size: '1K',
+        mimeType: 'image/jpeg',
+        includeText: true,
+      },
+    },
+    guardrails: { quota: { perDay: 10 } },
+  });
+  const { generation } = resolveTurn({
+    profile: 'image_with_text',
+    input: { text: 'fox' },
+  });
+  assertEquals(generation.image?.includeText, true);
+  const body = toInteractionsBody({
+    model: generation.model,
+    apiId: generation.apiId,
+    thinking: generation.thinking,
+    summaries: generation.summaries,
+    maxOutputTokens: generation.maxOutputTokens,
+    temperature: generation.temperature,
+    builtins: generation.builtins,
+    system: 'sys',
+    input: generation.input,
+    structured: generation.structured,
+    image: generation.image,
+    geminiBucket: generation.geminiBucket,
+  });
+  assertImageWithTextWireBody(body);
 });
 
 Deno.test('image runTurn yields media then done', async () => {

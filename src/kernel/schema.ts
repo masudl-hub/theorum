@@ -566,6 +566,10 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   ),
   'outputs.image.mimeType': field('string', 'Output MIME for generated images.'),
   'outputs.image.maxInputImages': field('number', 'Cap on reference images in one turn.'),
+  'outputs.image.includeText': field(
+    'boolean',
+    'When true, request interleaved assistant text alongside generated images.',
+  ),
   'outputs.speech': field('ProfileSpeechSpec', 'TTS pins. Model id is on model.'),
   'outputs.speech.voice': field(
     'string',

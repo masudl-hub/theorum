@@ -1,5 +1,4 @@
 import '../fixtures/test-host.ts';
-import { PUBLIC_CANARY, TheorumError } from '../../src/guardrails/error.ts';
 import {
   bindCanary,
   createCanaryStreamGate,
@@ -13,9 +12,10 @@ import {
   USER_OPEN,
   wrapUserData,
 } from '../../src/guardrails/canary.ts';
+import { PUBLIC_CANARY, TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals, assertThrows } from '../../src/kernel/engine/assert.ts';
-import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { yieldProviderEvents } from '../../src/kernel/engine/runner/stream.ts';
+import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
@@ -142,8 +142,13 @@ Deno.test('canary stream gate detects token split across chunks', async () => {
     events.some((event) => event.type === 'error' && event.error === PUBLIC_CANARY),
     true,
   );
-  assertEquals(events.some((event) => event.text?.includes(canary)), false);
-  const leakedSuffix = events.find((event) => event.type === 'text' && event.text?.includes('suffix'));
+  assertEquals(
+    events.some((event) => event.text?.includes(canary)),
+    false,
+  );
+  const leakedSuffix = events.find(
+    (event) => event.type === 'text' && event.text?.includes('suffix'),
+  );
   assertEquals(leakedSuffix, undefined);
 });
 
@@ -193,11 +198,17 @@ Deno.test('createCanaryStreamGate holds back prefix until safe', () => {
 Deno.test('eventHasCanary scans grounding and evidence payloads', () => {
   const canary = mintCanary();
   assertEquals(
-    eventHasCanary({ type: 'grounding', grounding: { sources: [], metadata: { note: canary } } }, canary),
+    eventHasCanary(
+      { type: 'grounding', grounding: { sources: [], metadata: { note: canary } } },
+      canary,
+    ),
     true,
   );
   assertEquals(
-    eventHasCanary({ type: 'evidence', evidence: { provider: 'google', raw: { id: canary } } }, canary),
+    eventHasCanary(
+      { type: 'evidence', evidence: { provider: 'google', raw: { id: canary } } },
+      canary,
+    ),
     true,
   );
 });
@@ -265,12 +276,26 @@ Deno.test('scanTextForCanaryLeak returns false for unrelated text containing "th
   assertEquals(scanTextForCanaryLeak('theo is just a word', canary), false);
 });
 
+Deno.test('scanTextForCanaryLeak detects spaced hex when text has B64 theo hint but not literal theo', () => {
+  // B64_THEO_HINT = 'dGhlbw'; text has no literal 'theo' but has the base64 hint
+  // The spaced-hex branch must still activate via the hint path
+  const canary = mintCanary();
+  const hex = canary.slice('theo-'.length);
+  const spaced = hex.split('').join(' ');
+  const textWithHint = `dGhlbw ${spaced}`;
+  assertEquals(textWithHint.includes('theo'), false);
+  assertEquals(scanTextForCanaryLeak(textWithHint, canary), true);
+});
+
 Deno.test('isStreamedCanaryEvent returns true for text and thought types only', () => {
   assertEquals(isStreamedCanaryEvent({ type: 'text', text: 'hi' }), true);
   assertEquals(isStreamedCanaryEvent({ type: 'thought', text: 'thinking' }), true);
   assertEquals(isStreamedCanaryEvent({ type: 'error', error: 'bad' }), false);
   assertEquals(isStreamedCanaryEvent({ type: 'done' }), false);
-  assertEquals(isStreamedCanaryEvent({ type: 'tokens', tokens: { input: 1, output: 1, total: 2 } }), false);
+  assertEquals(
+    isStreamedCanaryEvent({ type: 'tokens', tokens: { input: 1, output: 1, total: 2 } }),
+    false,
+  );
 });
 
 Deno.test('eventHasCanary returns false when canary is empty', () => {
@@ -287,10 +312,7 @@ Deno.test('eventHasCanary detects canary in tool payload', () => {
 
 Deno.test('eventHasCanary detects canary in sessionResumptionHandle', () => {
   const canary = mintCanary();
-  assertEquals(
-    eventHasCanary({ type: 'done', sessionResumptionHandle: canary }, canary),
-    true,
-  );
+  assertEquals(eventHasCanary({ type: 'done', sessionResumptionHandle: canary }, canary), true);
 });
 
 Deno.test('eventHasCanary detects canary in error field', () => {
@@ -300,10 +322,7 @@ Deno.test('eventHasCanary detects canary in error field', () => {
 
 Deno.test('eventHasCanary detects canary in structured field', () => {
   const canary = mintCanary();
-  assertEquals(
-    eventHasCanary({ type: 'structured', structured: { token: canary } }, canary),
-    true,
-  );
+  assertEquals(eventHasCanary({ type: 'structured', structured: { token: canary } }, canary), true);
 });
 
 Deno.test('createCanaryStreamGate flush emits remaining safe text in the pending buffer', () => {
@@ -348,6 +367,109 @@ Deno.test('wrapUserData produces correct fence boundaries and strips spoofed inn
   const text = 'user text';
   const wrapped = wrapUserData(text);
   assertEquals(wrapped, `${USER_OPEN}\n${text}\n${USER_CLOSE}`);
+});
+
+Deno.test('scanTextForCanaryLeak returns false when spaced hex present but no theo or b64 hint', () => {
+  // Kills B64_THEO_HINT='' and `if (false)` mutations at the early-return guard:
+  // with either mutation, the hex scan runs on ALL text and would find the spaced hex.
+  const canary = mintCanary();
+  const hex = canary.slice('theo-'.length);
+  const spaced = hex.split('').join(' ');
+  const text = `analysis: ${spaced} done`;
+  assertEquals(text.includes('theo'), false);
+  assertEquals(text.includes('dGhlbw'), false);
+  assertEquals(scanTextForCanaryLeak(text, canary), false);
+});
+
+Deno.test('scanTextForCanaryLeak returns false for canary not starting with theo- prefix', () => {
+  // Kills `if (hex.length > 0)` → `if (true)` and `>= 0` mutations:
+  // when canary lacks the prefix, hex = '' and spaced = '' → text.includes('') is always true.
+  const canary = 'invalid-format-not-theo-prefixed';
+  assertEquals(scanTextForCanaryLeak('some text with theo word in it', canary), false);
+});
+
+Deno.test('redactCanary replacement text is the literal omit marker not empty string', () => {
+  // Kills OMIT_CANARY = '' mutation: the OMIT_CANARY constant must equal the literal string.
+  const canary = mintCanary();
+  const event = redactCanary({ type: 'text', text: `leak ${canary}` }, canary);
+  assertEquals(event.text, `leak [omitted - canary]`);
+});
+
+Deno.test('wrapUserData trims leading and trailing whitespace from inner content', () => {
+  // Kills the `.trim()` removal mutation in stripUserFences.
+  const wrapped = wrapUserData('  padded  ');
+  assertEquals(wrapped, `${USER_OPEN}\npadded\n${USER_CLOSE}`);
+});
+
+Deno.test('wrapUserData replaces fences with empty string not a placeholder', () => {
+  // Kills the StringLiteral "Stryker was here!" mutation in replaceAll.
+  const text = `before ${USER_OPEN} inside ${USER_CLOSE} after`;
+  const wrapped = wrapUserData(text);
+  assertEquals(wrapped.includes('Stryker'), false);
+  assertEquals(wrapped.includes(USER_OPEN), true);
+  assertEquals(wrapped.endsWith(USER_CLOSE), true);
+  const inner = wrapped.slice(USER_OPEN.length + 1, wrapped.length - USER_CLOSE.length - 1);
+  assertEquals(inner.includes(USER_OPEN), false);
+  assertEquals(inner.includes(USER_CLOSE), false);
+});
+
+Deno.test('eventHasCanary returns false for structured event without canary', () => {
+  // Kills `event.structured !== undefined && scan(...)` → `|| scan(...)` mutation.
+  const canary = mintCanary();
+  assertEquals(
+    eventHasCanary({ type: 'structured', structured: { note: 'safe data' } }, canary),
+    false,
+  );
+});
+
+Deno.test('eventHasCanary returns false for tool event without canary', () => {
+  // Kills `event.tool !== undefined && scan(...)` → `|| scan(...)` mutation.
+  const canary = mintCanary();
+  assertEquals(
+    eventHasCanary({ type: 'tool', tool: { name: 'fn', arguments: { q: 'safe' } } }, canary),
+    false,
+  );
+});
+
+Deno.test('eventHasCanary returns false for grounding event without canary', () => {
+  // Kills `event.grounding !== undefined && scan(...)` → `|| scan(...)` mutation.
+  const canary = mintCanary();
+  assertEquals(
+    eventHasCanary({ type: 'grounding', grounding: { sources: [], metadata: {} } }, canary),
+    false,
+  );
+});
+
+Deno.test('eventHasCanary returns false for evidence event without canary', () => {
+  // Kills `event.evidence !== undefined && scan(...)` → `|| scan(...)` mutation.
+  const canary = mintCanary();
+  assertEquals(
+    eventHasCanary({ type: 'evidence', evidence: { provider: 'google', raw: {} } }, canary),
+    false,
+  );
+});
+
+Deno.test('eventHasCanary returns false for sessionResumptionHandle without canary', () => {
+  // Kills `sessionResumptionHandle && scan(...)` → `|| scan(...)` mutation.
+  const canary = mintCanary();
+  assertEquals(
+    eventHasCanary({ type: 'done', sessionResumptionHandle: 'safe-handle-no-canary' }, canary),
+    false,
+  );
+});
+
+Deno.test('createCanaryStreamGate emits the correct number of safe bytes for long input', () => {
+  // Kills canary.length - 1 → canary.length + 1 overlap mutation:
+  // with the +1 mutation the safe window shrinks by 2, producing fewer emitted bytes.
+  const canary = mintCanary();
+  const gate = createCanaryStreamGate(canary);
+  const text = 'safe text that is definitely longer than the canary overlap window yes it is';
+  const result = gate.process(text);
+  assertEquals(result.leak, false);
+  if (!result.leak) {
+    const expectedEmit = text.length - (canary.length - 1);
+    assertEquals(result.emit.length, expectedEmit);
+  }
 });
 
 Deno.test('unlisted input.role is not interpolated into the system block', async () => {

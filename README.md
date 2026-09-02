@@ -10,7 +10,7 @@
 
 # THEORUM: The Flat Agent Kernel
 
-**Current release: `0.1.15`** (`jsr:@theorum/core` / npm `theorum`).
+**Current release: `1.0.0`** (`jsr:@theorum/core` / npm `theorum`).
 
 > **"Profiles describe the contract. Providers move bytes. The runner enforces the turn."**
 
@@ -242,8 +242,8 @@ THEORUM separates tool concerns into four layers.
 | Layer | Owner | Purpose |
 | :--- | :--- | :--- |
 | **Catalog** | Host (startup) | `registerTool` — schema, handler, access, loadTier, permission |
-| **Access** | Profile | Hard ceiling: `profile.tools.allow` only |
-| **Gating** | Turn request | `tools: { [id]: true }` opts tools in; `toolLoader` wires T1 tools |
+| **Allow** | Profile | Custom: `tools.allow`. Builtins: `model.config.*.builtInTools` |
+| **Visibility** | Registry + profile | `loadTier` on tool; T1 via `tools.t1Policy`; T2 via `tools.t2Loader` |
 | **Permission** | Host app | `auto`, `session_consent`, and `always_confirm` determine whether execution pauses |
 
 ```ts
@@ -266,11 +266,10 @@ registerTool({
   }),
 });
 
-// Profile ceiling
+// Profile allow
 tools: { allow: ['lookup_order', 'load_tools'] }
 
-// Turn opt-in
-runTurn({ profile, tools: { lookup_order: true }, input: { text: '…' } }, provider);
+runTurn({ profile, input: { text: '…' } }, provider);
 
 // Host resume (interactive, confirmation, permission)
 invokeTool({ profile, name: 'ask_user', input: { kind: 'confirm', prompt: 'Proceed?' }, resume: { value: true } });
@@ -279,7 +278,7 @@ invokeTool({ profile, name: 'ask_user', input: { kind: 'confirm', prompt: 'Proce
 The host owns handlers and authorization state. The kernel enforces the declared contract
 via shared `executeRegisteredTool` for model tool calls and `invokeTool` for host resumes.
 
-Function and loader tools require **Zod** input/output schemas at registration time.
+Function tools require **Zod** input/output schemas at registration time.
 
 **Migration:** [`docs/MIGRATION-tool-system.md`](docs/MIGRATION-tool-system.md) (breaking changes from `dynamicTools` / `ToolEnvelope`).
 
@@ -405,9 +404,9 @@ Named exports from the root barrel (same symbols hosts get from `theorum` /
 | Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
 | Runner | `runTurn`, `prepareLiveInboundText` |
 | Catalog | `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `requireModelSpec` |
-| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_ACCESS`, `TOOL_PERMISSION`, `TOOL_ACCESS_LEVELS`, `TOOL_PERMISSION_TIERS`, `LIVE_ACTIVITY_HANDLINGS`, `LIVE_CONTEXT_COMPRESSIONS`, `LIVE_SPEECH_SENSITIVITIES` |
+| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_ACCESS`, `TOOL_PERMISSION`, `TOOL_TYPES`, `LIVE_ACTIVITY_HANDLINGS`, `LIVE_CONTEXT_COMPRESSIONS`, `LIVE_SPEECH_SENSITIVITIES` |
 | Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn`, `pickModel` |
-| Tools | `defineTool`, `registerTool`, `registerTools`, `invokeTool`, `executeRegisteredTool`, `registerHarnessTools`, `getTool`, `hasTool`, `requireTool`, `listTools`, `listBuiltinIds`, `listFunctionIds`, `resetTools`, `formatToolResult`, `TOOL_TYPES` |
+| Tools | `registerTool`, `registerTools`, `invokeTool`, `registerHarnessTools`, `getTool`, `hasTool`, `requireTool`, `listTools`, `listBuiltinIds`, `listFunctionIds`, `resetTools`, `formatToolResult`, `prepareTurnToolSnapshot` |
 | Structured | `getStructured`, `registerStructured` |
 | Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenAiFinishReason` |
 | Observability | `jsonlSink`, `memorySink`, `noopSink`, `resolveTraceDir`, `sinkFromDir`, `writeTrace`, `TraceRecord` |
@@ -453,6 +452,8 @@ Document health is enforced by `npm run lint:docs` — the **first** step of
 - Doc + **section** freshness on every code change (no Export-only gaming)
 - Behavioral sections require `contract_test` evidence (≥2 supports each)
 - Publish gates keep `docs/` and `src/**/*.md` out of npm/JSR (`verify-publish-bundle`)
+- Freshness diffs use a 32 MiB `git` buffer so large `origin/main...HEAD` patches
+  are not silently dropped (`ENOBUFS`)
 - Pre-commit runs `lint:docs` automatically (`prepare` installs the hook on `npm install`)
 
 ---

@@ -121,14 +121,16 @@ export type TurnStopKind = (typeof TURN_STOP_KINDS)[number];
 export const TOOL_LOAD_TIERS = ['T0', 'T1', 'T2'] as const;
 export type ToolLoadTier = (typeof TOOL_LOAD_TIERS)[number];
 
-/** Registered tool discriminant (`defineTool` / `registerTool`). */
-export const TOOL_TYPES = ['builtin', 'function', 'loader'] as const;
-export type ToolType = (typeof TOOL_TYPES)[number];
+/** Registered tool discriminant (`registerTool`). */
+export const TOOL_TYPES = ['builtin', 'function'] as const;
 
-export const TOOL_ACCESS_LEVELS = ['read-only', 'read-write', 'destructive'] as const;
+/** Semantic access level — host policy / UI; not enforced by execute. */
+export const TOOL_ACCESS = ['read-only', 'read-write', 'destructive'] as const;
+export type ToolAccess = (typeof TOOL_ACCESS)[number];
 
 /** Execution authorization tier for registered tools. */
-export const TOOL_PERMISSION_TIERS = ['auto', 'session_consent', 'always_confirm'] as const;
+export const TOOL_PERMISSION = ['auto', 'session_consent', 'always_confirm'] as const;
+export type ToolPermission = (typeof TOOL_PERMISSION)[number];
 
 /** MIME essence → normalized media part category (shared ingress map). */
 export const MEDIA_INPUT_KINDS: Record<string, MediaInputKind> = {
@@ -403,7 +405,7 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   'model.config.*.temperature': field('number', 'Sampling temperature.'),
   'model.config.*.builtInTools': field(
     'BuiltinToolId[]',
-    'Provider-native builtins this model supports. Opt in per turn with tools[id]: true.',
+    'Provider-native builtins enabled whenever this model is selected.',
   ),
   'model.config.*.key': field(
     unionType(GEMINI_BUCKETS),
@@ -489,12 +491,20 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
     GEMINI_FREE_BUCKETS,
   ),
   tools: field(
-    '{ allow: ToolId[] }',
-    'Custom function/loader tools the profile may run. Builtins belong on model.config.*.builtInTools.',
+    '{ allow: ToolId[]; t1Policy?; t2Loader? }',
+    'Custom tools (allow), optional T1 policy, optional T2 loader function id. Builtins belong on model.config.*.builtInTools.',
   ),
   'tools.allow': field(
     'ToolId[]',
     'Custom tools the agent may call. Builtins are declared per model, not here.',
+  ),
+  'tools.t1Policy': field(
+    '(ctx) => ToolId[] | Promise<ToolId[]>',
+    'Optional T1 policy — which eligible loadTier:T1 tools to wire at turn start.',
+  ),
+  'tools.t2Loader': field(
+    'ToolId',
+    'Optional function tool id for T2 promotion. Must be in tools.allow; handler returns { loaded: string[] }.',
   ),
   inputs: field('ProfileInputsSpec', 'Text, attachment, voice, slot, and size rules.'),
   'inputs.text': field('boolean', 'Whether the profile accepts text on a turn. Defaults to true.'),
@@ -555,10 +565,6 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
     'Default size / resolution when the turn does not set slots.size.',
   ),
   'outputs.image.mimeType': field('string', 'Output MIME for generated images.'),
-  'outputs.image.allowsGrounding': field(
-    'boolean',
-    'When false, grounding builtins are rejected on this profile.',
-  ),
   'outputs.image.maxInputImages': field('number', 'Cap on reference images in one turn.'),
   'outputs.speech': field('ProfileSpeechSpec', 'TTS pins. Model id is on model.'),
   'outputs.speech.voice': field(
@@ -722,54 +728,58 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
 export const EXTRA_FIELDS: Record<string, FieldMeta> = {
   type: field(
     unionType(TOOL_TYPES),
-    'Discriminator: builtin (provider-native), function (host handler), or loader (mid-turn expansion).',
+    'Discriminator: builtin (provider-native) or function (host handler).',
     TOOL_TYPES,
     {
       builtin: 'Provider-native capability; wire maps to the provider adapter.',
-      function: 'Host-owned tool with Zod input/output and a handler.',
-      loader: 'Mid-turn tool that promotes deferred tools into the visible set.',
+      function:
+        'Host-owned tool with Zod input/output and a handler. Profile tools.t2Loader may promote T2 tools when output includes { loaded }.',
     },
   ),
-  name: field('string', 'Wire tool id — referenced in tools.allow and per-turn tools gates.'),
+  name: field(
+    'string',
+    'Wire tool id — custom: tools.allow; provider builtin: model.config.*.builtInTools. Visibility via loadTier (T0/T1/T2).',
+  ),
   description: field('string', 'Model-facing description included in function declarations.'),
   input: field(
     'ZodSchema',
-    'Zod input schema for function and loader tools; converted to JSON Schema at registration.',
+    'Zod input schema for function tools; converted to JSON Schema at registration.',
   ),
-  output: field(
-    'ZodSchema',
-    'Zod output schema for function and loader tools; validates handler results.',
-  ),
+  output: field('ZodSchema', 'Zod output schema for function tools; validates handler results.'),
   handler: field(
     'ToolHandler',
     'Host function or async generator run on model tool calls and invokeTool resumes.',
   ),
-  resolve: field(
-    '(input, ctx) => { loaded: string[] }',
-    'Loader-only: returns tool ids to promote into the visible set for the rest of the turn.',
-  ),
-  access: field(
-    unionType(TOOL_ACCESS_LEVELS),
-    'Semantic access level for policy and UI.',
-    TOOL_ACCESS_LEVELS,
-  ),
+  access: field(unionType(TOOL_ACCESS), 'Semantic access level for policy and UI.', TOOL_ACCESS, {
+    'read-only': 'Reads host or remote state; no lasting mutation.',
+    'read-write': 'May create or update host state.',
+    destructive: 'May delete, charge, or otherwise hard-to-undo actions.',
+  }),
   loadTier: field(
     unionType(TOOL_LOAD_TIERS),
-    'When this tool is wired to the model (profile allow is still required).',
+    'When this tool is wired to the model (profile allow / builtInTools is still required).',
     TOOL_LOAD_TIERS,
     {
-      T0: 'Always wired at turn start when gated on.',
-      T1: 'Wired when the turn toolLoader selects it.',
-      T2: 'Deferred until a loader tool promotes it.',
+      T0: 'Wired at turn start when allowed (custom on allow / builtin on the model).',
+      T1: 'Wired when profile.tools.t1Policy selects it.',
+      T2: 'Deferred until profile.tools.t2Loader returns { loaded } and the kernel promotes those ids.',
     },
   ),
   permission: field(
-    unionType(TOOL_PERMISSION_TIERS),
-    'Default permission tier for this tool.',
-    TOOL_PERMISSION_TIERS,
+    unionType(TOOL_PERMISSION),
+    'Default permission tier for this tool before the handler runs.',
+    TOOL_PERMISSION,
+    {
+      auto: 'Run without an extra host consent step.',
+      session_consent: 'Ask once per session, then remember grant.',
+      always_confirm: 'Confirm on every invocation.',
+    },
   ),
   category: field('string', 'Grouping label for settings and discovery.'),
-  paths: field('string[]', 'Channel/path availability for this tool.'),
+  paths: field(
+    'string[]',
+    "Channel/path availability. Use ['*'] for all paths; omit turn path only matches '*'.",
+  ),
 };
 
 /** Look up hover metadata for a dotted path (profile first, then extra). */

@@ -90,6 +90,7 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
       throw new TheorumError('cannot mix speech and structured response formats');
     }
     camel.responseFormat = { type: 'audio' };
+    camel.responseModalities = ['audio'];
     return;
   }
   if (req.image) {
@@ -99,6 +100,8 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
       aspectRatio: req.image.aspectRatio,
       imageSize: req.image.size,
     };
+    // Image-capable models may interleave assistant text with generated images.
+    camel.responseModalities = ['text', 'image'];
     return;
   }
   if (!req.structured) {

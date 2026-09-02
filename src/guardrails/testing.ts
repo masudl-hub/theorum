@@ -6,21 +6,21 @@
  * @module
  */
 
-export {
-  buildCanaryEgressAttacks,
-  buildLiveAttacks,
-  canaryEgressCatalog,
-  filterLiveAttacks,
-  FIXED_CANARY,
-  inboundFuzzPayloads,
-  inboundPayloadByName,
-  runInboundGuardrailFuzz,
-  summarizeAttackBank,
-} from './corpus/mod.ts';
 export type {
   CanaryEgressAttack,
   CanaryEgressCatalogEntry,
   InboundFuzzPayload,
   InboundFuzzResult,
   LiveAttack,
+} from './corpus/mod.ts';
+export {
+  buildCanaryEgressAttacks,
+  buildLiveAttacks,
+  canaryEgressCatalog,
+  FIXED_CANARY,
+  filterLiveAttacks,
+  inboundFuzzPayloads,
+  inboundPayloadByName,
+  runInboundGuardrailFuzz,
+  summarizeAttackBank,
 } from './corpus/mod.ts';

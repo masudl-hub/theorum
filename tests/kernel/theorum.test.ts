@@ -25,7 +25,7 @@ import type {
   TurnRequest,
 } from '../../src/kernel/types.ts';
 import { HOST_MODELS, modelAllow } from '../fixtures/models.ts';
-import { gateTools, invokeRegisteredTool, withProfileTools } from '../fixtures/test-tools.ts';
+import { invokeRegisteredTool, withProfileTools } from '../fixtures/test-tools.ts';
 
 Deno.test('runner internal helper branches: loaders, tool findings, step ceilings, and fallback handlers', async () => {
   registerProfile(
@@ -68,7 +68,6 @@ Deno.test('runner internal helper branches: loaders, tool findings, step ceiling
   for await (const ev of runTurn(
     {
       profile: 'loader_runner_bot',
-      tools: gateTools('record_lookup'),
       input: { text: 'lookup without loader' },
     },
     mockDeferredProvider,
@@ -82,7 +81,6 @@ Deno.test('runner internal helper branches: loaders, tool findings, step ceiling
   // 2. Registered tool on multi-step profile executes and continues
   const noHandlerReq: TurnRequest = {
     profile: 'dynamic_runner_bot',
-    tools: gateTools('stub_tool'),
     input: { text: 'run stub' },
   };
   let callCount = 0;
@@ -121,7 +119,6 @@ Deno.test('runner internal helper branches: loaders, tool findings, step ceiling
   );
   const updateReq: TurnRequest = {
     profile: 'existing_tool_bot',
-    tools: gateTools('existing_tool'),
     input: { text: 'run existing' },
   };
   const updateProvider: ModelProvider = {
@@ -279,35 +276,86 @@ Deno.test('selectable profile picks model and pinned thinking', () => {
   assertEquals(smart.generation.thinking, 'high');
 });
 
-Deno.test('search xor maps drops maps', () => {
+Deno.test('model builtInTools lists search and maps when both are allowlisted', () => {
+  registerProfile(
+    defineProfile({
+      id: 'mutex_grounding',
+      model: {
+        allow: ['gemini35FlashLite'],
+        config: {
+          gemini35FlashLite: {
+            ...getProfile('chat').model.config.gemini35FlashLite,
+            builtInTools: ['googleSearch', 'googleMaps'],
+          },
+        },
+        maxSteps: 1,
+      },
+      tools: { allow: [] },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
   const { generation } = resolveTurn({
-    profile: 'chat',
-    tools: { googleSearch: true, googleMaps: true },
+    profile: 'mutex_grounding',
     input: { text: 'x' },
   });
-  assertEquals(generation.builtins, ['googleSearch']);
+  assertEquals(generation.builtins, ['googleSearch', 'googleMaps']);
 });
 
 Deno.test('model builtInTools ceiling blocks unlisted builtins', () => {
+  registerProfile(
+    defineProfile({
+      id: 'ceiling_grounding',
+      model: {
+        allow: ['gemini35FlashLite'],
+        config: {
+          gemini35FlashLite: {
+            ...getProfile('chat').model.config.gemini35FlashLite,
+            builtInTools: ['googleSearch', 'googleMaps'],
+          },
+        },
+        maxSteps: 1,
+      },
+      tools: { allow: [] },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
   const { generation } = resolveTurn({
-    profile: 'formatter',
-    tools: { codeExecution: true, googleSearch: true },
+    profile: 'ceiling_grounding',
     input: { text: 'x' },
   });
-  assertEquals(generation.builtins, ['googleSearch']);
+  assertEquals(generation.builtins, ['googleSearch', 'googleMaps']);
 });
 
-Deno.test('tools stay off until the turn gates them', () => {
+Deno.test('allow puts T0 custom tools on the wire; builtins follow the model', () => {
   const idle = resolveTurn({ profile: 'chat', input: { text: 'x' } });
   assertEquals(idle.generation.builtins, []);
   assertEquals(idle.generation.tools.visible, []);
+  registerProfile(
+    defineProfile({
+      id: 'search_on_model',
+      model: {
+        allow: ['gemini35FlashLite'],
+        config: {
+          gemini35FlashLite: {
+            ...getProfile('chat').model.config.gemini35FlashLite,
+            builtInTools: ['googleSearch'],
+          },
+        },
+        maxSteps: 1,
+      },
+      tools: { allow: ['ask_user'] },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
   const search = resolveTurn({
-    profile: 'chat',
-    tools: { googleSearch: true, ask_user: true },
+    profile: 'search_on_model',
     input: { text: 'x' },
   });
   assertEquals(search.generation.builtins, ['googleSearch']);
-  assertEquals(search.generation.tools.visible.includes('ask_user'), false);
+  assertEquals(search.generation.tools.visible.includes('ask_user'), true);
 });
 
 Deno.test('language slot picks structured schema', () => {
@@ -342,7 +390,6 @@ Deno.test('ask_user pauses when allowed', async () => {
     profile: 'ask_user_bot',
     name: 'ask_user',
     input: { kind: 'text', prompt: 'which?' },
-    tools: gateTools('ask_user'),
   });
   const toolEv = events.find((e) => e.type === 'tool' && e.tool?.phase === 'pause');
   assertEquals(Boolean(toolEv), true);
@@ -371,7 +418,7 @@ Deno.test('projection lists only allowed tools', () => {
   const ui = projectProfile('formatter');
   assertEquals(
     ui.tools.map((t) => t.name),
-    ['googleSearch', 'googleMaps'],
+    [],
   );
   assertEquals(ui.controls, ['thinking']);
   assertEquals(ui.inputs.voice, undefined);
@@ -395,14 +442,12 @@ Deno.test('ask_user validates kind and prompt', async () => {
     profile: 'ask_user_validate_bot',
     name: 'ask_user',
     input: { kind: 'nope', prompt: 'q' },
-    tools: gateTools('ask_user'),
   });
   assertEquals(badKind.findLast((e) => e.type === 'tool')?.tool?.phase, 'error');
   const badPrompt = await invokeRegisteredTool({
     profile: 'ask_user_validate_bot',
     name: 'ask_user',
     input: { kind: 'text', prompt: '  ' },
-    tools: gateTools('ask_user'),
   });
   assertEquals(badPrompt.findLast((e) => e.type === 'tool')?.tool?.phase, 'error');
 });
@@ -413,7 +458,6 @@ Deno.test('unregistered custom tools fail at execution', async () => {
     profile: 'host_tool_bot',
     name: 'host_tool',
     input: { n: 1 },
-    tools: gateTools('host_tool'),
   });
   const toolEv = events.find((e) => e.type === 'tool');
   assertEquals(toolEv?.tool?.phase, 'error');
@@ -932,7 +976,6 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
   for await (const ev of runTurn(
     {
       profile: 'multistep_bot',
-      tools: gateTools('get_record_status'),
       input: { text: 'How is my record?' },
     },
     mockProvider,
@@ -994,7 +1037,6 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
   for await (const ev of runTurn(
     {
       profile: 'host_assistant',
-      tools: gateTools('fetch_sensor'),
       input: { text: 'Check soil' },
     },
     mockProvider,
@@ -1067,7 +1109,6 @@ Deno.test('runTurn sends every Interactions function_result in one continuation'
   for await (const _ev of runTurn(
     {
       profile: 'host_assistant_multi_fn',
-      tools: gateTools('fetch_sensor', 'lookup_order'),
       input: { text: 'Check both' },
     },
     mockProvider,
@@ -1120,7 +1161,6 @@ Deno.test('runTurn falls back to function_result history when Interactions id is
   for await (const _ev of runTurn(
     {
       profile: 'host_assistant_history_fallback',
-      tools: gateTools('fetch_sensor'),
       input: { text: 'Check soil' },
     },
     mockProvider,
@@ -1295,7 +1335,6 @@ Deno.test('registered tool exception is safely caught and converted to error fin
   for await (const ev of runTurn(
     {
       profile: 'fault_tolerant_bot',
-      tools: gateTools('crashing_tool'),
       input: { text: 'Run crashing tool' },
     },
     mockProvider,
@@ -1345,7 +1384,6 @@ Deno.test('autonomous loop strictly enforces maxSteps ceiling when tool requests
   for await (const ev of runTurn(
     {
       profile: 'loop_capped_bot',
-      tools: gateTools('ping_tool'),
       input: { text: 'Loop test' },
     },
     mockProvider,
@@ -1391,7 +1429,6 @@ Deno.test('registered tool enforces session_consent pause unless granted', async
   for await (const ev of runTurn(
     {
       profile: 'consent_tool_bot',
-      tools: gateTools('delete_resource'),
       input: { text: 'Delete resource 123' },
     },
     mockProvider,
@@ -1408,7 +1445,6 @@ Deno.test('registered tool enforces session_consent pause unless granted', async
     {
       profile: 'consent_tool_bot',
       sessionPermissions: ['delete_resource'],
-      tools: gateTools('delete_resource'),
       input: { text: 'Delete resource 123' },
     },
     mockProvider,
@@ -1432,7 +1468,7 @@ Deno.test('loader promotes deferred tools and continues the same turn loop', asy
       thinking: 'minimal',
       maxSteps: 3,
     },
-    tools: { allow: ['load_tools', 'record_lookup'] },
+    tools: { allow: ['load_tools', 'record_lookup'], t2Loader: 'load_tools' },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 50 } },
@@ -1471,7 +1507,6 @@ Deno.test('loader promotes deferred tools and continues the same turn loop', asy
     runTurn(
       {
         profile: 'loader_bot',
-        tools: gateTools('load_tools', 'record_lookup'),
         input: { text: 'load then lookup' },
       },
       provider,
@@ -1505,7 +1540,7 @@ Deno.test('loader does not promote deferred tools before required permission is 
       thinking: 'minimal',
       maxSteps: 2,
     },
-    tools: { allow: ['load_tools_consent', 'record_lookup'] },
+    tools: { allow: ['load_tools_consent', 'record_lookup'], t2Loader: 'load_tools_consent' },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 50 } },
@@ -1534,7 +1569,6 @@ Deno.test('loader does not promote deferred tools before required permission is 
     runTurn(
       {
         profile: 'loader_permission_bot',
-        tools: gateTools('load_tools_consent', 'record_lookup'),
         input: { text: 'try loading without consent' },
       },
       provider,
@@ -1748,7 +1782,6 @@ Deno.test('guardrails.egress withholds media until prose clears', async () => {
           aspectRatio: '1:1',
           size: '1K',
           mimeType: 'image/jpeg',
-          allowsGrounding: false,
         },
       },
       guardrails: {
@@ -1846,7 +1879,6 @@ Deno.test('registered tool canExecute returning false yields unauthorized error'
     runTurn(
       {
         profile: 'can_exec_bot_1',
-        tools: gateTools('denied_tool'),
         input: { text: 'test' },
       },
       createToolProvider('denied_tool'),
@@ -1863,7 +1895,6 @@ Deno.test('registered tool canExecute throwing error is caught safely', async ()
     runTurn(
       {
         profile: 'can_exec_bot_3',
-        tools: gateTools('throwing_auth_tool'),
         input: { text: 'test' },
       },
       createToolProvider('throwing_auth_tool'),

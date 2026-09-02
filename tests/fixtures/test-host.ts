@@ -164,7 +164,7 @@ const formatter: Profile = {
     config: {
       gemini35FlashLite: {
         ...HOST_MODELS.gemini35FlashLite,
-        builtInTools: ['googleSearch', 'googleMaps'],
+        builtInTools: [],
       },
     },
     controls: ['thinking'],
@@ -212,7 +212,6 @@ const image: Profile = {
       aspectRatio: '1:1',
       size: '1K',
       mimeType: 'image/jpeg',
-      allowsGrounding: false,
       maxInputImages: 14,
     } satisfies GoogleImagePins,
   },

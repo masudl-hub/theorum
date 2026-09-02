@@ -32,8 +32,6 @@ const VOICE_INPUT_MIMES = [...GOOGLE_VOICE_INPUT_MIMES];
 const IMAGE_ASPECT_RATIOS = [...GOOGLE_IMAGE_ASPECT_RATIOS];
 const IMAGE_SIZES = [...GOOGLE_IMAGE_SIZES];
 
-const GROUNDING_BUILTINS = ['googleSearch', 'googleMaps', 'urlContext'] as const;
-
 const gemini35FlashLite: ModelSpec = {
   apiId: 'gemini-3.5-flash-lite',
   thinking: { on: 'high', off: 'minimal' },
@@ -41,7 +39,7 @@ const gemini35FlashLite: ModelSpec = {
   summaries: { on: 'auto', off: 'none' },
   maxOutputTokens: 8192,
   temperature: 1,
-  builtInTools: [...GROUNDING_BUILTINS],
+  builtInTools: [],
 };
 
 const gemini31FlashLite: ModelSpec = {
@@ -51,7 +49,7 @@ const gemini31FlashLite: ModelSpec = {
   summaries: { on: 'auto', off: 'none' },
   maxOutputTokens: 8192,
   temperature: 1,
-  builtInTools: [...GROUNDING_BUILTINS],
+  builtInTools: [],
 };
 
 const gemini31ProPreview: ModelSpec = {
@@ -61,7 +59,7 @@ const gemini31ProPreview: ModelSpec = {
   summaries: { on: 'auto', off: 'none' },
   maxOutputTokens: 64_000,
   temperature: 1,
-  builtInTools: [...GROUNDING_BUILTINS],
+  builtInTools: [],
 };
 
 const gemini31FlashLiteImage: ModelSpec = {

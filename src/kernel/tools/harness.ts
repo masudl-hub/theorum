@@ -5,7 +5,6 @@
  */
 
 import { z } from 'zod';
-import { defineTool } from './define.ts';
 import { registerTool } from './registry.ts';
 
 const AskInputSchema = z.object({
@@ -22,33 +21,31 @@ type AskInput = z.infer<typeof AskInputSchema>;
 
 /** Register harness tools shipped with THEORUM. */
 function registerHarnessTools(): void {
-  registerTool(
-    defineTool({
-      type: 'function',
-      name: 'ask_user',
-      description: 'Ask the user a question and wait for a response',
-      category: 'conversation',
-      access: 'read-only',
-      paths: ['*'],
-      loadTier: 'T0',
-      permission: 'auto',
-      input: AskInputSchema,
-      output: AskOutputSchema,
-      interactive: {
-        render: (input) => {
-          const ask = input as AskInput;
-          return {
-            kind: ask.kind,
-            prompt: ask.prompt,
-            options: ask.options,
-          };
-        },
+  registerTool({
+    type: 'function',
+    name: 'ask_user',
+    description: 'Ask the user a question and wait for a response',
+    category: 'conversation',
+    access: 'read-only',
+    paths: ['*'],
+    loadTier: 'T0',
+    permission: 'auto',
+    input: AskInputSchema,
+    output: AskOutputSchema,
+    interactive: {
+      render: (input) => {
+        const ask = input as AskInput;
+        return {
+          kind: ask.kind,
+          prompt: ask.prompt,
+          options: ask.options,
+        };
       },
-      handler: (_input, ctx) => ({
-        answer: ctx.resume?.value ?? ctx.resume?.granted,
-      }),
+    },
+    handler: (_input, ctx) => ({
+      answer: ctx.resume?.value ?? ctx.resume?.granted,
     }),
-  );
+  });
 }
 
 export { registerHarnessTools };

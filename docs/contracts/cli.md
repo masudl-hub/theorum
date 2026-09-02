@@ -17,6 +17,7 @@ before commands that execute turns — the CLI does not embed app profiles.
 | Path | Role |
 | --- | --- |
 | `src/cli/index.ts` | Argument parser + command dispatch |
+| `src/cli/event-log.ts` | Shared `run`/`test` event printing + `--trace` capture |
 | `src/cli/commands/*` | `bench`, `fuzz`, `test`, `run`, `profile` |
 | `src/cli/matrix/*` | Permutation synthesizer + fixtures |
 
@@ -32,8 +33,8 @@ theorum <command> [options]
 | `verify:canary-live` | Alias for `verify:guardrails-live` |
 | `fuzz` | Adversarial inbound sanitization fuzzer; exit `1` on expected miss |
 | `fuzz-canary` | Adversarial canary egress fuzzer (`runTurn` stream gate + Live batch gate); exit `1` on bypass |
-| `test` | Stress matrix or custom profile tests (`--profile`, `--all`, `--lite`, `--matrix`, `--mode`, `--search`, `--map`) |
-| `run` | Execute a turn with streaming output (`--profile`, `--prompt`, `--mode`, …) |
+| `test` | Stress matrix or custom profile tests (`--profile`, `--all`, `--lite`, `--matrix`, `--mode`, `--search`, `--map`, `--verbose`, `--trace`, `--trace-dir`) |
+| `run` | Execute a turn with streaming output (`--profile`, `--prompt`, `--mode`, `--verbose`, `--trace`, `--trace-dir`, …) |
 | `profile list` / `profile show <id>` | Inspect registered profile blueprints |
 | `help` | Usage |
 
@@ -42,11 +43,17 @@ Both `test` and `run` print Google `code_execution_*` (and other) `evidence`
 events when a host-supplied provider yields them — hosts still must pass an
 explicit `ModelProvider` (the CLI never reads API keys).
 
+### Diagnostics flags (`run`, `test`)
+
+| Flag | Effect |
+| --- | --- |
+| `--verbose`, `-v` | Print `errorInternal` and `evidence.raw` while the turn runs; with `--trace`, also print `upstreamLog` after the record |
+| `--trace` | Attach a trace sink; dump the full `TraceRecord` JSON after each turn |
+| `--trace-dir <path>` | Also append trace JSONL under the given directory (in addition to `--trace` console dump) |
+
 ```bash
-theorum fuzz
-theorum fuzz-canary
-theorum test --profile my.agent --matrix
-theorum run --profile my.agent --prompt "ping"
+theorum run --profile my.agent --prompt "ping" --verbose --trace
+theorum test --profile my.agent --lite --trace --trace-dir /var/log/theorum
 ```
 ## Matrix and fixtures
 

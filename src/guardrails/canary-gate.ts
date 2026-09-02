@@ -6,10 +6,10 @@
 
 import type { TurnEvent } from '../kernel/types.ts';
 import {
+  type CanaryStreamGate,
   createCanaryStreamGate,
   eventHasCanary,
   isStreamedCanaryEvent,
-  type CanaryStreamGate,
 } from './canary.ts';
 
 export interface CanaryGateSession {

@@ -6,8 +6,12 @@
  * @module
  */
 
-export { buildCanaryEgressAttacks, canaryEgressCatalog, FIXED_CANARY } from './canary-egress-attacks.ts';
 export type { CanaryEgressAttack } from './canary-egress-attacks.ts';
+export {
+  buildCanaryEgressAttacks,
+  canaryEgressCatalog,
+  FIXED_CANARY,
+} from './canary-egress-attacks.ts';
 export { runInboundGuardrailFuzz } from './fuzz-inbound.ts';
 export { inboundFuzzPayloads, inboundPayloadByName } from './inbound-payloads.ts';
 export { buildLiveAttacks, filterLiveAttacks, summarizeAttackBank } from './live-attacks.ts';

@@ -77,7 +77,6 @@ const GOOGLE_BUILTIN_TOOLS = [
     loadTier: 'T0' as const,
     permission: 'auto' as const,
     wire: { interactions: 'google_maps' },
-    conflictsWith: ['googleSearch', 'urlContext'],
   },
   {
     type: 'builtin' as const,

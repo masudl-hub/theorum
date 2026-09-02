@@ -10,8 +10,6 @@
  * @module
  */
 
-export type { CanaryGateSession } from './canary-gate.ts';
-export { createCanaryGateSession, filterCanaryGatedEvents } from './canary-gate.ts';
 export type { CanaryGateResult, CanaryStreamGate } from './canary.ts';
 export {
   bindCanary,
@@ -26,6 +24,9 @@ export {
   USER_OPEN,
   wrapUserData,
 } from './canary.ts';
+export type { CanaryGateSession } from './canary-gate.ts';
+export { createCanaryGateSession, filterCanaryGatedEvents } from './canary-gate.ts';
+export { standardEgressEnforce } from './egress.ts';
 export {
   describeError,
   isAbortError,
@@ -44,7 +45,6 @@ export {
   toErrorEvent,
   UPSTREAM_FAILED,
 } from './error.ts';
-export { standardEgressEnforce } from './egress.ts';
 export { injectionSpans } from './injection.ts';
 export type {
   LiveOutboundBatchResult,

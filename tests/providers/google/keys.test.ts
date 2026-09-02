@@ -2,6 +2,11 @@ import '../../fixtures/test-host.ts';
 import '../../fixtures/enable-test-internals.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../../src/guardrails/error.ts';
 import { assertEquals } from '../../../src/kernel/engine/assert.ts';
+import {
+  defineProfile,
+  getProfile,
+  registerProfile,
+} from '../../../src/kernel/registry/profiles.ts';
 import { resolveTurn } from '../../../src/kernel/registry/resolve.ts';
 import {
   fetchGemini,
@@ -46,6 +51,40 @@ function responseForKey(key: string): Response {
   return new Response('body', { status: HTTP_QUOTA });
 }
 
+function withBuiltins(
+  id: string,
+  baseProfile: string,
+  builtInTools: string[],
+  select?: string,
+): void {
+  const base = getProfile(baseProfile);
+  const modelId = select
+    ? (base.model.select?.[select] ?? base.model.allow[0])
+    : base.model.allow[0];
+  const config = { ...base.model.config };
+  for (const mid of base.model.allow) {
+    config[mid] = {
+      ...base.model.config[mid],
+      builtInTools: mid === modelId ? builtInTools : [],
+    };
+  }
+  registerProfile(
+    defineProfile({
+      ...base,
+      id,
+      model: { ...base.model, config },
+    }),
+  );
+}
+
+withBuiltins('chat_search', 'chat', ['googleSearch']);
+withBuiltins('formatter_search', 'formatter', ['googleSearch']);
+withBuiltins('selector_fast_search', 'selector', ['googleSearch'], 'fast');
+withBuiltins('chat_maps', 'chat', ['googleMaps']);
+withBuiltins('selector_fast_maps', 'selector', ['googleMaps'], 'fast');
+withBuiltins('selector_smart_maps', 'selector', ['googleMaps'], 'smart');
+withBuiltins('chat_url', 'chat', ['urlContext']);
+
 Deno.test('host profiles default to their configured free key slots', () => {
   assertEquals(
     resolveTurn({ profile: 'chat', input: { text: 'x' } }).generation.geminiBucket,
@@ -80,22 +119,19 @@ Deno.test('pro preview without search or maps stays on the configured free key',
   assertEquals(generation.geminiBucket, 'freeB');
 });
 
-Deno.test('search forces the paid key on every free profile', () => {
+Deno.test('search forces the paid key when listed on the model', () => {
   assertEquals(
-    resolveTurn({ profile: 'chat', tools: { googleSearch: true }, input: { text: 'x' } }).generation
-      .geminiBucket,
+    resolveTurn({ profile: 'chat_search', input: { text: 'x' } }).generation.geminiBucket,
     'paid',
   );
   assertEquals(
-    resolveTurn({ profile: 'formatter', tools: { googleSearch: true }, input: { text: 'x' } })
-      .generation.geminiBucket,
+    resolveTurn({ profile: 'formatter_search', input: { text: 'x' } }).generation.geminiBucket,
     'paid',
   );
   assertEquals(
     resolveTurn({
-      profile: 'selector',
+      profile: 'selector_fast_search',
       select: 'fast',
-      tools: { googleSearch: true },
       input: { text: 'x' },
     }).generation.geminiBucket,
     'paid',
@@ -104,24 +140,21 @@ Deno.test('search forces the paid key on every free profile', () => {
 
 Deno.test('maps uses profile free key unless model pins paid or builtin forces paid', () => {
   assertEquals(
-    resolveTurn({ profile: 'chat', tools: { googleMaps: true }, input: { text: 'x' } }).generation
-      .geminiBucket,
+    resolveTurn({ profile: 'chat_maps', input: { text: 'x' } }).generation.geminiBucket,
     'freeA',
   );
   assertEquals(
     resolveTurn({
-      profile: 'selector',
+      profile: 'selector_fast_maps',
       select: 'fast',
-      tools: { googleMaps: true },
       input: { text: 'x' },
     }).generation.geminiBucket,
     'freeB',
   );
   assertEquals(
     resolveTurn({
-      profile: 'selector',
+      profile: 'selector_smart_maps',
       select: 'smart',
-      tools: { googleMaps: true },
       input: { text: 'x' },
     }).generation.geminiBucket,
     'freeB',
@@ -130,8 +163,7 @@ Deno.test('maps uses profile free key unless model pins paid or builtin forces p
 
 Deno.test('url context does not force paid', () => {
   assertEquals(
-    resolveTurn({ profile: 'chat', tools: { urlContext: true }, input: { text: 'x' } }).generation
-      .geminiBucket,
+    resolveTurn({ profile: 'chat_url', input: { text: 'x' } }).generation.geminiBucket,
     'freeA',
   );
 });

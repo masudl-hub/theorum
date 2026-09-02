@@ -3,6 +3,7 @@ import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals, assertThrows } from '../../src/kernel/engine/assert.ts';
 import { wrapUserData } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
+import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
@@ -122,6 +123,7 @@ function assertImageWireBody(body: Record<string, unknown>): void {
   assertEquals(format[mimeKey], 'image/jpeg');
   assertEquals(format[camelToSnake('aspectRatio')], '1:1');
   assertEquals(format[camelToSnake('imageSize')], '1K');
+  assertEquals(body[camelToSnake('responseModalities')], ['text', 'image']);
 }
 
 Deno.test('interactions body places refs in input and image in response format', () => {
@@ -153,7 +155,7 @@ Deno.test('image projection exposes image pins not tools', () => {
   assertEquals(ui.controls, []);
 });
 
-Deno.test('media validations reject missing image pins, structured mixing, grounding on image, and invalid mime', async () => {
+Deno.test('media validations reject missing image pins, structured mixing, and invalid mime', async () => {
   const { registerProfile, defineProfile } = await import('../../src/kernel/registry/profiles.ts');
 
   // Image pins without aspect/size
@@ -171,14 +173,14 @@ Deno.test('media validations reject missing image pins, structured mixing, groun
     TheorumError,
   );
 
-  // Image pins with structured output
+  // Image pins with responseFormat-enforced structured output
   registerProfile(
     defineProfile({
       id: 'mixed_media_profile',
       model: { ...modelAllow('gemini31FlashLiteImage') },
       inputs: { text: true },
       outputs: {
-        structured: 'custom',
+        structured: 'chatTurn',
         image: { aspectRatio: '1:1', size: '1K', mimeType: 'image/jpeg' },
       },
       guardrails: { quota: { perDay: 10 } },
@@ -189,7 +191,58 @@ Deno.test('media validations reject missing image pins, structured mixing, groun
     TheorumError,
   );
 
-  // Grounding tool on image profile that disallows grounding
+  // Prompt-enforced structured + image is allowed (no competing responseFormat)
+  registerProfile(
+    defineProfile({
+      id: 'image_with_prompt_schema',
+      model: { ...modelAllow('gemini31FlashLiteImage') },
+      inputs: { text: true },
+      outputs: {
+        structured: 'promptTurn',
+        image: { aspectRatio: '1:1', size: '1K', mimeType: 'image/jpeg' },
+      },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  const promptImage = resolveTurn({
+    profile: 'image_with_prompt_schema',
+    input: { text: 'fox' },
+  }).generation;
+  assertEquals(promptImage.structured, 'promptTurn');
+  assertEquals(promptImage.image?.type, 'image');
+
+  // codeExecution on image profiles is a host/model choice — kernel does not block it
+  registerProfile(
+    defineProfile({
+      id: 'image_with_code_exec',
+      model: {
+        allow: ['gemini31FlashLiteImage'],
+        config: {
+          gemini31FlashLiteImage: {
+            ...HOST_MODELS.gemini31FlashLiteImage,
+            builtInTools: ['codeExecution'],
+          },
+        },
+      },
+      tools: { allow: [] },
+      inputs: { text: true },
+      outputs: {
+        structured: null,
+        image: {
+          aspectRatio: '1:1',
+          size: '1K',
+          mimeType: 'image/jpeg',
+        },
+      },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  assertEquals(
+    resolveTurn({ profile: 'image_with_code_exec', input: { text: 'plot' } }).generation.builtins,
+    ['codeExecution'],
+  );
+
+  // googleSearch on image profiles is a host/model choice — kernel does not block it
   registerProfile(
     defineProfile({
       id: 'image_with_search',
@@ -210,19 +263,32 @@ Deno.test('media validations reject missing image pins, structured mixing, groun
           aspectRatio: '1:1',
           size: '1K',
           mimeType: 'image/jpeg',
-          allowsGrounding: false,
         },
       },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
+  assertEquals(
+    resolveTurn({ profile: 'image_with_search', input: { text: 'search image' } }).generation
+      .builtins,
+    ['googleSearch'],
+  );
+});
+
+Deno.test('resolveTurn rejects multiple responseFormat wire formats', () => {
+  registerProfile({
+    id: 'mixed_output_modes_test',
+    model: { ...modelAllow('gemini35FlashLite') },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: 'chatTurn',
+      speech: { voice: 'Kore', format: 'pcm' },
+    },
+    guardrails: { canary: false, sanitizeInput: false, redactSensitive: false },
+  });
   assertThrows(
-    () =>
-      resolveTurn({
-        profile: 'image_with_search',
-        tools: { googleSearch: true },
-        input: { text: 'search image' },
-      }),
+    () => resolveTurn({ profile: 'mixed_output_modes_test', input: { text: 'hi' } }),
     TheorumError,
   );
 });

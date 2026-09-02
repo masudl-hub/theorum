@@ -56,7 +56,6 @@ export {
   MEDIA_INPUT_KINDS,
   MEDIA_WILDCARDS,
   PROFILE_FIELDS,
-  TOOL_LOAD_TIERS,
   PROTOCOL_PROVIDERS,
   PROTOCOLS,
   PROVIDERS,
@@ -67,10 +66,14 @@ export {
   STREAM_MODES,
   SUMMARY_MODES,
   THINKING_LEVELS,
+  TOOL_ACCESS,
+  TOOL_LOAD_TIERS,
+  TOOL_PERMISSION,
+  TOOL_TYPES,
   TURN_STOP_KINDS,
   VOICE_ACCEPT_MIMES,
 } from './schema.ts';
-export type { ProfileResumeSpec, TurnContinueFrom, TurnStop, TurnStopKind } from './stop.ts';
+export type { ProfileResumeSpec, TurnContinueFrom, TurnStop } from './stop.ts';
 export {
   AUTO_CONTINUE_DELAY_MS,
   CONTINUE_INSTRUCTION,
@@ -85,8 +88,6 @@ export {
   turnStopFromOpenAiFinishReason,
 } from './stop.ts';
 export {
-  defineTool,
-  executeRegisteredTool,
   formatToolResult,
   getTool,
   hasTool,
@@ -94,13 +95,11 @@ export {
   listBuiltinIds,
   listFunctionIds,
   listTools,
+  prepareTurnToolSnapshot,
   registerHarnessTools,
   registerTool,
   registerTools,
   requireTool,
   resetTools,
-  TOOL_ACCESS,
-  TOOL_PERMISSION,
-  TOOL_TYPES,
 } from './tools/mod.ts';
 export type * from './types.ts';

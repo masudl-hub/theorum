@@ -175,6 +175,9 @@ function foldStepStart(payload: Record<string, unknown>, fold: StreamFold): Turn
   const type = String(step.type ?? '');
   const index = typeof payload.index === 'number' ? payload.index : 0;
   if (type === 'function_call') {
+    if (step.arguments !== undefined && typeof step.arguments !== 'string') {
+      return foldFunctionCallDelta(step, fold);
+    }
     fold.functionCalls.set(index, {
       id: typeof step.id === 'string' ? step.id : undefined,
       name: typeof step.name === 'string' ? step.name : undefined,
@@ -213,14 +216,20 @@ function foldArgumentsDelta(delta: Record<string, unknown>, index: number, fold:
   fold.functionCalls.set(index, existing);
 }
 
-function foldFunctionCallDelta(delta: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
-  const id = typeof delta.id === 'string' ? delta.id : undefined;
-  const name = typeof delta.name === 'string' ? delta.name : '';
-  const tool = { id, name, arguments: parseArgumentsObject(delta.arguments) };
+function emitUniqueToolEvent(
+  tool: { id?: string; name: string; arguments: Record<string, unknown> },
+  fold: StreamFold,
+): TurnEvent[] {
   const key = functionCallKey(tool);
   if (fold.emittedToolKeys.has(key)) return [];
   fold.emittedToolKeys.add(key);
   return [{ type: 'tool', tool }];
+}
+
+function foldFunctionCallDelta(delta: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+  const id = typeof delta.id === 'string' ? delta.id : undefined;
+  const name = typeof delta.name === 'string' ? delta.name : '';
+  return emitUniqueToolEvent({ id, name, arguments: parseArgumentsObject(delta.arguments) }, fold);
 }
 
 function foldDeltaPayload(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
@@ -293,7 +302,26 @@ function* scanMediaParts(content: unknown): Generator<TurnEvent> {
   }
 }
 
+function emitPendingFunctionCall(index: number, fold: StreamFold): TurnEvent[] {
+  const pending = fold.functionCalls.get(index);
+  if (!pending) return [];
+  fold.functionCalls.delete(index);
+  return emitUniqueToolEvent(
+    {
+      id: pending.id,
+      name: pending.name ?? '',
+      arguments: parseArgumentsObject(pending.arguments || {}),
+    },
+    fold,
+  );
+}
+
 function foldStepStop(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+  const index = typeof payload.index === 'number' ? payload.index : 0;
+  const fromFunctionCall = emitPendingFunctionCall(index, fold);
+  if (fromFunctionCall.length > 0) {
+    return fromFunctionCall;
+  }
   const step = asRecord(payload.step);
   if (!step) return [];
   const stepType = String(step.type ?? '');

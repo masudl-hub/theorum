@@ -13,9 +13,9 @@ import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { noopSink, type TraceSink, writeTrace } from '../../../observability/trace.ts';
 import { buildRecord } from '../../../observability/trace-record.ts';
 import { pickSystemRole, resolveTurn } from '../../registry/resolve.ts';
-import { expandTurnToolLoader } from '../../tools/resolve.ts';
 import type { Protocol } from '../../schema.ts';
 import { CONTINUE_INSTRUCTION } from '../../stop.ts';
+import { expandT1Policy } from '../../tools/resolve.ts';
 import type {
   CompactionSignal,
   CompactionSpec,
@@ -228,7 +228,7 @@ async function* runTurnBody(ctx: TraceCtx, provider: ModelProvider): AsyncGenera
   ctx.safe = sanitizeTurnRequest(ctx.req);
   throwIfAborted(ctx.safe.signal);
   const { profile, generation: gen } = resolveTurn(ctx.safe);
-  await expandTurnToolLoader(gen.tools, profile, ctx.safe);
+  await expandT1Policy(gen.tools, profile, ctx.safe);
   gen.builtins = gen.tools.builtins;
   ctx.generation = gen;
   ctx.model = gen.model;

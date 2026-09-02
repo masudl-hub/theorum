@@ -201,3 +201,113 @@ Deno.test('toErrorEvent preserves internal detail alongside public message', () 
   assertEquals(ev.error, PUBLIC_CANARY);
   assertEquals(ev.errorInternal, 'canary leaked');
 });
+
+Deno.test('publicError maps "Only" text without "file" to GENERIC (kills && → || mutation)', () => {
+  // Ensures Rule 5 requires BOTH startsWith('Only ') AND includes('file')
+  assertEquals(publicError('Only records were updated'), PUBLIC_GENERIC);
+  assertEquals(publicError('Only one attempt allowed'), PUBLIC_GENERIC);
+});
+
+Deno.test('publicError maps "does not accept attachments" rule to FILE_TYPE', () => {
+  assertEquals(publicError('Profile does not accept attachments'), PUBLIC_FILE_TYPE);
+});
+
+Deno.test('publicError maps "does not accept voice" to FILE_TYPE', () => {
+  assertEquals(publicError('Profile does not accept voice'), PUBLIC_FILE_TYPE);
+});
+
+Deno.test('publicError maps "not allowed" phrase to ACTION', () => {
+  assertEquals(publicError('Action not allowed'), PUBLIC_ACTION);
+});
+
+Deno.test('publicError maps "not registered" phrase to ACTION', () => {
+  assertEquals(publicError('Tool not registered'), PUBLIC_ACTION);
+});
+
+Deno.test('publicError maps "not enabled on this turn" to ACTION', () => {
+  assertEquals(publicError('Feature not enabled on this turn'), PUBLIC_ACTION);
+});
+
+Deno.test('publicError maps "must pin thinking" and "has no models" both to GENERIC', () => {
+  assertEquals(publicError('Profile must pin thinking budget'), PUBLIC_GENERIC);
+  assertEquals(publicError('Registry has no models'), PUBLIC_GENERIC);
+});
+
+Deno.test('describeError stringifies Error with empty message via fallback', () => {
+  const err = new Error('');
+  // Error with empty string message uses the String() fallback
+  assertEquals(typeof describeError(err), 'string');
+});
+
+Deno.test('TheorumError default message is empty string not a placeholder', () => {
+  // Kills: constructor(message = "Stryker was here!", ...)
+  assertEquals(new TheorumError().message, '');
+});
+
+Deno.test('TheorumError name is TheorumError not empty string', () => {
+  // Kills: this.name = ""
+  assertEquals(new TheorumError('test').name, 'TheorumError');
+});
+
+Deno.test('UPSTREAM_FAILED constant is the literal string upstream failed', () => {
+  // Kills: const UPSTREAM_FAILED = ""
+  assertEquals(UPSTREAM_FAILED, 'upstream failed');
+});
+
+Deno.test('PUBLIC_GENERIC constant is the expected user-safe copy', () => {
+  // Kills: const PUBLIC_GENERIC = ""
+  assertEquals(PUBLIC_GENERIC, 'Something went wrong. Try again.');
+});
+
+Deno.test('PUBLIC_FILE_COUNT constant is the expected user-safe copy', () => {
+  // Kills: const PUBLIC_FILE_COUNT = ""
+  assertEquals(PUBLIC_FILE_COUNT, 'Too many files for one message.');
+});
+
+Deno.test('PUBLIC_FILE_SIZE constant is the expected user-safe copy', () => {
+  // Kills: const PUBLIC_FILE_SIZE = ""
+  assertEquals(PUBLIC_FILE_SIZE, 'That file is too large.');
+});
+
+Deno.test('PUBLIC_IMAGE_SIZE constant is the expected user-safe copy', () => {
+  // Kills: const PUBLIC_IMAGE_SIZE = ""
+  assertEquals(PUBLIC_IMAGE_SIZE, "That image size isn't supported.");
+});
+
+Deno.test('PUBLIC_CANCELLED constant is the expected user-safe copy', () => {
+  // Kills: const PUBLIC_CANCELLED = ""
+  assertEquals(PUBLIC_CANCELLED, 'Cancelled.');
+});
+
+Deno.test('publicError does not map a string starting with Error: Gemini to UNAVAILABLE (anchor mutation)', () => {
+  // Kills: regex anchor ^ removal — without ^, "Error: Gemini HTTP 500" would match
+  assertEquals(publicError('Error: Gemini HTTP 500'), PUBLIC_GENERIC);
+});
+
+Deno.test('throwIfAborted re-throws the exact same AbortError object not a new one', () => {
+  // Kills: if (false) mutation that skips the rethrow and always creates a new DOMException
+  const ctrl = new AbortController();
+  const reason = new DOMException('specific abort reason', 'AbortError');
+  ctrl.abort(reason);
+  let caught: unknown;
+  try {
+    throwIfAborted(ctrl.signal);
+  } catch (e) {
+    caught = e;
+  }
+  assertEquals(caught === reason, true);
+});
+
+Deno.test('throwIfAborted wraps non-AbortError with correct message and name', () => {
+  // Kills: DOMException message = "" and name = "" mutations
+  const ctrl = new AbortController();
+  ctrl.abort(new Error('underlying cause'));
+  let caught: DOMException | undefined;
+  try {
+    throwIfAborted(ctrl.signal);
+  } catch (e) {
+    caught = e as DOMException;
+  }
+  assertEquals(caught?.message, 'The operation was aborted.');
+  assertEquals(caught?.name, 'AbortError');
+});

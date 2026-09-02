@@ -9,19 +9,16 @@
  */
 
 import { bindCanary, mintCanary, scanTextForCanaryLeak } from '../../guardrails/canary.ts';
+import { createCanaryGateSession, filterCanaryGatedEvents } from '../../guardrails/canary-gate.ts';
 import {
   buildCanaryEgressAttacks,
-  FIXED_CANARY,
   type CanaryEgressAttack,
+  FIXED_CANARY,
 } from '../../guardrails/corpus/canary-egress-attacks.ts';
-import {
-  createCanaryGateSession,
-  filterCanaryGatedEvents,
-} from '../../guardrails/canary-gate.ts';
 import { yieldProviderEvents } from '../../kernel/engine/runner/stream.ts';
-import { resolveTurn } from '../../kernel/registry/resolve.ts';
 import { clearProfiles, registerProfile } from '../../kernel/registry/profiles.ts';
-import type { ModelProvider, ResolvedGeneration, TurnEvent } from '../../kernel/types.ts';
+import { resolveTurn } from '../../kernel/registry/resolve.ts';
+import type { ResolvedGeneration, TurnEvent } from '../../kernel/types.ts';
 
 const FUZZ_PROFILE_ID = '__fuzz_canary__';
 

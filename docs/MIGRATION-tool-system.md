@@ -3,7 +3,7 @@
 Ground-up tool registry rebuild (2026). **No compatibility shims.** Hosts must
 migrate once; after that the model is simpler and enforcement is consistent.
 
-Spec: `docs/specs/tool-system.md`
+Spec: `tmp/specs/tool-system.md` (working design notes — not published docs)
 
 ---
 
@@ -11,15 +11,16 @@ Spec: `docs/specs/tool-system.md`
 
 | Removed | Replacement |
 | --- | --- |
-| `TurnRequest.dynamicTools` | `registerTool({ ... })` at startup |
-| `TurnRequest.dynamicToolLoader` | `type: 'loader'` tool with `resolve()` |
+| `TurnRequest.tools` (per-id gates) | `tools.allow` / `builtInTools` + `loadTier` |
+| `TurnRequest.dynamicToolLoader` | `tools.t2Loader` function returning `{ loaded }` |
 | `TurnRequest.toolInvoke` | `invokeTool({ profile, name, input, … })` |
 | `executeTool(profile, name, args)` | Stream events via `runTurn` / `invokeTool` |
 | `ToolEnvelope` (`status` / `finding` / `data`) | `TurnEvent.tool.phase` (`complete`, `pause`, `error`, …) |
 | `askUser` catalog builtin | `ask_user` harness tool (`registerHarnessTools`) |
-| Per-turn `loadTier` / `permissionTier` on declarations | `loadTier` / `permission` on `defineTool` |
-| Per-turn `dynamicToolLoader` (T2 schemas) | `type: 'loader'` tool with `resolve()` |
-| Per-turn T1 conditional wiring | `TurnRequest.toolLoader` |
+| Per-turn `loadTier` / `permissionTier` on declarations | `loadTier` / `permission` on each registered tool |
+| Per-turn `dynamicToolLoader` (T2 schemas) | `tools.t2Loader` + `{ loaded }` |
+| Per-turn T1 conditional wiring | `profile.tools.t1Policy` |
+| `TurnRequest.toolLoader` | `profile.tools.t1Policy` |
 | Hand-authored JSON Schema on turns | Zod `input` / `output` at registration |
 | `CATALOG.tools` monolith | `registerTool`, `getTool`, `listTools` |
 
@@ -52,22 +53,25 @@ registerTool({
 
 Add **`zod`** as a dependency (`^3.24` peer on npm).
 
-### 2. Profile — ceiling only
+### 2. Profile — allow customs; model lists builtins
 
 ```ts
 tools: {
-  allow: ['lookup_order', 'load_tools', 'googleSearch'],
+  allow: ['lookup_order', 'load_tools', 'deferred_lookup'],
+  t2Loader: 'load_tools', // optional — function that returns { loaded }
 }
+// model.config.*.builtInTools: ['googleSearch']
 ```
 
-Set **`loadTier`** on each registered tool (`T0` / `T1` / `T2`). Profile has no loading mode.
+Set **`loadTier`** on each registered tool (`T0` / `T1` / `T2`).
 
-### 3. Turn — opt in
+### 3. Turn — no per-tool gate
+
+Eligibility is allow / `builtInTools`. Visibility is `loadTier` (+ `tools.t1Policy` for T1, `tools.t2Loader` for T2).
 
 ```ts
 runTurn({
   profile: 'my.bot',
-  tools: { lookup_order: true, load_tools: true },
   sessionPermissions: ['lookup_order'], // session_consent tools
   path: 'web', // catalog path filter
   input: { text: '…' },
@@ -88,10 +92,10 @@ invokeTool({
 });
 ```
 
-`resume` **skips** turn gating (`not_gated`) when `value` or `granted` is set. It does
-**not** bypass T1/T2 load checks — pass `toolLoader` / `promoted` on resume when needed.
-T0 paused calls may resume without rebuilding gates. Direct invoke (command palette)
-requires `tools: { [id]: true }` like `runTurn`.
+`resume` **skips** eligibility (`not_gated`) when `value` or `granted` is set. It does
+**not** bypass T1/T2 load checks — ensure `tools.t1Policy` / `promoted` cover resume when needed.
+T0 paused calls may resume without rebuilding the snapshot. Direct invoke requires the
+tool on `tools.allow`.
 
 ### 5. Turn continue — `continueFrom` (not tool pause)
 
@@ -101,7 +105,6 @@ For `length`, `stream_incomplete`, `provider_error`:
 runTurn({
   profile: 'my.bot',
   continueFrom: { stop: previousDone.stop, partialText: '…' },
-  tools: { … }, // re-gate tools on the new turn
   input: { text: '…' },
 }, provider);
 ```
@@ -114,7 +117,7 @@ Do **not** use `continueFrom` for tool pauses — use `invokeTool`.
 
 - **`always_confirm`** ignores `sessionPermissions`; only `resume.granted === true` bypasses.
 - **`canExecute` returning a pause envelope** — use `preflight` returning a `ToolPause` instead.
-- **Loader promoting ad-hoc tools** — loaders may only promote **pre-registered** ids in `allow`.
+- **T2 promotion** — only the designated `tools.t2Loader` function may promote **pre-registered** ids in `allow`.
 - **Tool descriptions** — no per-turn `sanitizeDynamicTools`; sanitize at registration if needed.
 
 ---
@@ -127,7 +130,7 @@ Do **not** use `continueFrom` for tool pauses — use `invokeTool`.
 | `status: 'pause'` | `tool.phase: 'pause'` (+ `pause.kind`) |
 | `status: 'error'` | `tool.phase: 'error'` (+ `failure.code`) |
 
-Model-facing results use `formatToolResult` / `projectForModel` internally; hosts
+Model-facing results use `formatToolResult` internally; hosts
 consume `TurnEvent`s and traces, not envelopes.
 
 ---
@@ -135,4 +138,3 @@ consume `TurnEvent`s and traces, not envelopes.
 ## Deferred (not in v1)
 
 - `registerExternalToolProvider` (MCP / external dynamic tools)
-- Per-tool `projectForModel` override (use `exposeToModel: false` today)

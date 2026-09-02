@@ -21,21 +21,22 @@ import type {
   LiveSpeechSensitivity,
   MediaInputKind,
   Protocol,
-  ToolLoadTier,
   Provider,
   SchemaEnforcement,
   SpeechAudioFormat,
   StreamMode,
   SummaryMode,
   ThinkingLevel,
+  ToolLoadTier,
   TurnStopKind,
 } from './schema.ts';
 import type {
+  InvokeToolRequest,
   ProfileToolsSpec,
   RegisteredTool,
   ToolCallEvent,
   ToolLoadContext,
-  TurnToolLoader,
+  ToolPolicy,
   TurnToolSnapshot,
   WireFunctionTool,
 } from './tools/types.ts';
@@ -48,15 +49,13 @@ export type {
   FieldMeta,
   GeminiBucket,
   GeminiFreeBucket,
+  InvokeToolRequest,
   LiveActivityHandling,
   LiveContextCompression,
   LiveSpeechSensitivity,
   MediaInputKind,
   ProfileToolsSpec,
   Protocol,
-  ToolLoadTier,
-  ToolLoadContext,
-  TurnToolLoader,
   Provider,
   RegisteredTool,
   SchemaEnforcement,
@@ -65,6 +64,9 @@ export type {
   SummaryMode,
   ThinkingLevel,
   ToolCallEvent,
+  ToolLoadContext,
+  ToolLoadTier,
+  ToolPolicy,
   TurnStopKind,
   TurnToolSnapshot,
   WireFunctionTool,
@@ -99,8 +101,6 @@ export interface ProfileImageSpec {
   size?: string;
   /** Output MIME for generated images. */
   mimeType?: string;
-  /** When false, grounding builtins are rejected on this profile. */
-  allowsGrounding?: boolean;
   /** Cap on reference images in one turn. */
   maxInputImages?: number;
 }
@@ -533,15 +533,8 @@ export interface TurnRequest {
   system?: string;
   /** Session permissions granted for this conversation turn */
   sessionPermissions?: string[];
-  /** Opt-in gates. Profile `allow` is the ceiling; a tool is off until `tools[id]` is true. */
-  tools?: Partial<Record<ToolId, boolean>>;
   /** Host channel/path for catalog `paths` filtering. */
   path?: string;
-  /**
-   * Host-owned T1 resolver — returns tool ids to wire at turn start.
-   * Only tools with `loadTier: 'T1'` in allow and gated on are promoted.
-   */
-  toolLoader?: TurnToolLoader;
   /** Host-owned metadata preserved for traces; the kernel does not interpret it. */
   metadata?: Record<string, unknown>;
   /**

@@ -130,5 +130,5 @@ Deno.test('EXTRA_FIELDS covers registerTool keys shown in profile docs', () => {
     assertEquals(fieldMeta(key) != null, true, `missing EXTRA_FIELDS.${key}`);
   }
   const toolType = fieldMeta('type');
-  assertEquals(toolType?.options, ['builtin', 'function', 'loader']);
+  assertEquals(toolType?.options, ['builtin', 'function']);
 });

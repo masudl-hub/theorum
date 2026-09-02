@@ -5,7 +5,7 @@
  */
 
 import type { z } from 'zod';
-import { TheorumError, throwIfAborted } from '../../guardrails/error.ts';
+import { throwIfAborted } from '../../guardrails/error.ts';
 import { sanitizeText } from '../../guardrails/sanitize.ts';
 import type { Profile, TurnEvent } from '../types.ts';
 import { getTool } from './registry.ts';
@@ -13,17 +13,22 @@ import { promoteLoadedTools } from './resolve.ts';
 import type {
   FunctionToolDef,
   InvokeToolResume,
-  LoaderToolDef,
   ModelToolResult,
   ToolCallEvent,
   ToolContext,
   ToolFailure,
-  ToolHandler,
   ToolPause,
   ToolPermission,
   ToolStreamEvent,
   TurnToolSnapshot,
 } from './types.ts';
+
+function isStreamHandler(handler: unknown): boolean {
+  return (
+    typeof handler === 'function' &&
+    Object.prototype.toString.call(handler) === '[object AsyncGeneratorFunction]'
+  );
+}
 
 function isResumeContinuation(resume?: InvokeToolResume): boolean {
   return resume?.value !== undefined || resume?.granted === true;
@@ -36,31 +41,48 @@ function isToolPause(value: ToolFailure | ToolPause): value is ToolPause {
   );
 }
 
-async function runHandler<TIn, TOut>(
-  tool: FunctionToolDef,
-  handler: ToolHandler<TIn, TOut>,
+function* yieldHandlerSideEvent(
+  base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
+  event: Exclude<ToolStreamEvent, { kind: 'complete' }>,
+): Generator<TurnEvent> {
+  if (event.kind === 'progress') {
+    yield toolEvent(base, { phase: 'progress', data: event.data });
+  } else if (event.kind === 'trace') {
+    yield toolEvent(base, { phase: 'trace', step: event.step });
+  } else if (event.kind === 'artifact') {
+    yield toolEvent(base, { phase: 'artifact', artifact: event.artifact });
+  } else if (event.kind === 'warning') {
+    yield toolEvent(base, { phase: 'warning', warning: event.warning });
+  }
+}
+
+/** Run the handler, yielding stream side-events live; returns terminal output. */
+async function* runHandler<TIn, TOut>(
+  handler: FunctionToolDef<TIn, TOut>['handler'],
   input: TIn,
   ctx: ToolContext,
-): Promise<{ events: ToolStreamEvent<TOut>[]; output?: TOut }> {
-  if (tool.handlerStreams) {
-    const events: ToolStreamEvent<TOut>[] = [];
+  base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
+): AsyncGenerator<TurnEvent, TOut | undefined> {
+  if (isStreamHandler(handler)) {
     let output: TOut | undefined;
     const gen = (
       handler as (input: TIn, ctx: ToolContext) => AsyncGenerator<ToolStreamEvent<TOut>>
     )(input, ctx);
     for await (const event of gen) {
-      events.push(event);
+      throwIfAborted(ctx.signal);
       if (event.kind === 'complete') {
         output = event.output;
+        continue;
       }
+      yield* yieldHandlerSideEvent(base, event);
     }
-    return { events, output };
+    return output;
   }
   const output = await (handler as (input: TIn, ctx: ToolContext) => TOut | Promise<TOut>)(
     input,
     ctx,
   );
-  return { events: [{ kind: 'complete', output }], output };
+  return output;
 }
 
 function permissionGranted(toolName: string, sessionPermissions?: string[]): boolean {
@@ -140,6 +162,19 @@ function formatToolResult(result: ModelToolResult): string {
   return sanitizeText(result.finding);
 }
 
+/** Format a tool failure for provider history — structured so the model (or host) sees the code. */
+function formatToolFailureForModel(failure: ToolFailure): ModelToolResult {
+  return {
+    finding: `Tool error (${failure.code}): ${failure.message}`,
+    data: {
+      ok: false,
+      code: failure.code,
+      message: failure.message,
+      ...(failure.details !== undefined ? { details: failure.details } : {}),
+    },
+  };
+}
+
 function* startToolExecution<T>(
   tool: { input: z.ZodType<T> },
   rawInput: unknown,
@@ -160,50 +195,12 @@ function* startToolExecution<T>(
   return { ok: true, data: parsed.data };
 }
 
-async function* executeLoader(
-  tool: LoaderToolDef,
-  rawInput: unknown,
-  ctx: ToolContext,
-  snapshot: TurnToolSnapshot,
-  profile: Profile,
-  base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
-): AsyncGenerator<TurnEvent, ModelToolResult | undefined> {
-  const parsed = yield* startToolExecution(tool, rawInput, ctx, base);
-  if (!parsed.ok) return undefined;
-  const pause = checkPermission(tool.name, tool.permission, ctx.sessionPermissions, ctx.resume);
-  if (pause) {
-    pause.input = parsed.data;
-    yield toolEvent(base, { phase: 'pause', pause });
-    return undefined;
-  }
-  throwIfAborted(ctx.signal);
-  try {
-    const resolved = await tool.resolve(parsed.data, ctx);
-    const promoted = promoteLoadedTools(snapshot, resolved.loaded, profile);
-    const output = { loaded: promoted };
-    const checked = tool.output.safeParse(output);
-    if (!checked.success) {
-      yield failureEvent(base, {
-        code: 'invalid_output',
-        message: 'Loader output validation failed',
-        details: checked.error.flatten(),
-      });
-      return undefined;
-    }
-    yield toolEvent(base, { phase: 'complete', output: checked.data });
-    return { finding: `Loaded ${String(resolved.loaded.length)} tool(s).`, data: checked.data };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    yield failureEvent(base, { code: 'loader_error', message: msg });
-    return undefined;
-  }
-}
-
 async function* executeFunction(
   tool: FunctionToolDef,
   rawInput: unknown,
   ctx: ToolContext,
   base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
+  snapshot?: TurnToolSnapshot,
 ): AsyncGenerator<TurnEvent, ModelToolResult | undefined> {
   const parsed = yield* startToolExecution(tool, rawInput, ctx, base);
   if (!parsed.ok) return undefined;
@@ -270,19 +267,7 @@ async function* executeFunction(
 
   throwIfAborted(ctx.signal);
   try {
-    const { events, output } = await runHandler(tool, tool.handler, input, ctx);
-    for (const event of events) {
-      throwIfAborted(ctx.signal);
-      if (event.kind === 'progress') {
-        yield toolEvent(base, { phase: 'progress', data: event.data });
-      } else if (event.kind === 'trace') {
-        yield toolEvent(base, { phase: 'trace', step: event.step });
-      } else if (event.kind === 'artifact') {
-        yield toolEvent(base, { phase: 'artifact', artifact: event.artifact });
-      } else if (event.kind === 'warning') {
-        yield toolEvent(base, { phase: 'warning', warning: event.warning });
-      }
-    }
+    const output = yield* runHandler(tool.handler, input, ctx, base);
     if (output === undefined) {
       yield failureEvent(base, { code: 'invalid_output', message: 'Handler returned no output' });
       return undefined;
@@ -296,14 +281,115 @@ async function* executeFunction(
       });
       return undefined;
     }
-    const modelResult = projectForModel(tool, checked.data);
-    yield toolEvent(base, { phase: 'complete', output: checked.data });
+
+    let finalOutput: unknown = checked.data;
+    if (ctx.profile.tools.t2Loader === tool.name) {
+      if (!snapshot) {
+        yield failureEvent(base, {
+          code: 'invalid_output',
+          message: `tools.t2Loader '${tool.name}' requires a turn tool snapshot`,
+        });
+        return undefined;
+      }
+      const loaded = extractLoadedIds(checked.data);
+      if (!loaded) {
+        yield failureEvent(base, {
+          code: 'invalid_output',
+          message: `T2 loader '${tool.name}' must return { loaded: string[] }`,
+        });
+        return undefined;
+      }
+      const { promoted, failure: promoteFailure } = promoteLoadedTools(
+        snapshot,
+        loaded,
+        ctx.profile,
+      );
+      if (promoteFailure) {
+        yield failureEvent(base, promoteFailure);
+        return undefined;
+      }
+      finalOutput = { ...(checked.data as Record<string, unknown>), loaded: promoted };
+      const rechecked = tool.output.safeParse(finalOutput);
+      if (!rechecked.success) {
+        yield failureEvent(base, {
+          code: 'invalid_output',
+          message: 'T2 loader output validation failed after promotion',
+          details: rechecked.error.flatten(),
+        });
+        return undefined;
+      }
+      finalOutput = rechecked.data;
+    }
+
+    const modelResult = projectForModel(tool, finalOutput);
+    yield toolEvent(base, { phase: 'complete', output: finalOutput });
     return modelResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     yield failureEvent(base, { code: 'handler_error', message: msg });
     return undefined;
   }
+}
+
+function notLoadedMessage(tool: FunctionToolDef): string {
+  if (tool.loadTier === 'T1') {
+    return `Tool '${tool.name}' is not wired — profile.tools.t1Policy must select it`;
+  }
+  if (tool.loadTier === 'T2') {
+    return `Tool '${tool.name}' is not loaded — run profile.tools.t2Loader first`;
+  }
+  return `Tool '${tool.name}' is not visible this turn`;
+}
+
+function extractLoadedIds(output: unknown): string[] | undefined {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return undefined;
+  }
+  const loaded = (output as { loaded?: unknown }).loaded;
+  if (!Array.isArray(loaded) || !loaded.every((id) => typeof id === 'string')) {
+    return undefined;
+  }
+  return loaded;
+}
+
+/** Strip prototype-pollution keys from provider/host tool args before validation. */
+function plainToolInput(input: unknown): unknown {
+  if (input === null || typeof input !== 'object') {
+    return input;
+  }
+  if (Array.isArray(input)) {
+    return input.map(plainToolInput);
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(input as Record<string, unknown>)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
+    out[key] = plainToolInput((input as Record<string, unknown>)[key]);
+  }
+  return out;
+}
+
+async function* executeBuiltin(
+  tool: { name: string },
+  ctx: ToolContext,
+  base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
+  snapshot: TurnToolSnapshot,
+): AsyncGenerator<TurnEvent, ModelToolResult | undefined> {
+  yield toolEvent(base, { phase: 'running' });
+  throwIfAborted(ctx.signal);
+  if (!snapshot.builtins.includes(tool.name)) {
+    yield failureEvent(base, {
+      code: 'not_loaded',
+      message: `Builtin '${tool.name}' is not enabled this turn`,
+    });
+    return undefined;
+  }
+  yield failureEvent(base, {
+    code: 'provider_native',
+    message: `Tool '${tool.name}' is a provider builtin — execution is handled by the model provider, not the kernel`,
+  });
+  return undefined;
 }
 
 async function* executeRegisteredTool(args: {
@@ -316,17 +402,29 @@ async function* executeRegisteredTool(args: {
 }): AsyncGenerator<TurnEvent, ModelToolResult | undefined> {
   const { profile, name, input, callId, ctx, snapshot } = args;
   const tool = getTool(name);
+  const safeInput = plainToolInput(input);
   const base = {
     name,
     callId,
     arguments:
-      typeof input === 'object' && input !== null && !Array.isArray(input)
-        ? (input as Record<string, unknown>)
-        : { value: input },
+      typeof safeInput === 'object' && safeInput !== null && !Array.isArray(safeInput)
+        ? (safeInput as Record<string, unknown>)
+        : { value: safeInput },
   };
   if (!tool) {
     yield failureEvent(base, { code: 'unknown_tool', message: `Tool '${name}' is not registered` });
     return undefined;
+  }
+  if (tool.type === 'builtin') {
+    if (!snapshot) {
+      yield failureEvent(base, {
+        code: 'provider_native',
+        message: `Tool '${name}' is a provider builtin and requires a turn tool snapshot`,
+      });
+      return undefined;
+    }
+    const fullCtx: ToolContext = { ...ctx, callId, profile };
+    return yield* executeBuiltin(tool, fullCtx, base, snapshot);
   }
   if (!profile.tools.allow.includes(name)) {
     yield failureEvent(base, {
@@ -335,12 +433,12 @@ async function* executeRegisteredTool(args: {
     });
     return undefined;
   }
-  if (snapshot && tool.type !== 'builtin') {
+  if (snapshot) {
     const continuing = isResumeContinuation(ctx.resume);
     if (!continuing && !snapshot.gated.includes(name)) {
       yield failureEvent(base, {
         code: 'not_gated',
-        message: `Tool '${name}' is not enabled on this turn`,
+        message: `Tool '${name}' is not eligible on this turn (allow/path)`,
       });
       return undefined;
     }
@@ -349,7 +447,7 @@ async function* executeRegisteredTool(args: {
       if (!skipLoadCheck) {
         yield failureEvent(base, {
           code: 'not_loaded',
-          message: `Tool '${name}' is not loaded — use a loader tool first`,
+          message: notLoadedMessage(tool),
         });
         return undefined;
       }
@@ -357,24 +455,11 @@ async function* executeRegisteredTool(args: {
   }
   const fullCtx: ToolContext = { ...ctx, callId, profile };
 
-  if (tool.type === 'loader') {
-    if (!snapshot) {
-      throw new TheorumError('Loader tools require a turn tool snapshot');
-    }
-    return yield* executeLoader(tool, input, fullCtx, snapshot, profile, base);
-  }
-  if (tool.type === 'function') {
-    return yield* executeFunction(tool, input, fullCtx, base);
-  }
-  yield failureEvent(base, {
-    code: 'unknown_tool',
-    message: `Tool '${name}' is a builtin and cannot be executed locally`,
-  });
-  return undefined;
+  return yield* executeFunction(tool, safeInput, fullCtx, base, snapshot);
 }
 
 function newCallId(name: string): string {
   return `call_${name}_${Date.now()}`;
 }
 
-export { executeRegisteredTool, formatToolResult, newCallId, projectForModel };
+export { executeRegisteredTool, formatToolFailureForModel, formatToolResult, newCallId };

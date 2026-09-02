@@ -2,11 +2,11 @@ import { publicError, throwIfAborted, toErrorEvent } from '../../../guardrails/e
 import { providerCompleteRequest } from '../../registry/provider-request.ts';
 import type { ModelProvider, Profile, ResolvedGeneration, TurnEvent } from '../../types.ts';
 import {
+  type CanaryStreamGate,
   createCanaryStreamGate,
   eventHasCanary,
   isStreamedCanaryEvent,
   redactCanary,
-  type CanaryStreamGate,
 } from '../boundary.ts';
 
 function systemFromProfile(profile: Profile, role: string): string {
@@ -65,7 +65,7 @@ function* yieldGatedStreamEvent(
 
 function* flushCanaryGate(
   gate: CanaryStreamGate,
-  canary: string,
+  _canary: string,
   lastType: 'text' | 'thought' | undefined,
 ): Generator<TurnEvent, 'stop' | 'pass'> {
   const result = gate.flush();

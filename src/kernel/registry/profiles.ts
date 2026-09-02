@@ -8,8 +8,8 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
-import type { CompactionSpec, ModelId, Profile } from '../types.ts';
 import { getTool } from '../tools/registry.ts';
+import type { CompactionSpec, ModelId, Profile } from '../types.ts';
 
 const profiles = new Map<string, Profile>();
 
@@ -107,6 +107,8 @@ function defineProfile(input: ProfileDefinition): Profile {
     model: buildDefaultModel(input.id, input.model),
     tools: {
       allow: input.tools?.allow ?? [],
+      t1Policy: input.tools?.t1Policy,
+      t2Loader: input.tools?.t2Loader,
     },
     inputs: buildDefaultInputs(input.inputs),
     outputs: buildDefaultOutputs(input.outputs),
@@ -164,6 +166,24 @@ function assertCustomToolsOnly(profile: Profile): void {
   }
 }
 
+function assertProfileToolLoader(profile: Profile): void {
+  const loaderId = profile.tools.t2Loader;
+  if (!loaderId) {
+    return;
+  }
+  if (!profile.tools.allow.includes(loaderId)) {
+    throw new TheorumError(
+      `Profile ${profile.id} tools.t2Loader '${loaderId}' must also be listed in tools.allow`,
+    );
+  }
+  const tool = getTool(loaderId);
+  if (tool?.type !== 'function') {
+    throw new TheorumError(
+      `Profile ${profile.id} tools.t2Loader '${loaderId}' must be a registered type: 'function' tool`,
+    );
+  }
+}
+
 function assertModelBuiltInTools(profile: Profile): void {
   for (const [modelId, spec] of Object.entries(profile.model.config)) {
     for (const id of spec.builtInTools) {
@@ -182,6 +202,7 @@ function registerProfile(profileInput: Profile | ProfileDefinition): void {
   const profile = defineProfile(profileInput);
   assertModelSpecs(profile.id, profile.model.allow, profile.model.config);
   assertCustomToolsOnly(profile);
+  assertProfileToolLoader(profile);
   assertModelBuiltInTools(profile);
   const { attachments, voice, maxFiles, maxBytes, maxTurnBytes } = profile.inputs;
   if (attachments || voice) {

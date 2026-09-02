@@ -27,14 +27,9 @@ function builtInToolIds(profile: Profile): ToolId[] {
   return [...seen];
 }
 
-/** Custom + builtin tool ids declared on a profile (union across models). */
-function listProfileToolIds(profile: Profile): ToolId[] {
-  return [...profile.tools.allow, ...builtInToolIds(profile)];
-}
-
 function projectTools(profile: Profile): Array<RegisteredTool | { name: ToolId; missing: true }> {
-  const ids = listProfileToolIds(profile);
+  const ids = [...profile.tools.allow, ...builtInToolIds(profile)];
   return ids.map((name) => projectTool(name));
 }
 
-export { listProfileToolIds, projectTools };
+export { projectTools };

@@ -359,6 +359,7 @@ function readGit(repoRoot, args) {
     return execFileSync('git', args, {
       cwd: repoRoot,
       encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch {

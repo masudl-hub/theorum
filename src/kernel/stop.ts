@@ -9,8 +9,6 @@
 
 import type { TurnStopKind } from './schema.ts';
 
-export type { TurnStopKind };
-
 /** Normalized stop attached to terminal `done` events and host continue requests. */
 export interface TurnStop {
   kind: TurnStopKind;

@@ -112,8 +112,8 @@ terminal `done.stop` via `turnStopFromOpenAiFinishReason`.
 | History | `user_input` / `model_output` steps |
 | Multimodal | `image` / `audio` / `video` / `document` parts |
 | Structured | `responseFormat` JSON schema when enforced |
-| Output modes | Image / speech / structured are mutually exclusive |
-| Tools | Registry builtins (`interactionsType`) + registered function tools wired via `projectTools` |
+| Output modes | responseFormat JSON schema, image, and speech are mutually exclusive; prompt-enforced structured schemas and free text are not |
+| Tools | Registry builtins (`wire.interactions`) + function schemas from `generation.tools.wire` |
 | Code execution | Builtin `codeExecution` → `{ type: "code_execution" }`. Streamed `step.start` / `step.delta` / `step.stop`, `interaction.status_update` (`requires_action` for host tools), and batched `interaction.steps` become `evidence` (`kind`, `code`, `result`, `isError`, `raw`) plus `media` for sandbox images. Search/maps/`url_context` steps in `steps[]` are also `evidence`. Structured `responseFormat` is still attached when both are requested. |
 | Stream vs batch | Default `stream: true` (`?alt=sse`). `TurnRequest.stream: false` POSTs JSON and yields the same `TurnEvent` types from `steps[]`. |
 | Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / maps tool payloads (`search_suggestions` chips, annotations). Emits `grounding` (normalized) plus `evidence` with the raw tool payload so hosts can decide what to surface. |

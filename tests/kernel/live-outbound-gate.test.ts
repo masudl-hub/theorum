@@ -1,12 +1,12 @@
 import { standardEgressEnforce } from '../../src/guardrails/egress.ts';
+import { assertEquals } from '../../src/kernel/engine/assert.ts';
+import { mintCanary } from '../../src/kernel/engine/boundary.ts';
 import {
   abortLiveOutboundTurn,
   createLiveOutboundGateSession,
   finalizeLiveOutboundTurn,
   processLiveOutboundBatch,
-} from '../../src/guardrails/live-outbound-gate.ts';
-import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import { mintCanary } from '../../src/kernel/engine/boundary.ts';
+} from '../../src/kernel/engine/live-outbound-gate.ts';
 import type { Profile } from '../../src/kernel/types.ts';
 
 function liveProfile(egress = true): Profile {

@@ -1,5 +1,5 @@
-import type { TurnEvent } from '../kernel/types.ts';
 import { mapStrings } from '../kernel/engine/tree.ts';
+import type { TurnEvent } from '../kernel/types.ts';
 
 const USER_OPEN = '<user_data>';
 const USER_CLOSE = '</user_data>';
@@ -81,19 +81,31 @@ function eventHasCanary(event: TurnEvent, canary: string): boolean {
   if (event.error && scanTextForCanaryLeak(event.error, canary)) {
     return true;
   }
-  if (event.structured !== undefined && scanTextForCanaryLeak(JSON.stringify(event.structured), canary)) {
+  if (
+    event.structured !== undefined &&
+    scanTextForCanaryLeak(JSON.stringify(event.structured), canary)
+  ) {
     return true;
   }
   if (event.tool !== undefined && scanTextForCanaryLeak(JSON.stringify(event.tool), canary)) {
     return true;
   }
-  if (event.grounding !== undefined && scanTextForCanaryLeak(JSON.stringify(event.grounding), canary)) {
+  if (
+    event.grounding !== undefined &&
+    scanTextForCanaryLeak(JSON.stringify(event.grounding), canary)
+  ) {
     return true;
   }
-  if (event.evidence !== undefined && scanTextForCanaryLeak(JSON.stringify(event.evidence), canary)) {
+  if (
+    event.evidence !== undefined &&
+    scanTextForCanaryLeak(JSON.stringify(event.evidence), canary)
+  ) {
     return true;
   }
-  if (event.sessionResumptionHandle && scanTextForCanaryLeak(event.sessionResumptionHandle, canary)) {
+  if (
+    event.sessionResumptionHandle &&
+    scanTextForCanaryLeak(event.sessionResumptionHandle, canary)
+  ) {
     return true;
   }
   return false;
@@ -138,7 +150,9 @@ function createCanaryStreamGate(canary: string): CanaryStreamGate {
   };
 }
 
-function isStreamedCanaryEvent(event: TurnEvent): event is TurnEvent & { type: 'text' | 'thought' } {
+function isStreamedCanaryEvent(
+  event: TurnEvent,
+): event is TurnEvent & { type: 'text' | 'thought' } {
   return event.type === 'text' || event.type === 'thought';
 }
 

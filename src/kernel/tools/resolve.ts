@@ -7,7 +7,12 @@
 import { TheorumError } from '../../guardrails/error.ts';
 import type { ModelId, Profile, ToolId, TurnRequest } from '../types.ts';
 import { getTool } from './registry.ts';
-import type { TurnToolSnapshot, TurnToolLoader, WireFunctionTool } from './types.ts';
+import type {
+  PromoteLoadedResult,
+  ToolFailure,
+  TurnToolSnapshot,
+  WireFunctionTool,
+} from './types.ts';
 
 function pathMatches(catalogPaths: string[], turnPath?: string): boolean {
   if (catalogPaths.includes('*')) {
@@ -17,13 +22,6 @@ function pathMatches(catalogPaths: string[], turnPath?: string): boolean {
     return false;
   }
   return catalogPaths.includes(turnPath);
-}
-
-function isGatedOn(requested: Partial<Record<ToolId, boolean>> | undefined, id: ToolId): boolean {
-  if (!requested) {
-    return false;
-  }
-  return requested[id] === true;
 }
 
 function applyBuiltinMutualExclusions(requested: string[]): string[] {
@@ -37,20 +35,18 @@ function applyBuiltinMutualExclusions(requested: string[]): string[] {
   });
 }
 
-function resolveGatedCustomToolIds(profile: Profile, req: TurnRequest): ToolId[] {
+function resolveAllowedCustomToolIds(profile: Profile, req: TurnRequest): ToolId[] {
   return profile.tools.allow.filter((id) => {
     const tool = getTool(id);
     if (!tool || tool.type === 'builtin') {
       return false;
     }
-    if (!pathMatches(tool.paths, req.path)) {
-      return false;
-    }
-    return isGatedOn(req.tools, id);
+    return pathMatches(tool.paths, req.path);
   });
 }
 
-function resolveGatedBuiltinIds(profile: Profile, req: TurnRequest, modelId: ModelId): ToolId[] {
+/** Provider builtins listed on the selected model — on for the turn (path-filtered). */
+function resolveModelBuiltinIds(profile: Profile, req: TurnRequest, modelId: ModelId): ToolId[] {
   const spec = profile.model.config[modelId];
   if (!spec) {
     return [];
@@ -60,10 +56,7 @@ function resolveGatedBuiltinIds(profile: Profile, req: TurnRequest, modelId: Mod
     if (tool?.type !== 'builtin') {
       return false;
     }
-    if (!pathMatches(tool.paths, req.path)) {
-      return false;
-    }
-    return isGatedOn(req.tools, id);
+    return pathMatches(tool.paths, req.path);
   });
 }
 
@@ -136,9 +129,9 @@ function initialBuiltins(gated: ToolId[]): ToolId[] {
 
 /** Build the initial tool snapshot for a turn (T0 wired; T1/T2 pending). */
 function resolveTurnTools(profile: Profile, req: TurnRequest, modelId: ModelId): TurnToolSnapshot {
-  const customGated = resolveGatedCustomToolIds(profile, req);
-  const builtinGated = resolveGatedBuiltinIds(profile, req, modelId);
-  const gated = [...customGated, ...builtinGated];
+  const customAllowed = resolveAllowedCustomToolIds(profile, req);
+  const modelBuiltins = resolveModelBuiltinIds(profile, req, modelId);
+  const gated = [...customAllowed, ...modelBuiltins];
   const builtins = initialBuiltins(gated);
   const visible = initialVisible(gated);
   const executable = visible.filter((id) => getTool(id)?.type !== 'builtin');
@@ -153,40 +146,64 @@ function resolveTurnTools(profile: Profile, req: TurnRequest, modelId: ModelId):
   };
 }
 
-/** Resolve T0 snapshot and expand T1 selections from `TurnRequest.toolLoader`. */
+/** Resolve T0 snapshot and expand T1 selections from `profile.tools.t1Policy`. */
 async function prepareTurnToolSnapshot(
   profile: Profile,
   req: TurnRequest,
   modelId: ModelId,
 ): Promise<TurnToolSnapshot> {
   const snapshot = resolveTurnTools(profile, req, modelId);
-  await expandTurnToolLoader(snapshot, profile, req);
+  await expandT1Policy(snapshot, profile, req);
   return snapshot;
 }
 
-/** Wire T1 tools selected by the host toolLoader. */
-async function expandTurnToolLoader(
+/** Deep-clone a turn snapshot so host-side concurrent invokes do not share mutable state. */
+function cloneTurnToolSnapshot(state: TurnToolSnapshot): TurnToolSnapshot {
+  return {
+    builtins: [...state.builtins],
+    gated: [...state.gated],
+    visible: [...state.visible],
+    executable: [...state.executable],
+    path: state.path,
+    sessionPermissions: state.sessionPermissions ? [...state.sessionPermissions] : undefined,
+    wire: state.wire.map((w) => ({ ...w, parameters: structuredClone(w.parameters) })),
+  };
+}
+
+/** Wire T1 tools selected by `profile.tools.t1Policy`. */
+async function expandT1Policy(
   state: TurnToolSnapshot,
   profile: Profile,
   req: TurnRequest,
 ): Promise<void> {
-  const loader: TurnToolLoader | undefined = req.toolLoader;
-  if (!loader) {
+  const t1Policy = profile.tools.t1Policy;
+  if (!t1Policy) {
     return;
   }
-  const selected = await loader({
-    profile,
-    input: req.input,
-    path: req.path,
-    sessionPermissions: req.sessionPermissions,
-    gated: state.gated,
-  });
+  let selected: ToolId[];
+  try {
+    selected = await t1Policy({
+      profile,
+      input: req.input,
+      path: req.path,
+      sessionPermissions: req.sessionPermissions,
+      gated: state.gated,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new TheorumError(`Profile '${profile.id}' tools.t1Policy rejected: ${msg}`, {
+      cause: err,
+    });
+  }
+  if (!Array.isArray(selected)) {
+    throw new TheorumError(`Profile '${profile.id}' tools.t1Policy must return ToolId[]`);
+  }
   for (const id of selected) {
     if (!state.gated.includes(id)) {
       continue;
     }
     const tool = getTool(id);
-    if (!tool || tool.loadTier !== 'T1') {
+    if (tool?.loadTier !== 'T1') {
       continue;
     }
     if (tool.type === 'builtin') {
@@ -198,40 +215,85 @@ async function expandTurnToolLoader(
   state.executable = state.visible.filter((id) => getTool(id)?.type !== 'builtin');
 }
 
-/** Promote T2 tools into the visible set after a loader resolves. Returns ids actually promoted. */
-function promoteLoadedTools(state: TurnToolSnapshot, loaded: string[], profile: Profile): string[] {
-  const promoted: string[] = [];
+const LOADED_ID_BLOCKLIST = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Promote T2 tools into the visible set after tools.t2Loader returns { loaded }. */
+function promoteLoadedTools(
+  state: TurnToolSnapshot,
+  loaded: string[],
+  profile: Profile,
+): PromoteLoadedResult {
+  const toPromote: ToolId[] = [];
   for (const id of loaded) {
-    if (!profile.tools.allow.includes(id)) {
-      throw new TheorumError(`Loader attempted to promote tool '${id}' outside profile allow`);
+    if (typeof id !== 'string' || LOADED_ID_BLOCKLIST.has(id)) {
+      return {
+        promoted: [],
+        failure: {
+          code: 'invalid_output',
+          message: 'tools.t2Loader loaded ids must be plain strings',
+        },
+      };
+    }
+    const failure = promotionFailure(id, profile);
+    if (failure) {
+      return { promoted: [], failure };
     }
     const tool = getTool(id);
     if (!tool) {
-      throw new TheorumError(`Loader attempted to promote unknown tool '${id}'`);
+      return {
+        promoted: [],
+        failure: {
+          code: 'invalid_output',
+          message: `Tool '${id}' is not registered`,
+        },
+      };
     }
-    if (tool.type === 'builtin') {
-      throw new TheorumError(`Loader attempted to promote builtin '${id}' — only custom tools may be loader-promoted`);
-    }
-    if (tool.loadTier !== 'T2') {
-      throw new TheorumError(
-        `Loader attempted to promote tool '${id}' with loadTier '${tool.loadTier}' — only T2 tools may be loader-promoted`,
-      );
-    }
-    if (!pathMatches(tool.paths, state.path)) {
+    if (!pathMatches(tool.paths, state.path) || !state.gated.includes(id)) {
       continue;
     }
-    if (!state.gated.includes(id)) {
-      continue;
-    }
+    toPromote.push(id);
+  }
+  const promoted: ToolId[] = [];
+  for (const id of toPromote) {
     promoteTool(state, id);
     promoted.push(id);
   }
-  state.executable = state.visible.filter((id) => getTool(id)?.type !== 'builtin');
-  return promoted;
+  state.executable = state.visible.filter((tid) => getTool(tid)?.type !== 'builtin');
+  return { promoted };
+}
+
+function promotionFailure(id: string, profile: Profile): ToolFailure | undefined {
+  if (!profile.tools.allow.includes(id)) {
+    return {
+      code: 'invalid_output',
+      message: `tools.t2Loader attempted to promote tool '${id}' outside profile allow`,
+    };
+  }
+  const tool = getTool(id);
+  if (!tool) {
+    return {
+      code: 'invalid_output',
+      message: `tools.t2Loader attempted to promote unknown tool '${id}'`,
+    };
+  }
+  if (tool.type === 'builtin') {
+    return {
+      code: 'invalid_output',
+      message: `tools.t2Loader attempted to promote builtin '${id}' — only custom tools may be promoted`,
+    };
+  }
+  if (tool.loadTier !== 'T2') {
+    return {
+      code: 'invalid_output',
+      message: `tools.t2Loader attempted to promote tool '${id}' with loadTier '${tool.loadTier}' — only T2 tools may be promoted`,
+    };
+  }
+  return undefined;
 }
 
 export {
-  expandTurnToolLoader,
+  cloneTurnToolSnapshot,
+  expandT1Policy,
   prepareTurnToolSnapshot,
   promoteLoadedTools,
   resolveTurnTools,

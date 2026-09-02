@@ -45,6 +45,22 @@ files older than 14 days. Directory creation is recursive.
 `writeTrace(sink, recordPromise)` awaits the record and writes it; errors from
 the sink are swallowed so observability cannot abort execution.
 
+## Sensitive storage
+
+Trace records are **host-confidential**, not end-user artifacts:
+
+| Field | Stored as | Notes |
+| --- | --- | --- |
+| `upstreamLog` | Scrubbed HTTP/SSE rows | Auth headers redacted; image bytes hashed; canary omitted |
+| `events[].evidence.raw` | Verbatim provider step JSON | Audit/debug — treat like server logs |
+| `events[].errorInternal` | Redacted sensitive spans | Full upstream diagnostics |
+| `events[].media` | SHA-256 only | Bytes not retained in trace |
+| `wire` | Scrubbed outbound request | Same rules as `upstreamLog` |
+
+Restrict trace directories to the host process. Do not expose JSONL files or
+`memorySink` dumps to clients. Use `forClientEvents` before any user-visible
+transport.
+
 ## Trace records
 
 `TraceRecord` captures turn identity, timing, model selection, token usage, and
@@ -85,6 +101,12 @@ consumed by sinks.
     "Trace sinks": {
       "supports": [
         { "kind": "source", "path": "src/observability/trace.ts" },
+        { "kind": "contract_test", "path": "tests/observability/trace.test.ts" }
+      ]
+    },
+    "Sensitive storage": {
+      "supports": [
+        { "kind": "source", "path": "src/observability/trace-record.ts" },
         { "kind": "contract_test", "path": "tests/observability/trace.test.ts" }
       ]
     },

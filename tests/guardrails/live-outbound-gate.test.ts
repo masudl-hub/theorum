@@ -22,10 +22,6 @@ function session(canary?: string) {
   return createLiveOutboundGateSession(chatProfile(), canary);
 }
 
-function textEvents(texts: string[]): TurnEvent[] {
-  return texts.map((text) => ({ type: 'text' as const, text }));
-}
-
 // ── createLiveOutboundGateSession ─────────────────────────────────────────────
 
 Deno.test('createLiveOutboundGateSession: canary gate is null when no canary supplied', () => {
@@ -114,10 +110,7 @@ Deno.test('processLiveOutboundBatch withholds when non-stream event follows a pe
   processLiveOutboundBatch(s, [{ type: 'text', text: canary.slice(0, 5) }]);
   // Now the gate has 'lastStreamType' set; force a flush by sending a non-stream event
   // while also completing the canary in the pending buffer by sending the rest
-  const events: TurnEvent[] = [
-    { type: 'text', text: canary.slice(5) },
-    { type: 'done' },
-  ];
+  const events: TurnEvent[] = [{ type: 'text', text: canary.slice(5) }, { type: 'done' }];
   const result = processLiveOutboundBatch(s, events);
   assertEquals(result.action, 'withhold');
 });
@@ -223,11 +216,15 @@ Deno.test('finalizeLiveOutboundTurn emits refuse_to_user text when onBlock is se
 Deno.test('finalizeLiveOutboundTurn flushes canary gate tail on finalize', async () => {
   const canary = mintCanary();
   const s = session(canary);
-  // feed most of a long string so the tail is buffered
+  // 'prefix ' is shorter than the overlap window (canary.length - 1), so the gate
+  // holds all of it; finalize must flush and emit it
   processLiveOutboundBatch(s, [{ type: 'text', text: 'prefix ' }]);
   const result = await finalizeLiveOutboundTurn(s);
-  // tail should be flushed and emitted
-  assertEquals(result.action === 'emit' || result.action === 'idle', true);
+  assertEquals(result.action, 'emit');
+  if (result.action === 'emit') {
+    const text = result.events.map((e) => e.text ?? '').join('');
+    assertEquals(text.includes('prefix'), true);
+  }
 });
 
 Deno.test('finalizeLiveOutboundTurn returns idle when there is nothing to emit', async () => {
@@ -265,4 +262,288 @@ Deno.test('abortLiveOutboundTurn without canary does not recreate gate', () => {
   const s = session();
   abortLiveOutboundTurn(s);
   assertEquals(s.gate, null);
+});
+
+Deno.test('processLiveOutboundBatch returns idle when all text is held in the gate overlap buffer', () => {
+  const canary = mintCanary();
+  const s = session(canary);
+  // 'hi' is much shorter than the overlap window (canary.length - 1 ≈ 37)
+  // so the gate emits nothing → action must be idle
+  const result = processLiveOutboundBatch(s, [{ type: 'text', text: 'hi' }]);
+  assertEquals(result.action, 'idle');
+});
+
+Deno.test('processLiveOutboundBatch with holdUserVisible buffers thought events too', async () => {
+  registerProfile(
+    defineProfile({
+      id: 'live_egress_hold_thought',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          enforce: async (ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: false,
+            text: ctx.text,
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_egress_hold_thought');
+  const s = createLiveOutboundGateSession(profile);
+  assertEquals(s.holdUserVisible, true);
+  const result = processLiveOutboundBatch(s, [{ type: 'thought', text: 'inner reasoning' }]);
+  // thought events are also user-visible and must be buffered
+  assertEquals(result.action, 'idle');
+  assertEquals(s.pendingVisible.length, 1);
+});
+
+Deno.test('createLiveOutboundGateSession initial accumulatedText is empty string not a placeholder', () => {
+  // Kills: accumulatedText = "Stryker was here!" mutation
+  const s = session(mintCanary());
+  assertEquals(s.accumulatedText, '');
+});
+
+Deno.test('createLiveOutboundGateSession with canary=false profile ignores provided canary', () => {
+  // Kills: useCanary = true and useCanary = true && Boolean(canary) mutations
+  registerProfile(
+    defineProfile({
+      id: 'live_canary_disabled',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 }, canary: false },
+    }),
+  );
+  const profile = getProfile('live_canary_disabled');
+  const s = createLiveOutboundGateSession(profile, mintCanary());
+  assertEquals(s.gate, null);
+  assertEquals(s.canary, undefined);
+});
+
+Deno.test('createLiveOutboundGateSession with canary=true profile but no canary string leaves gate null', () => {
+  // Kills: useCanary = profile.guardrails.canary !== false || Boolean(canary) mutation
+  const s = session();
+  assertEquals(s.gate, null);
+  assertEquals(s.canary, undefined);
+});
+
+Deno.test('flushCanaryTail action is idle not empty object when gate is null', async () => {
+  // Kills: return {} mutation at line 66 — need action === 'idle' exactly
+  const s = session();
+  const result = await finalizeLiveOutboundTurn(s);
+  assertEquals(result.action, 'idle');
+});
+
+Deno.test('appendVisibleText skips non-text and non-thought events (type filter)', () => {
+  // Kills: if (false) mutation at line 55 — non-text events must not be appended
+  registerProfile(
+    defineProfile({
+      id: 'live_type_filter',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          enforce: async (ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: false,
+            text: ctx.text,
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_type_filter');
+  const s = createLiveOutboundGateSession(profile);
+  assertEquals(s.holdUserVisible, true);
+  // 'done' is not text/thought — should NOT be appended to pendingVisible
+  processLiveOutboundBatch(s, [{ type: 'done' }]);
+  assertEquals(s.pendingVisible.length, 0);
+});
+
+Deno.test('appendVisibleText only accumulates non-empty text not undefined/empty', async () => {
+  // Kills: if (true) mutation at line 58 — undefined text must not increment accumulatedText
+  registerProfile(
+    defineProfile({
+      id: 'live_text_gate',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          enforce: async (ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: false,
+            text: ctx.text,
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_text_gate');
+  const s = createLiveOutboundGateSession(profile);
+  processLiveOutboundBatch(s, [{ type: 'text', text: 'hello' }]);
+  assertEquals(s.accumulatedText, 'hello');
+});
+
+Deno.test('processLiveOutboundBatch action is idle string not empty object when buffering', () => {
+  // Kills: action: "" mutation at line 66/197/etc — verify action is the literal string
+  const s = session(mintCanary());
+  const result = processLiveOutboundBatch(s, [{ type: 'text', text: 'hi' }]);
+  assertEquals(result.action, 'idle');
+});
+
+Deno.test('processLiveOutboundBatch action is emit string not empty when emitting', () => {
+  // Kills: action: "" mutation at various emit returns
+  const s = session();
+  const result = processLiveOutboundBatch(s, [{ type: 'text', text: 'hello world safe text' }]);
+  assertEquals(result.action, 'emit');
+  if (result.action === 'emit') {
+    assertEquals(result.events.length > 0, true);
+  }
+});
+
+Deno.test('finalizeLiveOutboundTurn action and events correct when pending visible with no egress enforce', async () => {
+  // Kills: action: "" and events: [] mutations at line 207
+  registerProfile(
+    defineProfile({
+      id: 'live_hold_no_egress',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          enforce: async (ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: false,
+            text: ctx.text,
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_hold_no_egress');
+  const s = createLiveOutboundGateSession(profile);
+  processLiveOutboundBatch(s, [{ type: 'text', text: 'response content' }]);
+  assertEquals(s.pendingVisible.length > 0, true);
+  const result = await finalizeLiveOutboundTurn(s);
+  assertEquals(result.action, 'emit');
+  if (result.action === 'emit') {
+    assertEquals(result.events.length > 0, true);
+    assertEquals(
+      result.events.some((e) => e.text === 'response content'),
+      true,
+    );
+  }
+});
+
+Deno.test('finalizeLiveOutboundTurn emits refuse_to_user event type is text not empty', async () => {
+  // Kills: type: "" mutation at line 221
+  registerProfile(
+    defineProfile({
+      id: 'live_refuse_type_check',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          onBlock: 'refuse_to_user',
+          enforce: async (_ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: true,
+            text: 'Sorry, that was blocked.',
+            hits: ['canary'],
+            rejectionMessage: 'blocked',
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_refuse_type_check');
+  const s = createLiveOutboundGateSession(profile, mintCanary());
+  processLiveOutboundBatch(s, [{ type: 'text', text: 'partial' }]);
+  const result = await finalizeLiveOutboundTurn(s);
+  assertEquals(result.action, 'emit');
+  if (result.action === 'emit') {
+    assertEquals(result.events[0]?.type, 'text');
+  }
+});
+
+Deno.test('finalizeLiveOutboundTurn onBlock=refuse_to_user requires both condition parts', async () => {
+  // Kills: || mutation and true && mutation at line 220
+  registerProfile(
+    defineProfile({
+      id: 'live_refuse_both_parts',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          // onBlock not set — defaults to withhold behavior
+          enforce: async (_ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: true,
+            text: 'should not be shown',
+            hits: ['canary'],
+            rejectionMessage: 'blocked',
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_refuse_both_parts');
+  const s = createLiveOutboundGateSession(profile, mintCanary());
+  processLiveOutboundBatch(s, [{ type: 'text', text: 'partial' }]);
+  const result = await finalizeLiveOutboundTurn(s);
+  // Without onBlock='refuse_to_user', blocked turn should withhold, not emit the text
+  assertEquals(result.action, 'withhold');
+});
+
+Deno.test('abortLiveOutboundTurn resets accumulatedText to empty string not placeholder', () => {
+  // Kills: accumulatedText = "Stryker was here!" on line 203
+  const s = session(mintCanary());
+  s.accumulatedText = 'some text';
+  abortLiveOutboundTurn(s);
+  assertEquals(s.accumulatedText, '');
+});
+
+Deno.test('processLiveOutboundBatch emitType in flush is text string when lastStreamType is text', async () => {
+  // Kills: lastStreamType ?? "" (empty string emitType) and lastStreamType && 'text' mutations
+  const canary = mintCanary();
+  const s = session(canary);
+  processLiveOutboundBatch(s, [{ type: 'text', text: 'a'.repeat(50) }]);
+  const result = await finalizeLiveOutboundTurn(s);
+  if (result.action === 'emit') {
+    assertEquals(
+      result.events.every((e) => e.type === 'text' || e.type === 'thought'),
+      true,
+    );
+  }
+});
+
+Deno.test('processLiveOutboundBatch emits non-visible event types immediately even with holdUserVisible', async () => {
+  registerProfile(
+    defineProfile({
+      id: 'live_egress_nonvis',
+      model: { ...modelAllow('gemini35FlashLite') },
+      inputs: { text: true },
+      guardrails: {
+        quota: { perDay: 100 },
+        egress: {
+          enforce: async (ctx: EgressContext): Promise<EgressEnforcementResult> => ({
+            blocked: false,
+            text: ctx.text,
+          }),
+        },
+      },
+    }),
+  );
+  const profile = getProfile('live_egress_nonvis');
+  const s = createLiveOutboundGateSession(profile);
+  // 'tokens' and 'done' are not visible types — they pass through immediately
+  const result = processLiveOutboundBatch(s, [
+    { type: 'tokens', tokens: { input: 1, output: 1, total: 2 } },
+    { type: 'done' },
+  ]);
+  assertEquals(result.action, 'emit');
+  if (result.action === 'emit') {
+    assertEquals(result.events.length, 2);
+  }
+  assertEquals(s.pendingVisible.length, 0);
 });

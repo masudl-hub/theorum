@@ -121,6 +121,23 @@ function scanNonStreamEvent(session: LiveOutboundGateSession, event: TurnEvent):
   return Boolean(session.canary && eventHasCanary(event, session.canary));
 }
 
+function flushCanaryTailInto(
+  session: LiveOutboundGateSession,
+  into: TurnEvent[],
+): LiveOutboundBatchResult | undefined {
+  if (!(session.gate && session.lastStreamType)) {
+    return undefined;
+  }
+  const tailResult = flushCanaryTail(session);
+  if (tailResult.action === 'withhold') {
+    return tailResult;
+  }
+  if (tailResult.action === 'emit') {
+    into.push(...tailResult.events);
+  }
+  return undefined;
+}
+
 /** Process one upstream Live batch (may emit immediately or buffer for egress). */
 function processLiveOutboundBatch(
   session: LiveOutboundGateSession,
@@ -143,14 +160,9 @@ function processLiveOutboundBatch(
       continue;
     }
 
-    if (session.gate && session.lastStreamType) {
-      const tailResult = flushCanaryTail(session);
-      if (tailResult.action === 'withhold') {
-        return tailResult;
-      }
-      if (tailResult.action === 'emit') {
-        toEmit.push(...tailResult.events);
-      }
+    const withheld = flushCanaryTailInto(session, toEmit);
+    if (withheld) {
+      return withheld;
     }
 
     if (scanNonStreamEvent(session, event)) {
@@ -176,14 +188,9 @@ async function finalizeLiveOutboundTurn(
 ): Promise<LiveOutboundBatchResult> {
   const extra: TurnEvent[] = [];
 
-  if (session.gate && session.lastStreamType) {
-    const tailResult = flushCanaryTail(session);
-    if (tailResult.action === 'withhold') {
-      return tailResult;
-    }
-    if (tailResult.action === 'emit') {
-      extra.push(...tailResult.events);
-    }
+  const withheld = flushCanaryTailInto(session, extra);
+  if (withheld) {
+    return withheld;
   }
 
   if (!session.holdUserVisible) {

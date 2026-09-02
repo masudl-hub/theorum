@@ -1081,6 +1081,30 @@ Deno.test('_internals.foldStepStart ignores empty steps and seeds function_call'
   assertEquals(started[0]?.evidence?.code, 'print(1)');
 });
 
+Deno.test('foldPayload emits tool when function_call arrives on step.start with object arguments', () => {
+  const fold = _internals.newStreamFold();
+  const started = _internals.foldPayload(
+    {
+      event_type: 'step.start',
+      index: 1,
+      step: { id: 'call_live', type: 'function_call', name: 'stub_tool', arguments: {} },
+    },
+    fold,
+  );
+  const stopped = _internals.foldPayload({ event_type: 'step.stop', index: 1 }, fold);
+  const completed = _internals.foldPayload(
+    {
+      event_type: 'interaction.completed',
+      interaction: { id: 'v1_live', status: 'requires_action' },
+    },
+    fold,
+  );
+  const tools = [...started, ...stopped, ...completed].filter((e) => e.type === 'tool');
+  assertEquals(tools.length, 1);
+  assertEquals(tools[0]?.tool?.name, 'stub_tool');
+  assertEquals(tools[0]?.tool?.id, 'call_live');
+});
+
 Deno.test('_internals.foldDeltaPayload accumulates function arguments and media', () => {
   const fold = _internals.newStreamFold();
   assertEquals(_internals.foldDeltaPayload({ event_type: 'step.delta' }, fold), []);

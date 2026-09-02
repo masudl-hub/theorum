@@ -142,6 +142,12 @@ export function buildGeminiLiveSetupMessage(req: ProviderCompleteRequest): Recor
   const tools = wireLiveTools(req);
   const sessionResumption = buildLiveSessionResumption(req);
 
+  // Only opt into initial-history gating when we actually have history to seed.
+  // With `initialHistoryInClientContent: true`, Gemini waits for clientContent
+  // after setupComplete and will not start realtime generation until that lands —
+  // empty sessions (e.g. Th30) would hang forever if this were always set.
+  const seedInitialHistory = Boolean(req.history && req.history.length > 0);
+
   const setup: Record<string, unknown> = {
     model: liveModelName(req.apiId),
     generationConfig: buildLiveGenerationConfig(req),
@@ -152,9 +158,7 @@ export function buildGeminiLiveSetupMessage(req: ProviderCompleteRequest): Recor
     ...(sessionResumption ? { sessionResumption } : {}),
     contextWindowCompression:
       live?.contextCompression === 'none' ? undefined : { slidingWindow: {} },
-    historyConfig: {
-      initialHistoryInClientContent: true,
-    },
+    ...(seedInitialHistory ? { historyConfig: { initialHistoryInClientContent: true } } : {}),
     realtimeInputConfig: buildLiveRealtimeInputConfig(vad),
   };
 
@@ -243,23 +247,39 @@ export function buildGeminiLiveRealtimeText(text: string): Record<string, unknow
   };
 }
 
+/** Build the Gemini Live `response` struct for a function result. */
+function liveFunctionResponsePayload(output: unknown): Record<string, unknown> {
+  if (
+    typeof output === 'object' &&
+    output !== null &&
+    'error' in output &&
+    typeof (output as { error?: unknown }).error === 'string'
+  ) {
+    return { error: (output as { error: string }).error };
+  }
+  return { result: output };
+}
+
 /** Build a `toolResponse` message returning the execution result of a tool call. */
 export function buildGeminiLiveToolResponse(
   id: string,
   name: string,
   output: unknown,
 ): Record<string, unknown> {
+  return buildGeminiLiveToolResponses([{ id, name, output }]);
+}
+
+/** Build a batched `toolResponse` for one or more function results. */
+export function buildGeminiLiveToolResponses(
+  responses: Array<{ id: string; name: string; output: unknown }>,
+): Record<string, unknown> {
   return {
     toolResponse: {
-      functionResponses: [
-        {
-          id,
-          name,
-          response: {
-            output: typeof output === 'object' && output !== null ? output : { result: output },
-          },
-        },
-      ],
+      functionResponses: responses.map(({ id, name, output }) => ({
+        id,
+        name,
+        response: liveFunctionResponsePayload(output),
+      })),
     },
   };
 }
@@ -440,7 +460,9 @@ function foldUsageMetadata(message: Record<string, unknown>, events: TurnEvent[]
 /**
  * Fold a raw `BidiGenerateContentServerMessage` into normalized `TurnEvent` items.
  */
-export function foldGeminiLiveServerMessage(message: Record<string, unknown> | null | undefined): TurnEvent[] {
+export function foldGeminiLiveServerMessage(
+  message: Record<string, unknown> | null | undefined,
+): TurnEvent[] {
   if (!message || typeof message !== 'object') return [];
   const events: TurnEvent[] = [];
   foldSessionUpdate(message, events);
@@ -462,6 +484,7 @@ exposeForTests('google-live-framing', {
   buildGeminiLiveRealtimeInput,
   buildGeminiLiveRealtimeText,
   buildGeminiLiveToolResponse,
+  buildGeminiLiveToolResponses,
   parseGeminiLiveMessage,
   foldGeminiLiveServerMessage,
 });

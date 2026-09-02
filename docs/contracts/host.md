@@ -16,6 +16,7 @@ structured-output preview without reimplementing it per route.
 | Path | Role |
 | --- | --- |
 | `src/host/reply.ts` | JSON responses + HTTP status constants |
+| `src/host/client-turn.ts` | Strip `errorInternal` / `evidence.raw` before client transports |
 | `src/host/mint-trace.ts` | Cutout mint trace flush helpers |
 | `src/host/readStreamingJsonStringField.ts` | Incomplete JSON string preview |
 | `src/host/mod.ts` | Public barrel |
@@ -45,6 +46,29 @@ try {
 
 Quota busy responses typically use `HTTP_BUSY` after `takeSlot` returns `busy`.
 
+## Client-safe turn events
+
+Before forwarding `TurnEvent`s to browsers, SSE, or mobile clients, strip
+host-only diagnostics:
+
+```ts
+import { forClientEvents } from "theorum/host";
+
+const gated = processLiveOutboundBatch(session, upstreamEvents);
+if (gated.action === "emit") {
+  ws.send(JSON.stringify({ type: "events", events: forClientEvents(gated.events) }));
+}
+```
+
+| Export | Role |
+| --- | --- |
+| `forClient(event, options?)` | Copy one event without `errorInternal`; strips `evidence.raw` unless `includeEvidenceRaw: true` |
+| `forClientEvents(events, options?)` | Batch helper for Live relays and HTTP stream flush |
+| `ClientTurnOptions` | `{ includeEvidenceRaw?: boolean }` |
+
+HTTP error responses should still use `publicError(err)` — `forClient` applies
+only to turn event payloads.
+
 ## Cutout mint trace
 
 | Export | Role |
@@ -58,7 +82,9 @@ turns. Skip entirely for non-HTTP or non-Deno hosts.
 ## Structured JSON preview
 
 `readStreamingJsonStringField(jsonText, key)` reads one string field from
-**incomplete** JSON while structured output streams as text deltas.
+**incomplete** JSON while structured output streams as text deltas. Hosts use
+it for live UI previews; it is not a JSON validator and never throws on truncated
+input.
 
 ```ts
 import { readStreamingJsonStringField } from "theorum/host";
@@ -79,7 +105,8 @@ Does not validate full JSON documents.
 ## Exported API
 
 Live list: `src/host/mod.ts` (`json`, status constants, `caughtStatus`,
-`flushMintTrace`, `CutoutTape`, `readStreamingJsonStringField`).
+`flushMintTrace`, `CutoutTape`, `readStreamingJsonStringField`, `forClient`,
+`forClientEvents`, `ClientTurnOptions`).
 
 ```theorum-evidence
 {
@@ -100,6 +127,12 @@ Live list: `src/host/mod.ts` (`json`, status constants, `caughtStatus`,
       "supports": [
         { "kind": "source", "path": "src/host/reply.ts" },
         { "kind": "contract_test", "path": "tests/host/host.test.ts" }
+      ]
+    },
+    "Client-safe turn events": {
+      "supports": [
+        { "kind": "source", "path": "src/host/client-turn.ts" },
+        { "kind": "contract_test", "path": "tests/host/client-turn.test.ts" }
       ]
     },
     "Cutout mint trace": {

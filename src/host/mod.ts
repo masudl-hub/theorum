@@ -7,6 +7,8 @@
  * @module
  */
 
+export type { ClientTurnOptions } from './client-turn.ts';
+export { forClient, forClientEvents } from './client-turn.ts';
 export type { CutoutTape } from './mint-trace.ts';
 export { flushMintTrace } from './mint-trace.ts';
 export { readStreamingJsonStringField } from './readStreamingJsonStringField.ts';

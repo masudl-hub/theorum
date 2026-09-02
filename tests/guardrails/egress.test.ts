@@ -1,5 +1,5 @@
 import '../fixtures/test-host.ts';
-import { mintCanary, USER_OPEN } from '../../src/guardrails/canary.ts';
+import { mintCanary, USER_CLOSE, USER_OPEN } from '../../src/guardrails/canary.ts';
 import { TEST_OPENAI_KEY, TEST_SSN } from '../../src/guardrails/corpus/secrets.ts';
 import { INJ_IGNORE } from '../../src/guardrails/corpus/strings.ts';
 import { standardEgressEnforce } from '../../src/guardrails/egress.ts';
@@ -22,6 +22,7 @@ Deno.test('standardEgressEnforce blocks literal canary leak', () => {
   const result = standardEgressEnforce(egressCtx(`The token is ${canary}`, canary));
   assertEquals(result.blocked, true);
   assertEquals(result.hits?.includes('canary'), true);
+  assertEquals(result.text, '');
 });
 
 Deno.test('standardEgressEnforce blocks sensitive echo', () => {
@@ -80,4 +81,17 @@ Deno.test('standardEgressEnforce blocks "This turn\\u2019s canary is" boundary m
 Deno.test('standardEgressEnforce without canary: no canary hit even if text has theo-prefix', () => {
   const result = standardEgressEnforce(egressCtx('theo-deadbeef', undefined));
   assertEquals(result.hits?.includes('canary') ?? false, false);
+});
+
+Deno.test('standardEgressEnforce blocks closing user_data fence tag', () => {
+  const result = standardEgressEnforce(egressCtx(`leaked ${USER_CLOSE}`, mintCanary()));
+  assertEquals(result.blocked, true);
+  assertEquals(result.text, '');
+  assertEquals(result.hits?.includes('system_boundary'), true);
+});
+
+Deno.test('standardEgressEnforce sensitive echo sets text to empty string', () => {
+  const result = standardEgressEnforce(egressCtx(`Your ssn is ${TEST_SSN}`, mintCanary()));
+  assertEquals(result.blocked, true);
+  assertEquals(result.text, '');
 });

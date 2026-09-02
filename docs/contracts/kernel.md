@@ -114,14 +114,32 @@ different transport than the primary turn.
 | --- | --- |
 | `thought` | Model reasoning stream (may be gated) |
 | `text` | User-visible assistant text |
-| `tool` | Tool call envelope (`ok` / `error` / `pause`) |
+| `tool` | Tool call (`phase`: `running` / `progress` / `complete` / `pause` / `error`, …) |
 | `structured` | Parsed JSON object when schema enforced |
 | `media` | Generated image/audio bytes + mime |
 | `grounding` | Search/maps grounding metadata (classic `grounding_metadata` and Interactions tool results such as `google_search_result.search_suggestions`) |
 | `evidence` | Provider-native attachments. Google code execution sets `kind` (`code_execution_call` / `code_execution_result`) plus parsed `code` / `result` / `isError` / `id` / `callId`, and always keeps `raw`. |
 | `tokens` | `input` / `output` / `total` usage (billing; may gate `meter: 'input'`) |
 | `done` | Terminal: `stop`, `tokens`, `compaction`, final text pointer |
-| `error` | Public-safe failure (`toErrorEvent`) |
+| `error` | Public-safe `error` string; optional `errorInternal` for host logs only |
+
+### Host client boundary
+
+`runTurn` yields one stream for the host process. **Do not forward the stream
+verbatim to browsers or end-user SSE** unless you intend to expose diagnostics.
+
+| Field | Host logs / traces | End-user transport |
+| --- | --- | --- |
+| `error` | yes | yes |
+| `errorInternal` | yes | **never** |
+| `evidence` parsed fields (`kind`, `code`, `result`, citations) | yes | when useful in UI |
+| `evidence.raw` | yes | only when you explicitly want provider internals |
+| `text`, `media`, `structured`, `grounding` | yes | yes (after egress/canary gates) |
+| `thought` | yes (also in trace when filtered from stream) | only when profile allows |
+
+Use `forClient` / `forClientEvents` from `theorum/host` before WebSocket or SSE
+flush. Pass a trace sink (`memorySink`, `jsonlSink`) as the third argument to
+`runTurn` for wire-level audit (`upstreamLog`).
 
 `TurnHistoryMessage` preserves `role`, `content`, `parts`, `tool_calls`,
 `tool_call_id`, and opaque `metadata` across turns.
@@ -140,8 +158,10 @@ event types.
 
 ## Registered tools
 
-Tools are registered once at host startup via `registerTool`. Profiles
-declare a ceiling with `tools.allow`; turns opt in with `tools: { [id]: true }`.
+Tools are registered once at host startup via `registerTool` (Google builtins via
+`registerGooglePreset`). Profiles declare **custom** tools on `tools.allow` and
+**provider builtins** on `model.config.*.builtInTools`. Visibility is `loadTier`
+(T0 at turn start, T1 via `tools.t1Policy`, T2 via `tools.t2Loader`).
 
 ```ts
 // Startup
@@ -159,38 +179,41 @@ registerTool({
   handler: async (input) => ({ finding: `Order ${input.orderId} is in transit.` }),
 });
 
-// Profile — allow ceiling only
-tools: { allow: ['lookup_order', 'load_tools'] }
+// Profile — custom allow + optional T1 policy + optional T2 loader
+tools: {
+  allow: ['lookup_order', 'load_tools', 'deferred_order_tool'],
+  t1Policy: (ctx) => (ctx.input?.text?.includes('order') ? ['deferred_order_tool'] : []),
+  t2Loader: 'load_tools',
+}
+// model.config.fast.builtInTools: ['googleMaps', 'urlContext']
 
-// Turn — gate + optional T1 resolver
+// Turn
 runTurn({
   profile,
-  tools: { lookup_order: true },
-  toolLoader: (ctx) => (ctx.input?.text?.includes('order') ? ['lookup_order'] : []),
   input: { text: '...' },
 }, provider);
 
 // Host resume (interactive, confirmation, permission)
 invokeTool({ profile, name: 'ask_user', input: {...}, resume: { value: 'yes' } });
 
-// Host direct invoke (command palette) — gate like a turn
-invokeTool({ profile, name: 'lookup_order', input: {...}, tools: { lookup_order: true } });
+// Host direct invoke (command palette)
+invokeTool({ profile, name: 'lookup_order', input: {...} });
 ```
 
 | Layer | Owner | Role |
 | --- | --- | --- |
-| Catalog | Registry | Schema, handler, `access`, `loadTier`, `permission`, wire metadata |
-| Profile | Host | `tools.allow` ceiling only |
-| Turn | Host | `tools[id]: true` gates; `toolLoader` for T1; `sessionPermissions` for consent |
+| Registry | Host startup | Schema, handler, `access`, `loadTier`, `permission`, wire metadata |
+| Profile | Host | `tools.allow` / `tools.t1Policy` / `tools.t2Loader`; `model.config.*.builtInTools` |
+| Turn | Host | `sessionPermissions` for consent; path / input / transport |
 | Execution | Kernel | Shared `executeRegisteredTool` for model and `invokeTool` paths |
 
 Builtins (`type: 'builtin'`) are provider-native — kernel pins capabilities in
-`generation.builtins` but does not execute handlers. Function and loader tools require
+`generation.builtins` but does not execute handlers. Function tools require
 Zod input/output validated at registration.
-Catalog `conflictsWith` enforces builtin mutual exclusion (e.g. Google maps vs search).
+Catalog `conflictsWith` is an optional host-declared mutual exclusion on registered builtins; the Google preset does not set it.
 MIME classification (`MEDIA_INPUT_KINDS`, `ATTACHMENT_ACCEPT_MIMES`, …) lives in
-`schema.ts`. Tool catalog constants: `TOOL_LOAD_TIERS`, `TOOL_ACCESS_LEVELS`,
-`TOOL_PERMISSION_TIERS`.
+`schema.ts`. Tool catalog constants: `TOOL_LOAD_TIERS`, `TOOL_ACCESS`,
+`TOOL_PERMISSION`, `TOOL_TYPES`.
 
 ## Outputs and guardrails
 
@@ -199,7 +222,7 @@ Profile `outputs` pins behavior the kernel enforces before adapters run:
 | Pin | Effect |
 | --- | --- |
 | `structured` | Schema id or slot-mapped ids; `responseFormat` vs prompt enforcement |
-| `image` | Aspect ratio, size, mime, grounding allowance, max input images |
+| `image` | Aspect ratio, size, mime, max input images |
 | `speech` | TTS voice + `format` (`pcm` → WAV; `mp3` OpenAI-only) |
 | `streaming` | `mode`, `streamThoughts`, `gateMedia` |
 | `validation` | Field validators + `maxRetries` + `repairGuidance` |
@@ -367,7 +390,9 @@ that prefer exceptions over stream `done.stop`.
 
 Beyond compaction rules (above), `registerProfile` asserts:
 
-- Each `tools.allow` / `model.allow` id resolves to catalog / config entries.
+- Each `tools.allow` id is a registered **custom** tool (builtins rejected here).
+- Each `model.config.*.builtInTools` id is a registered **builtin**.
+- Each `model.allow` id has a `model.config` entry.
 - Profiles with attachments or voice set `maxFiles`, `maxBytes`, `maxTurnBytes`.
 
 Runtime structured validation uses `outputs.validation.fields` keyed by dotted
@@ -383,9 +408,9 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
 | Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
 | Runner | `runTurn` |
 | Catalog | `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
-| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_ACCESS`, `TOOL_PERMISSION` |
+| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_ACCESS`, `TOOL_PERMISSION`, `TOOL_TYPES` |
 | Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn` |
-| Tools | `defineTool`, `registerTool`, `registerTools`, `invokeTool`, `executeRegisteredTool`, `registerHarnessTools`, `getTool`, `hasTool`, `requireTool`, `listTools`, `listBuiltinIds`, `listFunctionIds`, `resetTools`, `formatToolResult`, `TOOL_TYPES`, `TOOL_ACCESS`, `TOOL_LOAD_TIERS`, `TOOL_PERMISSION` |
+| Tools | `registerTool`, `registerTools`, `invokeTool`, `registerHarnessTools`, `getTool`, `hasTool`, `requireTool`, `listTools`, `listBuiltinIds`, `listFunctionIds`, `resetTools`, `formatToolResult`, `prepareTurnToolSnapshot` |
 | Structured | `getStructured`, `registerStructured` |
 | Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenAiFinishReason` |
 

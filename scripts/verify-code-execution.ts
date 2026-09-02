@@ -80,7 +80,6 @@ registerProfile(
       key: 'freeA',
       select: { fast: 'flash', smart: 'flash' },
     },
-    tools: { allow: [] },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 1000 } },
@@ -104,7 +103,6 @@ registerProfile(
       maxSteps: 1,
       key: 'freeA',
     },
-    tools: { allow: ['codeExecution'] },
     inputs: { text: true },
     outputs: { structured: { schema: 'liveCodeAnswer' } },
     guardrails: { quota: { perDay: 1000 } },
@@ -202,7 +200,6 @@ asserted.push(
     const req = {
       profile: PROFILE,
       select: 'smart',
-      tools: { codeExecution: true },
       thinking: true,
       input: {
         text: 'Use code_execution once: print(sum(range(1, 11))). Reply with only the number.',
@@ -223,7 +220,6 @@ asserted.push(
     {
       profile: PROFILE,
       stream: true,
-      tools: { codeExecution: true },
       thinking: true,
       input: { text: 'Use code_execution: print(sum(range(1, 101))). Reply with only the number.' },
     },
@@ -246,7 +242,6 @@ asserted.push(
     {
       profile: PROFILE,
       stream: false,
-      tools: { codeExecution: true },
       thinking: true,
       input: { text: 'Use code_execution: print(sum(range(1, 51))). Reply with only the number.' },
     },
@@ -267,7 +262,6 @@ asserted.push(
     'sandbox error isError=true',
     {
       profile: PROFILE,
-      tools: { codeExecution: true },
       thinking: true,
       input: {
         text:
@@ -293,7 +287,6 @@ asserted.push(
     'multi-exec in one turn',
     {
       profile: PROFILE,
-      tools: { codeExecution: true },
       thinking: true,
       input: {
         text:
@@ -319,7 +312,6 @@ asserted.push(
     'matplotlib media',
     {
       profile: PROFILE,
-      tools: { codeExecution: true },
       thinking: true,
       input: {
         text:
@@ -346,7 +338,6 @@ asserted.push(
     'codeExecution + googleSearch',
     {
       profile: PROFILE,
-      tools: { codeExecution: true, googleSearch: true },
       thinking: true,
       input: {
         text:
@@ -370,7 +361,6 @@ asserted.push(
     'structured + codeExecution (API may reject)',
     {
       profile: PROFILE_STRUCTURED,
-      tools: { codeExecution: true },
       thinking: true,
       input: {
         text: 'Use code_execution to compute 21*2. Return JSON with answer and usedCode=true.',

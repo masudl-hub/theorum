@@ -218,6 +218,7 @@ Deno.test('attachResponseFormat sets an audio response format for speech-only re
   const camel: Record<string, unknown> = {};
   attachResponseFormat(req, camel);
   assertEquals(camel.responseFormat, { type: 'audio' });
+  assertEquals(camel.responseModalities, ['audio']);
 });
 
 Deno.test('attachResponseFormat sets an image response format', () => {
@@ -232,6 +233,7 @@ Deno.test('attachResponseFormat sets an image response format', () => {
     aspectRatio: '16:9',
     imageSize: '2K',
   });
+  assertEquals(camel.responseModalities, ['text', 'image']);
 });
 
 Deno.test('attachResponseFormat leaves camel untouched when nothing is requested', () => {

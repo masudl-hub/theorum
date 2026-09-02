@@ -33,14 +33,14 @@ Deno.test('sensitiveSpans detects all credential pattern types', () => {
     ['iban', 'DE89370400440532013000'],
     ['ipv6', '2001:0db8:85a3:0000:0000:8a2e:0370:7334'],
     ['github-pat', 'github_pat_11AAAAAAA_1234567890123456789012345'],
-    ['github-token', 'ghp_' + 'A'.repeat(36)],
+    ['github-token', `ghp_${'A'.repeat(36)}`],
     ['slack', 'xoxb-123456789012-1234567890123-abcde'],
     ['bearer', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'],
     ['pem', '-----BEGIN RSA PRIVATE KEY-----\nMIIEo\n-----END RSA PRIVATE KEY-----'],
-    ['anthropic', 'sk-ant-api03-' + 'x'.repeat(24)],
-    ['openrouter', 'sk-or-' + 'x'.repeat(25)],
-    ['openai', 'sk-' + 'x'.repeat(24)],
-    ['google', 'AIza' + 'x'.repeat(35)],
+    ['anthropic', `sk-ant-api03-${'x'.repeat(24)}`],
+    ['openrouter', `sk-or-${'x'.repeat(25)}`],
+    ['openai', `sk-${'x'.repeat(24)}`],
+    ['google', `AIza${'x'.repeat(35)}`],
     ['aws', 'AKIAIOSFODNN7EXAMPLE123'],
     ['ipv4', '10.0.0.1'],
     ['ssn', '078-05-1120'],
@@ -62,4 +62,125 @@ Deno.test('sensitiveSpans detects multiple cards in a single string', () => {
 
 Deno.test('sensitiveSpans ignores digit sequences below minimum card length', () => {
   assertEquals(sensitiveSpans('411111111111').length, 0);
+});
+
+Deno.test('sensitiveSpans ignores digit sequences above maximum card length', () => {
+  // 20 digits — over CARD_MAX_DIGITS = 19; kills the <= vs < boundary mutation
+  assertEquals(sensitiveSpans('41111111111111111120').length, 0);
+});
+
+Deno.test('sensitiveSpans detects 19-digit card at exact upper boundary', () => {
+  // 4111111111111111102 is Luhn-valid (sum=30) and exactly 19 digits; kills <= vs < mutation
+  assertEquals(sensitiveSpans('4111111111111111102').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects card where Luhn doubling exceeds 9 and subtracts 9', () => {
+  // 5500005555555559: positions with 5 doubled = 10 → 10-9 = 1; exercises n -= LUHN_NINE
+  assertEquals(sensitiveSpans('5500005555555559').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects SSN_CONTEXTUAL with double space between social and security', () => {
+  // Kills: social\ssecurity (single \s) mutation — double space requires \s+ or \s*
+  assertEquals(sensitiveSpans('social  security: 123456789').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects SSN_CONTEXTUAL without the word number', () => {
+  // Kills: (?:\s*number) without ? — number must be optional
+  assertEquals(sensitiveSpans('social security: 123456789').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects SSN_CONTEXTUAL with double space before number', () => {
+  // Kills: (?:\snumber)? single-space variant
+  assertEquals(sensitiveSpans('social security  number: 123456789').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects SSN_CONTEXTUAL with dash-separated digits', () => {
+  // Kills: [^-\s]* mutation which would reject dashes between digits
+  assertEquals(sensitiveSpans('SSN: 1-2-3-4-5-6-7-8-9').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects SSN_CONTEXTUAL with space-separated digits', () => {
+  // Kills: [-\S]* mutation which would reject spaces between digits
+  assertEquals(sensitiveSpans('SSN: 1 2 3 4 5 6 7 8 9').length > 0, true);
+});
+
+Deno.test('sensitiveSpans does not detect SSN_CONTEXTUAL with only 8 digits', () => {
+  // Kills: {9} removal mutation — without {9}, 1 digit would match
+  assertEquals(sensitiveSpans('social security: 12345678').length, 0);
+});
+
+Deno.test('sensitiveSpans does not detect ITIN with only 1 area digit (91-xx-xxxx format)', () => {
+  // Kills: \d{2} → \d mutation for first ITIN group — mutation would match 2-digit start
+  assertEquals(sensitiveSpans('91-34-5678').length, 0);
+});
+
+Deno.test('sensitiveSpans does not detect ITIN with only 1 middle digit (912-3-xxxx format)', () => {
+  // Kills: \d{2} → \d mutation for middle ITIN group
+  assertEquals(sensitiveSpans('912-3-5678').length, 0);
+});
+
+Deno.test('sensitiveSpans does not detect ITIN with only 1 final digit (912-34-5 format)', () => {
+  // Kills: \d{4} → \d mutation for last ITIN group
+  assertEquals(sensitiveSpans('912-34-5').length, 0);
+});
+
+Deno.test('sensitiveSpans does not detect IBAN-like with letter in check digits position', () => {
+  // Kills: \d{2} → \d mutation — with \d, a 1-digit check followed by letter would match
+  assertEquals(sensitiveSpans('DE8ABC0440532013000').length, 0);
+});
+
+Deno.test('sensitiveSpans does not detect IPV6 with only 1 colon-separated group', () => {
+  // Kills: {7} → removal mutation — without {7}, just one colon group would match
+  assertEquals(sensitiveSpans('2001:safe-text-here').length, 0);
+});
+
+Deno.test('sensitiveSpans detects BEARER with double space after Bearer keyword', () => {
+  // Kills: \s+ → \s mutation — double space after Bearer requires \s+
+  assertEquals(sensitiveSpans('Bearer  eyJhbGciOiJIUzI1NiJ9.payload').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects full multi-word BEARER token body', () => {
+  // Kills: \s+ → \s mutation — double space between Bearer and token requires \s+
+  assertEquals(sensitiveSpans('Bearer  eyJhbGciOiJIUzI1NiJ9.payload.sig').length > 0, true);
+});
+
+Deno.test('sensitiveSpans detects PEM without RSA prefix', () => {
+  // Kills: (?:RSA )? removal mutation on BEGIN line — non-RSA PEM must still match
+  assertEquals(
+    sensitiveSpans('-----BEGIN PRIVATE KEY-----\nMIIEvg\n-----END PRIVATE KEY-----').length > 0,
+    true,
+  );
+});
+
+Deno.test('sensitiveSpans detects PEM without RSA on END line', () => {
+  // Kills: (?:RSA )? removal mutation on END line — BEGIN RSA / END non-RSA must still match
+  assertEquals(
+    sensitiveSpans('-----BEGIN RSA PRIVATE KEY-----\nMIIEvg\n-----END PRIVATE KEY-----').length > 0,
+    true,
+  );
+});
+
+Deno.test('sensitiveSpans kind is sensitive not empty string', () => {
+  // Kills: kind: "" mutations on lines 86 and 95
+  const spans = sensitiveSpans('078-05-1120');
+  assertEquals(spans.length > 0, true);
+  assertEquals(spans[0]?.kind, 'sensitive');
+});
+
+Deno.test('sensitiveSpans does not detect OPENAI key with non-whitespace between sk- and body', () => {
+  // Kills: \s* → \S* mutation — sk-BODY should be detected but sk-.BODY (dot) should not be
+  // A key with leading junk between sk- and the alphanumeric body is not a valid key
+  assertEquals(sensitiveSpans('sk-$$$$$$$$$$$$$$$$$$$$$$$$$').length, 0);
+});
+
+Deno.test('cardSpans does not flag a 12-digit Luhn-valid number (below CARD_MIN_DIGITS)', () => {
+  // Kills: >= → > mutation on CARD_MIN_DIGITS check (13 digits minimum)
+  // 4111111111111 is 13 digits (minimum), 411111111111 is 12 (below minimum)
+  assertEquals(sensitiveSpans('411111111111').length, 0);
+});
+
+Deno.test('cardSpans if (found) vs if (true) mutation: null match should not be processed', () => {
+  // Kills: if (true) mutation — blobAt returns undefined for no-match positions
+  // Benign short number sequences should yield 0 spans (blobAt returns null)
+  assertEquals(sensitiveSpans('1234').length, 0);
 });

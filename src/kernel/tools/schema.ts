@@ -201,4 +201,4 @@ function jsonSchemaFromZod(schema: z.ZodType | Parameters<typeof zodToJsonSchema
   return stripUnsupportedGeminiKeys(json);
 }
 
-export { jsonSchemaFromZod, validateToolInputSchema, validateToolOutputSchema, validateToolWireSchema };
+export { jsonSchemaFromZod, validateToolInputSchema, validateToolOutputSchema };

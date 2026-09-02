@@ -22,7 +22,7 @@ import type {
 } from '../types.ts';
 import { clampThinkingLevel, requireModelSpec } from './catalog.ts';
 import {
-  assertImageGrounding,
+  assertOutputMode,
   assertSpeechRole,
   resolveImageFormat,
   resolveInputParts,
@@ -165,7 +165,8 @@ function resolveTurn(req: TurnRequest): {
   const thinkingOn = safe.thinking === true;
   const toolSnapshot = resolveTurnTools(profile, safe, model);
   const builtins = toolSnapshot.builtins;
-  assertImageGrounding(profile, model, builtins);
+  const structured = resolveStructured(profile, input.slots);
+  assertOutputMode(profile, structured);
   assertSpeechRole(profile);
   const geminiBucket =
     profile.model.provider === 'google'
@@ -195,7 +196,7 @@ function resolveTurn(req: TurnRequest): {
       sessionPermissions: safe.sessionPermissions,
       history: input.history,
       maxSteps: profile.model.maxSteps ?? 1,
-      structured: resolveStructured(profile, input.slots),
+      structured,
       image: resolveImageFormat(profile, model, input.slots),
       speech: profile.outputs.speech,
       live: profile.outputs.live,

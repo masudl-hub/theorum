@@ -1,3 +1,4 @@
+import '../../../fixtures/enable-test-internals.ts';
 import { assertEquals, assertExists } from '@std/assert';
 import { registerTool } from '../../../../src/kernel/tools/mod.ts';
 import type { ProviderCompleteRequest } from '../../../../src/kernel/types.ts';
@@ -7,6 +8,7 @@ import {
   buildGeminiLiveRealtimeText,
   buildGeminiLiveSetupMessage,
   buildGeminiLiveToolResponse,
+  buildGeminiLiveToolResponses,
   buildGeminiLiveWebSocketUrl,
   foldGeminiLiveServerMessage,
   parseGeminiLiveMessage,
@@ -87,6 +89,30 @@ Deno.test('buildGeminiLiveSetupMessage constructs standard setup frame', () => {
   assertExists(setupMsg.setup.contextWindowCompression);
   assertExists(setupMsg.setup.inputAudioTranscription);
   assertExists(setupMsg.setup.outputAudioTranscription);
+  // Empty sessions must not gate on clientContent history — that stalls realtime.
+  assertEquals((setupMsg.setup as { historyConfig?: unknown }).historyConfig, undefined);
+});
+
+Deno.test('buildGeminiLiveSetupMessage seeds historyConfig only when history is present', () => {
+  const req: ProviderCompleteRequest = {
+    model: 'gemini-3.1-flash-live-preview',
+    apiId: 'gemini-3.1-flash-live-preview',
+    temperature: 0.7,
+    maxOutputTokens: 2048,
+    system: 'You are a helpful live assistant.',
+    builtins: [],
+    thinking: 'low',
+    input: [],
+    structured: null,
+    image: null,
+    history: [{ role: 'user', content: 'prior turn' }],
+    live: { voice: 'Puck' },
+  };
+
+  const setupMsg = buildGeminiLiveSetupMessage(req) as {
+    setup: { historyConfig?: { initialHistoryInClientContent?: boolean } };
+  };
+  assertEquals(setupMsg.setup.historyConfig?.initialHistoryInClientContent, true);
 });
 
 Deno.test('buildGeminiLiveSetupMessage includes tool declarations when provided', () => {
@@ -195,13 +221,38 @@ Deno.test('buildGeminiLiveToolResponse formats function responses', () => {
     condition: 'Sunny',
   }) as {
     toolResponse: {
-      functionResponses: Array<{ id: string; name: string; response: { output: unknown } }>;
+      functionResponses: Array<{ id: string; name: string; response: { result: unknown } }>;
     };
   };
   const firstFn = resp.toolResponse.functionResponses[0];
   assertEquals(firstFn?.id, 'call_123');
   assertEquals(firstFn?.name, 'get_weather');
-  assertEquals((firstFn?.response?.output as { temp: number } | undefined)?.temp, 72);
+  assertEquals((firstFn?.response?.result as { temp: number } | undefined)?.temp, 72);
+});
+
+Deno.test('buildGeminiLiveToolResponse maps tool errors to response.error', () => {
+  const resp = buildGeminiLiveToolResponse('call_404', 'navigate', {
+    error: 'Element not found',
+  }) as {
+    toolResponse: {
+      functionResponses: Array<{ response: { error: string } }>;
+    };
+  };
+  assertEquals(resp.toolResponse.functionResponses[0]?.response?.error, 'Element not found');
+});
+
+Deno.test('buildGeminiLiveToolResponses batches multiple function responses', () => {
+  const resp = buildGeminiLiveToolResponses([
+    { id: 'a', name: 'one', output: { ok: true } },
+    { id: 'b', name: 'two', output: { error: 'nope' } },
+  ]) as {
+    toolResponse: {
+      functionResponses: Array<{ id: string; name: string; response: Record<string, unknown> }>;
+    };
+  };
+  assertEquals(resp.toolResponse.functionResponses.length, 2);
+  assertEquals(resp.toolResponse.functionResponses[0]?.id, 'a');
+  assertEquals(resp.toolResponse.functionResponses[1]?.response?.error, 'nope');
 });
 
 Deno.test('foldGeminiLiveServerMessage handles model audio, text, transcriptions, and interruption', () => {

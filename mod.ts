@@ -40,28 +40,19 @@
 export {
   describeError,
   isAbortError,
-  publicError,
   PUBLIC_CANARY,
+  publicError,
   TheorumError,
   throwIfAborted,
   toErrorEvent,
 } from './src/guardrails/error.ts';
-export type { QuotaSlotStatus } from './src/guardrails/quota.ts';
-export {
-  clientIp,
-  quotaMessage,
-  releaseSlot,
-  resetSlots,
-  skipQuota,
-  takeSlot,
-} from './src/guardrails/quota.ts';
-export {
-  PROJECT_ID_MAX,
-  redactSensitiveOnly,
-  sanitizeProjectId,
-  sanitizeText,
-  sanitizeTurnRequest,
-} from './src/guardrails/sanitize.ts';
+export type {
+  CanaryGateResult,
+  CanaryGateSession,
+  CanaryStreamGate,
+  LiveOutboundBatchResult,
+  LiveOutboundGateSession,
+} from './src/guardrails/mod.ts';
 export {
   bindCanary,
   createCanaryGateSession,
@@ -78,13 +69,22 @@ export {
   standardEgressEnforce,
   wrapUserData,
 } from './src/guardrails/mod.ts';
-export type {
-  CanaryGateResult,
-  CanaryGateSession,
-  CanaryStreamGate,
-  LiveOutboundBatchResult,
-  LiveOutboundGateSession,
-} from './src/guardrails/mod.ts';
+export type { QuotaSlotStatus } from './src/guardrails/quota.ts';
+export {
+  clientIp,
+  quotaMessage,
+  releaseSlot,
+  resetSlots,
+  skipQuota,
+  takeSlot,
+} from './src/guardrails/quota.ts';
+export {
+  PROJECT_ID_MAX,
+  redactSensitiveOnly,
+  sanitizeProjectId,
+  sanitizeText,
+  sanitizeTurnRequest,
+} from './src/guardrails/sanitize.ts';
 export type { CompactionSplit, CompactionTokens } from './src/kernel/engine/compaction.ts';
 export {
   compactionMeter,
@@ -142,7 +142,6 @@ export {
   MEDIA_INPUT_KINDS,
   MEDIA_WILDCARDS,
   PROFILE_FIELDS,
-  TOOL_LOAD_TIERS,
   PROTOCOL_PROVIDERS,
   PROTOCOLS,
   PROVIDERS,
@@ -153,8 +152,10 @@ export {
   STREAM_MODES,
   SUMMARY_MODES,
   THINKING_LEVELS,
-  TOOL_ACCESS_LEVELS,
-  TOOL_PERMISSION_TIERS,
+  TOOL_ACCESS,
+  TOOL_LOAD_TIERS,
+  TOOL_PERMISSION,
+  TOOL_TYPES,
   TURN_STOP_KINDS,
   VOICE_ACCEPT_MIMES,
 } from './src/kernel/schema.ts';
@@ -178,8 +179,6 @@ export {
   turnStopFromOpenAiFinishReason,
 } from './src/kernel/stop.ts';
 export {
-  defineTool,
-  executeRegisteredTool,
   formatToolResult,
   getTool,
   hasTool,
@@ -187,14 +186,12 @@ export {
   listBuiltinIds,
   listFunctionIds,
   listTools,
+  prepareTurnToolSnapshot,
   registerHarnessTools,
   registerTool,
   registerTools,
   requireTool,
   resetTools,
-  TOOL_ACCESS,
-  TOOL_PERMISSION,
-  TOOL_TYPES,
 } from './src/kernel/tools/mod.ts';
 export type * from './src/kernel/types.ts';
 export {

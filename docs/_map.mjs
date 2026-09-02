@@ -106,6 +106,7 @@ const graph = {
       export: './kernel',
       doc: 'docs/contracts/kernel.md',
       owns: ['src/kernel/'],
+      owns_except: ['src/kernel/schema.ts'],
       validates: [
         'tests/kernel/',
       ],
@@ -150,7 +151,7 @@ const graph = {
       export: './providers',
       doc: 'docs/contracts/providers.md',
       owns: ['src/providers/'],
-      owns_except: ['src/providers/local/mod.ts'],
+      owns_except: ['src/providers/local/mod.ts', 'src/providers/google/live/mod.ts'],
       watches: [
         {
           path: 'src/kernel/registry/vault.ts',
@@ -286,7 +287,7 @@ const graph = {
       ],
     },
 
-    observability: {
+	observability: {
       export: './observability',
       doc: 'docs/contracts/observability.md',
       owns: ['src/observability/'],
@@ -295,16 +296,17 @@ const graph = {
         'Export',
         'Ownership',
         'Trace sinks',
+        'Sensitive storage',
         'Trace records',
         'Exported API',
       ],
       section_triggers: [
         { paths: ['src/observability/trace.ts'], sections: ['Trace sinks'] },
-        { paths: ['src/observability/trace-record.ts'], sections: ['Trace records'] },
+        { paths: ['src/observability/trace-record.ts'], sections: ['Trace records', 'Sensitive storage'] },
       ],
     },
 
-    host: {
+	host: {
       export: './host',
       doc: 'docs/contracts/host.md',
       owns: ['src/host/'],
@@ -313,12 +315,14 @@ const graph = {
         'Export',
         'Ownership',
         'HTTP replies',
+        'Client-safe turn events',
         'Cutout mint trace',
         'Structured JSON preview',
         'Exported API',
       ],
       section_triggers: [
         { paths: ['src/host/reply.ts'], sections: ['HTTP replies'] },
+        { paths: ['src/host/client-turn.ts'], sections: ['Client-safe turn events'] },
         { paths: ['src/host/mint-trace.ts'], sections: ['Cutout mint trace'] },
         {
           paths: ['src/host/readStreamingJsonStringField.ts'],
@@ -327,7 +331,7 @@ const graph = {
       ],
     },
 
-    cli: {
+	cli: {
       export: './cli',
       doc: 'docs/contracts/cli.md',
       owns: ['src/cli/'],
@@ -341,6 +345,7 @@ const graph = {
       ],
       section_triggers: [
         { paths: ['src/cli/commands/'], sections: ['Commands'] },
+        { paths: ['src/cli/event-log.ts'], sections: ['Commands'] },
         { paths: ['src/cli/matrix/'], sections: ['Matrix and fixtures'] },
       ],
     },
@@ -369,7 +374,14 @@ const graph = {
     'presets-google': {
       export: './presets/google',
       doc: 'docs/contracts/presets-google.md',
-      owns: ['src/presets/google.ts', 'src/presets/google/speech-voices.ts'],
+      owns: ['src/presets/google.ts'],
+      watches: [
+        {
+          path: 'src/presets/google/speech-voices.ts',
+          reason: 'Speech voice vocabulary consumed by the Google preset pack',
+          sections: ['Vocabularies', 'Exported API'],
+        },
+      ],
       validates: ['tests/kernel/theorum.test.ts'],
       required_sections: [
         'Export',
@@ -378,6 +390,45 @@ const graph = {
         'Vocabularies',
         'Exported API',
       ],
+    },
+
+    'presets-google-speech-voices': {
+      export: './presets/google/speech-voices',
+      doc: 'docs/contracts/presets-google.md',
+      owns: ['src/presets/google/speech-voices.ts'],
+      validates: ['tests/kernel/theorum.test.ts'],
+      required_sections: ['Export', 'Ownership', 'Vocabularies', 'Exported API'],
+    },
+
+    schema: {
+      export: './schema',
+      doc: 'docs/contracts/kernel.md',
+      owns: ['src/kernel/schema.ts'],
+      validates: ['tests/kernel/schema.test.ts'],
+      required_sections: ['Export', 'Ownership', 'Profiles', 'Exported API'],
+    },
+
+    'providers-google-live': {
+      export: './providers/google/live',
+      doc: 'docs/contracts/providers.md',
+      owns: ['src/providers/google/live/mod.ts'],
+      watches: [
+        {
+          path: 'src/providers/google/live/framing.ts',
+          reason: 'Live wire helpers re-exported by the Google Live entry',
+          sections: ['Google Live'],
+        },
+        {
+          path: 'src/providers/google/live/stream.ts',
+          reason: 'Live stream adapter behind createGoogleLiveProvider',
+          sections: ['Google Live'],
+        },
+      ],
+      validates: [
+        'tests/providers/google/live/framing.test.ts',
+        'tests/providers/google/live/stream.test.ts',
+      ],
+      required_sections: ['Export', 'Google Live', 'Exported API'],
     },
   },
 };

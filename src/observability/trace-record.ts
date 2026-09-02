@@ -7,9 +7,9 @@
  * @module
  */
 
+import { OMIT_CANARY } from '../guardrails/canary.ts';
 import { isAbortError, publicError } from '../guardrails/error.ts';
 import { redactSensitiveOnly, sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
-import { OMIT_CANARY } from '../guardrails/canary.ts';
 import { sha256 } from '../kernel/engine/hash.ts';
 import type { Protocol } from '../kernel/schema.ts';
 import type { ResolvedGeneration, TurnBlob, TurnEvent, TurnRequest } from '../kernel/types.ts';
@@ -57,7 +57,6 @@ interface TraceRecord {
   projectId?: string;
   select?: string;
   thinking?: boolean;
-  tools?: TurnRequest['tools'];
   metadata?: Record<string, unknown>;
   model?: { id: string; apiId: string };
   bucket?: string;

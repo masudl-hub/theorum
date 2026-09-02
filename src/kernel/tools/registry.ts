@@ -1,19 +1,51 @@
 /**
  * Process-local tool registry.
  *
+ * Registration is not synchronized — hosts must register tools at startup before
+ * concurrent turns or invokeTool calls. Reads during execution are safe under Deno's
+ * single-threaded event loop; concurrent mutation of a shared TurnToolSnapshot is
+ * avoided by cloneTurnToolSnapshot on invokeTool entry.
+ *
  * @module
  */
 
+import type { z } from 'zod';
 import { TheorumError } from '../../guardrails/error.ts';
-import { defineTool } from './define.ts';
-import type { RegisteredTool, ToolDefinitionInput } from './types.ts';
+import { jsonSchemaFromZod, validateToolInputSchema, validateToolOutputSchema } from './schema.ts';
+import type { FunctionToolDef, RegisteredTool, ToolDefinitionInput } from './types.ts';
 
 const tools = new Map<string, RegisteredTool>();
 
+function normalizeFunction<TIn = unknown, TOut = unknown>(
+  def: Omit<FunctionToolDef<TIn, TOut>, 'inputSchema' | 'outputSchema'> & {
+    input: z.ZodType<TIn>;
+    output: z.ZodType<TOut>;
+  },
+): FunctionToolDef<TIn, TOut> {
+  const inputSchema = jsonSchemaFromZod(def.input);
+  validateToolInputSchema(inputSchema);
+  const outputSchema = jsonSchemaFromZod(def.output);
+  validateToolOutputSchema(outputSchema);
+  return {
+    ...def,
+    inputSchema,
+    outputSchema,
+  };
+}
+
+function normalizeToolDefinition<TIn = unknown, TOut = unknown>(
+  def: ToolDefinitionInput<TIn, TOut>,
+): RegisteredTool<TIn, TOut> {
+  if (def.type === 'builtin') {
+    return def;
+  }
+  return normalizeFunction(def);
+}
+
 /** Register or replace a tool definition. */
-function registerTool(def: ToolDefinitionInput): RegisteredTool {
-  const normalized = defineTool(def);
-  tools.set(normalized.name, normalized);
+function registerTool<TIn, TOut>(def: ToolDefinitionInput<TIn, TOut>): RegisteredTool<TIn, TOut> {
+  const normalized = normalizeToolDefinition(def);
+  tools.set(normalized.name, normalized as RegisteredTool);
   return normalized;
 }
 

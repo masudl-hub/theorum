@@ -1,11 +1,10 @@
 import { throwIfAborted } from '../../../guardrails/error.ts';
 import {
   executeRegisteredTool,
+  formatToolFailureForModel,
   formatToolResult,
   newCallId,
-  projectForModel,
 } from '../../tools/execute.ts';
-import { getTool } from '../../tools/registry.ts';
 import type { ModelToolResult } from '../../tools/types.ts';
 import type {
   ModelProvider,
@@ -190,16 +189,11 @@ async function* handlePendingTools(
   state: StepExecutionState,
 ): AsyncGenerator<TurnEvent, boolean> {
   let executed = false;
+  let sawPause = false;
   const useInteractionsContinuation = generation.transport === 'interactions';
   for (const toolEv of pendingTools) {
     const tool = toolEv.tool;
     if (!tool) {
-      continue;
-    }
-    const registered = getTool(tool.name);
-    if (!registered || registered.type === 'builtin') {
-      state.allEmittedEvents.push(toolEv);
-      yield toolEv;
       continue;
     }
 
@@ -207,7 +201,7 @@ async function* handlePendingTools(
     const callId = tool.id ?? tool.callId ?? newCallId(tool.name);
     let modelResult: ModelToolResult | undefined;
     let paused = false;
-    for await (const event of executeRegisteredTool({
+    const exec = executeRegisteredTool({
       profile,
       name: tool.name,
       input: tool.arguments ?? {},
@@ -218,7 +212,10 @@ async function* handlePendingTools(
         turn: { step: state.stepCount },
       },
       snapshot: generation.tools,
-    })) {
+    });
+    let next = await exec.next();
+    while (!next.done) {
+      const event = next.value;
       const enriched: TurnEvent = {
         type: 'tool',
         tool: {
@@ -230,28 +227,21 @@ async function* handlePendingTools(
       };
       state.allEmittedEvents.push(enriched);
       yield enriched;
-      if (event.tool?.phase === 'complete') {
-        const fnTool = registered?.type === 'function' ? registered : undefined;
-        modelResult = fnTool
-          ? projectForModel(fnTool, event.tool.output)
-          : {
-              finding: formatToolResult({
-                finding: JSON.stringify(event.tool.output),
-                data: event.tool.output,
-              }),
-            };
-      }
       if (event.tool?.phase === 'error' && event.tool.failure) {
-        modelResult = { finding: event.tool.failure.message };
+        modelResult = formatToolFailureForModel(event.tool.failure);
       }
       if (event.tool?.phase === 'pause') {
         modelResult = undefined;
         paused = true;
       }
+      next = await exec.next();
+    }
+    if (next.value !== undefined) {
+      modelResult = next.value;
     }
     if (paused) {
-      state.lastStop = { kind: 'tool' };
-      return false;
+      sawPause = true;
+      continue;
     }
     if (!modelResult) {
       continue;
@@ -269,6 +259,10 @@ async function* handlePendingTools(
     } else {
       appendToolTurnToHistory(state.currentHistory, toolEv, modelResult);
     }
+  }
+  if (sawPause) {
+    state.lastStop = { kind: 'tool' };
+    return false;
   }
   return executed;
 }

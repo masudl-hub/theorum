@@ -24,9 +24,6 @@ function attachResolved(
   if (safe.thinking !== undefined) {
     record.thinking = safe.thinking;
   }
-  if (safe.tools) {
-    record.tools = safe.tools;
-  }
   if (safe.metadata) {
     record.metadata = safe.metadata;
   }

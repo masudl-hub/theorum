@@ -105,7 +105,11 @@ function testTurnRequest(payloads: InboundFuzzPayload[]): InboundFuzzResult[] {
       });
     }
 
-    const sysReq: TurnRequest = { profile: FUZZ_PROFILE_ID, system: p.text, input: { text: 'hello' } };
+    const sysReq: TurnRequest = {
+      profile: FUZZ_PROFILE_ID,
+      system: p.text,
+      input: { text: 'hello' },
+    };
     try {
       const safe = sanitizeTurnRequest(sysReq);
       const output = safe.system ?? '';

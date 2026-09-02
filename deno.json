@@ -1,6 +1,6 @@
 {
   "name": "@theorum/core",
-  "version": "0.1.15",
+  "version": "1.0.0",
   "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, registered tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "keywords": [
@@ -79,6 +79,8 @@
     "verify:live": "deno run --allow-net scripts/verify-live.ts",
     "verify:canary-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-guardrails-live.ts",
     "verify:guardrails-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-guardrails-live.ts",
-    "stryker:guardrails": "npx stryker run --configFile stryker.guardrails.config.json"
+    "verify:tools-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-tools-live.ts",
+    "stryker:guardrails": "npx stryker run stryker.guardrails.config.json",
+    "stryker:tools": "npx stryker run stryker.tools.config.json"
   }
 }

@@ -11,9 +11,8 @@
  * @module
  */
 
-import { getTool } from '../../../kernel/registry/catalog.ts';
+import { getTool } from '../../../kernel/tools/registry.ts';
 import type { ProviderCompleteRequest } from '../../../kernel/types.ts';
-import type { OpenAiGatewayConfig } from '../../types.ts';
 import { buildChatMessages, resolveResponseFormat, wireTools } from './compat.ts';
 
 /** Convert a provider-neutral request into an OpenAI chat completion payload. */
@@ -35,7 +34,7 @@ function toOpenAiChatPayload(req: ProviderCompleteRequest): Record<string, unkno
     payload.response_format = responseFormat;
   }
 
-  const tools = wireTools(req.dynamicTools);
+  const tools = wireTools(req.wireTools);
   if (tools) {
     payload.tools = tools;
   }
@@ -60,7 +59,8 @@ function resolveOpenRouterPlugins(builtins: readonly string[]): ResolvedPlugins 
   let webSearch = false;
   const plugins: Array<{ id: string }> = [];
   for (const id of builtins) {
-    const pluginId = getTool(id)?.openRouterPlugin;
+    const entry = getTool(id);
+    const pluginId = entry?.type === 'builtin' ? entry.wire.openRouter : undefined;
     if (!pluginId) continue;
     if (pluginId === 'web') {
       webSearch = true;
@@ -71,5 +71,5 @@ function resolveOpenRouterPlugins(builtins: readonly string[]): ResolvedPlugins 
   return { plugins, webSearch };
 }
 
-export type { OpenAiGatewayConfig, ResolvedPlugins };
+export type { ResolvedPlugins };
 export { resolveOpenRouterPlugins, toOpenAiChatPayload };

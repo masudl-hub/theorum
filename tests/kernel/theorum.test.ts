@@ -1,5 +1,5 @@
 import '../fixtures/test-host.ts';
-import { PUBLIC_ACTION, PUBLIC_CANARY, TheorumError } from '../../src/guardrails/error.ts';
+import { PUBLIC_CANARY, TheorumError } from '../../src/guardrails/error.ts';
 import {
   assertEquals,
   assertRejects,
@@ -15,26 +15,48 @@ import {
 } from '../../src/kernel/registry/catalog.ts';
 import { defineProfile, getProfile, registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
-import { executeTool } from '../../src/kernel/registry/tools.ts';
 import type {
-  CustomToolId,
   EgressContext,
   ModelProvider,
   ProfileId,
   ProviderCompleteRequest,
+  ToolId,
   TurnEvent,
   TurnRequest,
 } from '../../src/kernel/types.ts';
 import { HOST_MODELS, modelAllow } from '../fixtures/models.ts';
+import { gateTools, invokeRegisteredTool, withProfileTools } from '../fixtures/test-tools.ts';
 
-Deno.test('runner internal helper branches: dynamic loaders, tool findings, step ceilings, and fallback handlers', async () => {
-  // 1. Dynamic loader when no dynamicToolLoader is provided on generation
-  const mockLoaderProvider: ModelProvider = {
+Deno.test('runner internal helper branches: loaders, tool findings, step ceilings, and fallback handlers', async () => {
+  registerProfile(
+    defineProfile({
+      id: 'dynamic_runner_bot',
+      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 3 },
+      tools: { allow: ['stub_tool'] },
+      inputs: { text: true },
+      outputs: { structured: null },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+
+  registerProfile(
+    defineProfile({
+      id: 'loader_runner_bot',
+      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 2 },
+      tools: { allow: ['record_lookup'] },
+      inputs: { text: true },
+      outputs: { structured: null },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+
+  // 1. Deferred tool not loaded yet -> not_loaded error
+  const mockDeferredProvider: ModelProvider = {
     complete: () => {
       return (async function* () {
         yield {
           type: 'tool',
-          tool: { name: 'load_more', arguments: { query: 'test' } },
+          tool: { name: 'record_lookup', arguments: { q: 'test' } },
         };
         yield { type: 'text', text: 'done' };
         yield { type: 'done' };
@@ -42,49 +64,26 @@ Deno.test('runner internal helper branches: dynamic loaders, tool findings, step
     },
   };
 
-  const dynamicReq: TurnRequest = {
-    profile: 'chat',
-    dynamicTools: [
-      {
-        name: 'load_more',
-        loadsDynamicTools: true,
-      },
-    ],
-    input: {
-      text: 'load tools',
+  const deferredEvents: TurnEvent[] = [];
+  for await (const ev of runTurn(
+    {
+      profile: 'loader_runner_bot',
+      tools: gateTools('record_lookup'),
+      input: { text: 'lookup without loader' },
     },
-  };
-
-  const loaderEvents: TurnEvent[] = [];
-  for await (const ev of runTurn(dynamicReq, mockLoaderProvider)) {
-    loaderEvents.push(ev);
+    mockDeferredProvider,
+  )) {
+    deferredEvents.push(ev);
   }
-  const toolResult = loaderEvents.find((e) => e.type === 'tool')?.tool?.result;
-  assertEquals(toolResult?.status, 'error');
+  const deferredTool = deferredEvents.find((e) => e.type === 'tool');
+  assertEquals(deferredTool?.tool?.phase, 'error');
+  assertStringIncludes(deferredTool?.tool?.failure?.message ?? '', 'not loaded');
 
-  // 2. Dynamic tool with no handler (default acceptance) on multi-step profile
-  registerProfile(
-    defineProfile({
-      id: 'dynamic_runner_bot',
-      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 3 },
-      inputs: { text: true },
-      outputs: { structured: null },
-      guardrails: { quota: { perDay: 10 } },
-    }),
-  );
-
+  // 2. Registered tool on multi-step profile executes and continues
   const noHandlerReq: TurnRequest = {
     profile: 'dynamic_runner_bot',
-    dynamicTools: [
-      {
-        name: 'stub_tool',
-        permissionTier: 'auto',
-        // no handler
-      },
-    ],
-    input: {
-      text: 'run stub',
-    },
+    tools: gateTools('stub_tool'),
+    input: { text: 'run stub' },
   };
   let callCount = 0;
   const noHandlerProvider: ModelProvider = {
@@ -109,16 +108,23 @@ Deno.test('runner internal helper branches: dynamic loaders, tool findings, step
   const textEv = stubEvents.find((e) => e.type === 'text');
   assertEquals(textEv?.text, 'finished');
 
-  // 3. Dynamic tool updating an existing declaration in mergeDynamicTools
+  // 3. Catalog registration is the source of truth for tool metadata
+  registerProfile(
+    defineProfile({
+      id: 'existing_tool_bot',
+      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 1 },
+      tools: { allow: ['existing_tool'] },
+      inputs: { text: true },
+      outputs: { structured: null },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
   const updateReq: TurnRequest = {
-    profile: 'chat',
-    dynamicTools: [{ name: 'existing_tool', description: 'v1' }],
-    dynamicToolLoader: () => [{ name: 'existing_tool', description: 'v2' }],
-    input: {
-      text: 'reload',
-    },
+    profile: 'existing_tool_bot',
+    tools: gateTools('existing_tool'),
+    input: { text: 'run existing' },
   };
-  const updateLoaderProvider: ModelProvider = {
+  const updateProvider: ModelProvider = {
     complete: () => {
       return (async function* () {
         yield {
@@ -130,7 +136,7 @@ Deno.test('runner internal helper branches: dynamic loaders, tool findings, step
       })();
     },
   };
-  for await (const _ev of runTurn(updateReq, updateLoaderProvider)) {
+  for await (const _ev of runTurn(updateReq, updateProvider)) {
     // drain
   }
 });
@@ -181,9 +187,9 @@ const fake: ModelProvider = { complete: fakeComplete };
 
 const LONG_FLASH = 40_000;
 
-function withTools(id: ProfileId, extra: CustomToolId[]) {
+function withTools(id: ProfileId, extra: ToolId[]) {
   const profile = getProfile(id);
-  return { ...profile, tools: { allow: [...profile.tools.allow, ...extra] } };
+  return withProfileTools(profile, extra);
 }
 
 Deno.test('every profile is oneshot', () => {
@@ -282,10 +288,10 @@ Deno.test('search xor maps drops maps', () => {
   assertEquals(generation.builtins, ['googleSearch']);
 });
 
-Deno.test('profile allowlist blocks unavailable builtins', () => {
+Deno.test('model builtInTools ceiling blocks unlisted builtins', () => {
   const { generation } = resolveTurn({
     profile: 'formatter',
-    tools: { urlContext: true, googleSearch: true },
+    tools: { codeExecution: true, googleSearch: true },
     input: { text: 'x' },
   });
   assertEquals(generation.builtins, ['googleSearch']);
@@ -294,14 +300,14 @@ Deno.test('profile allowlist blocks unavailable builtins', () => {
 Deno.test('tools stay off until the turn gates them', () => {
   const idle = resolveTurn({ profile: 'chat', input: { text: 'x' } });
   assertEquals(idle.generation.builtins, []);
-  assertEquals(idle.generation.custom, []);
+  assertEquals(idle.generation.tools.visible, []);
   const search = resolveTurn({
     profile: 'chat',
-    tools: { googleSearch: true, askUser: true },
+    tools: { googleSearch: true, ask_user: true },
     input: { text: 'x' },
   });
   assertEquals(search.generation.builtins, ['googleSearch']);
-  assertEquals(search.generation.custom, []);
+  assertEquals(search.generation.tools.visible.includes('ask_user'), false);
 });
 
 Deno.test('language slot picks structured schema', () => {
@@ -317,43 +323,40 @@ Deno.test('language slot picks structured schema', () => {
   assertEquals(tsx.generation.structured, 'tsxTurn');
 });
 
-Deno.test('disallowed tool cannot run', () => {
-  assertThrows(
-    () =>
-      executeTool(getProfile('pinned'), 'askUser', {
-        kind: 'text',
-        prompt: 'q',
-      }),
-    TheorumError,
-  );
-});
-
-Deno.test('askUser pauses when allowed', () => {
-  const env = executeTool(withTools('chat', ['askUser']), 'askUser', {
-    kind: 'text',
-    prompt: 'which?',
+Deno.test('disallowed tool cannot run', async () => {
+  const events = await invokeRegisteredTool({
+    profile: 'pinned',
+    name: 'ask_user',
+    input: { kind: 'text', prompt: 'q' },
   });
-  assertEquals(env.status, 'pause');
+  const toolEv = events.find((e) => e.type === 'tool');
+  assertEquals(toolEv?.tool?.phase, 'error');
 });
 
-Deno.test('ui invoke askUser is denied until allowed', async () => {
-  const events = await collect(
-    runTurn(
-      {
-        profile: 'chat',
-        input: { text: 'x' },
-        toolInvoke: {
-          name: 'askUser',
-          arguments: { kind: 'text', prompt: 'q' },
-        },
-      },
-      fake,
-    ),
-  );
-  assertEquals(
-    events.some((e) => e.type === 'error'),
-    true,
-  );
+Deno.test('ask_user pauses when allowed', async () => {
+  registerProfile({
+    ...withTools('chat', ['ask_user']),
+    id: 'ask_user_bot',
+  });
+  const events = await invokeRegisteredTool({
+    profile: 'ask_user_bot',
+    name: 'ask_user',
+    input: { kind: 'text', prompt: 'which?' },
+    tools: gateTools('ask_user'),
+  });
+  const toolEv = events.find((e) => e.type === 'tool' && e.tool?.phase === 'pause');
+  assertEquals(Boolean(toolEv), true);
+});
+
+Deno.test('invokeTool ask_user is denied until allowed', async () => {
+  const events = await invokeRegisteredTool({
+    profile: 'pinned',
+    name: 'ask_user',
+    input: { kind: 'text', prompt: 'q' },
+  });
+  const toolEv = events.findLast((e) => e.type === 'tool' && e.tool?.name === 'ask_user');
+  assertEquals(toolEv?.tool?.phase, 'error');
+  assertEquals(toolEv?.tool?.failure?.code, 'not_allowed');
 });
 
 Deno.test('runTurn oneshot yields text structured done', async () => {
@@ -386,18 +389,35 @@ Deno.test('unknown profile select is rejected', () => {
   );
 });
 
-Deno.test('askUser validates kind and prompt', () => {
-  const profile = withTools('chat', ['askUser']);
-  assertEquals(executeTool(profile, 'askUser', { kind: 'nope', prompt: 'q' }).status, 'error');
-  assertEquals(executeTool(profile, 'askUser', { kind: 'text', prompt: '  ' }).status, 'error');
+Deno.test('ask_user validates kind and prompt', async () => {
+  registerProfile({ ...withTools('chat', ['ask_user']), id: 'ask_user_validate_bot' });
+  const badKind = await invokeRegisteredTool({
+    profile: 'ask_user_validate_bot',
+    name: 'ask_user',
+    input: { kind: 'nope', prompt: 'q' },
+    tools: gateTools('ask_user'),
+  });
+  assertEquals(badKind.findLast((e) => e.type === 'tool')?.tool?.phase, 'error');
+  const badPrompt = await invokeRegisteredTool({
+    profile: 'ask_user_validate_bot',
+    name: 'ask_user',
+    input: { kind: 'text', prompt: '  ' },
+    tools: gateTools('ask_user'),
+  });
+  assertEquals(badPrompt.findLast((e) => e.type === 'tool')?.tool?.phase, 'error');
 });
 
-Deno.test('non-kernel custom tools require dynamic handlers', () => {
-  const result = executeTool(withTools('chat', ['hostTool']), 'hostTool', {
-    n: 1,
+Deno.test('unregistered custom tools fail at execution', async () => {
+  registerProfile({ ...withTools('chat', ['host_tool']), id: 'host_tool_bot' });
+  const events = await invokeRegisteredTool({
+    profile: 'host_tool_bot',
+    name: 'host_tool',
+    input: { n: 1 },
+    tools: gateTools('host_tool'),
   });
-  assertEquals(result.status, 'error');
-  assertStringIncludes(result.finding ?? '', 'dynamic tool handler');
+  const toolEv = events.find((e) => e.type === 'tool');
+  assertEquals(toolEv?.tool?.phase, 'error');
+  assertStringIncludes(toolEv?.tool?.failure?.message ?? '', 'not registered');
 });
 
 Deno.test('provider tool call is dispatched', async () => {
@@ -405,13 +425,15 @@ Deno.test('provider tool call is dispatched', async () => {
     await Promise.resolve();
     yield {
       type: 'tool',
-      tool: { name: 'askUser', arguments: { kind: 'text', prompt: 'q' } },
+      tool: { name: 'ask_user', arguments: { kind: 'text', prompt: 'q' } },
     };
   }
   const provider: ModelProvider = { complete };
   const events = await collect(runTurn({ profile: 'chat', input: { text: 'flow' } }, provider));
   assertEquals(
-    events.some((e) => e.type === 'error' && e.error === PUBLIC_ACTION),
+    events.some(
+      (e) => e.type === 'tool' && e.tool?.name === 'ask_user' && e.tool?.phase === 'error',
+    ),
     true,
   );
   assertEquals(events.at(-1)?.type, 'done');
@@ -874,15 +896,21 @@ Deno.test('runTurn passes host dynamic system prompt combined with canary', asyn
 });
 
 Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', async () => {
-  let callCount = 0;
-  const historyLog: import('../../src/kernel/types.ts').TurnHistoryMessage[][] = [];
+  registerProfile(
+    defineProfile({
+      id: 'multistep_bot',
+      model: { ...modelAllow('gemini35FlashLite'), maxSteps: 1 },
+      tools: { allow: ['get_record_status'] },
+      inputs: { text: true },
+      guardrails: { quota: { perDay: 100 } },
+    }),
+  );
 
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
-    async *complete(req) {
+  let callCount = 0;
+  const mockProvider: ModelProvider = {
+    async *complete() {
       callCount++;
-      historyLog.push([...(req.history ?? [])]);
       if (callCount === 1) {
-        // Step 1: Model requests a dynamic tool call
         yield {
           type: 'tool',
           tool: {
@@ -892,7 +920,6 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
           },
         };
       } else {
-        // Step 2: Model receives tool output and gives final text
         yield {
           type: 'text',
           text: 'The Monstera is healthy and needs water in 2 days.',
@@ -901,36 +928,11 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
     },
   };
 
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'get_record_status',
-      handler: (args) => {
-        assertEquals(args.recordId, 'record-1');
-        return {
-          status: 'ok',
-          finding: 'Moisture is 45%, last watered 4 days ago.',
-        };
-      },
-    },
-  ];
-
-  // Temporary register a multi-step profile
-  import('../../src/kernel/registry/profiles.ts').then(({ registerProfile, defineProfile }) => {
-    registerProfile(
-      defineProfile({
-        id: 'multistep_bot',
-        model: { ...modelAllow('gemini35FlashLite'), maxSteps: 3 },
-        inputs: { text: true },
-        guardrails: { quota: { perDay: 100 } },
-      }),
-    );
-  });
-
-  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  const events: TurnEvent[] = [];
   for await (const ev of runTurn(
     {
-      profile: 'chat', // chat has maxSteps: 1 by default, let's override with dynamicTools and custom profile
-      dynamicTools,
+      profile: 'multistep_bot',
+      tools: gateTools('get_record_status'),
       input: { text: 'How is my record?' },
     },
     mockProvider,
@@ -938,28 +940,30 @@ Deno.test('runTurn executes autonomous multi-step tool loop when maxSteps > 1', 
     events.push(ev);
   }
 
-  // With chat profile (maxSteps = 1), it should execute the tool, emit the tool event with result, and halt (callCount = 1)
   assertEquals(callCount, 1);
-  assertEquals(events[0]?.type, 'tool');
-  assertEquals(events[0]?.tool?.result?.status, 'ok');
-  assertEquals(events[0]?.tool?.result?.finding, 'Moisture is 45%, last watered 4 days ago.');
+  const toolEv = events.find((e) => e.type === 'tool' && e.tool?.phase === 'complete');
+  assertEquals(Boolean(toolEv), true);
+  assertEquals(
+    (toolEv?.tool?.output as { finding?: string })?.finding,
+    'Moisture is 45%, last watered 4 days ago.',
+  );
 });
 
 Deno.test('runTurn autonomous loop re-calls provider until text emitted or step ceiling reached', async () => {
-  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
   registerProfile(
     defineProfile({
       id: 'host_assistant',
       model: { ...modelAllow('gemini35FlashLite'), maxSteps: 3 },
+      tools: { allow: ['fetch_sensor'] },
       inputs: { text: true },
       guardrails: { quota: { perDay: 100 } },
     }),
   );
 
   let callCount = 0;
-  const requestLog: import('../../src/kernel/types.ts').ProviderCompleteRequest[] = [];
+  const requestLog: ProviderCompleteRequest[] = [];
 
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+  const mockProvider: ModelProvider = {
     async *complete(req) {
       callCount++;
       requestLog.push(req);
@@ -986,21 +990,11 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
     },
   };
 
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'fetch_sensor',
-      handler: () => ({
-        status: 'ok',
-        finding: 'Sensor raw value: 22%',
-      }),
-    },
-  ];
-
-  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  const events: TurnEvent[] = [];
   for await (const ev of runTurn(
     {
       profile: 'host_assistant',
-      dynamicTools,
+      tools: gateTools('fetch_sensor'),
       input: { text: 'Check soil' },
     },
     mockProvider,
@@ -1022,36 +1016,31 @@ Deno.test('runTurn autonomous loop re-calls provider until text emitted or step 
     true,
   );
 
-  // Interactions continuation uses function_result input + previous_interaction_id.
   const step2 = requestLog[1];
   assertEquals(step2?.previousInteractionId, 'v1_sensor');
-  assertEquals(step2?.interactionOnlyInput, [
-    {
-      type: 'function_result',
-      name: 'fetch_sensor',
-      call_id: 'call_sensor_1',
-      result: [{ type: 'text', text: 'Sensor raw value: 22%' }],
-    },
-  ]);
+  const continuationText = String(
+    (step2?.interactionOnlyInput?.[0] as { result?: Array<{ text?: string }> })?.result?.[0]?.text,
+  );
+  assertStringIncludes(continuationText, 'Sensor raw value: 22%');
   assertEquals(step2?.history, []);
   assertEquals(step2?.input, []);
 });
 
 Deno.test('runTurn sends every Interactions function_result in one continuation', async () => {
-  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
   registerProfile(
     defineProfile({
       id: 'host_assistant_multi_fn',
       model: { ...modelAllow('gemini35FlashLite'), maxSteps: 3 },
+      tools: { allow: ['fetch_sensor', 'lookup_order'] },
       inputs: { text: true },
       guardrails: { quota: { perDay: 100 } },
     }),
   );
 
   let callCount = 0;
-  const requestLog: import('../../src/kernel/types.ts').ProviderCompleteRequest[] = [];
+  const requestLog: ProviderCompleteRequest[] = [];
 
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+  const mockProvider: ModelProvider = {
     async *complete(req) {
       callCount++;
       requestLog.push(req);
@@ -1078,10 +1067,7 @@ Deno.test('runTurn sends every Interactions function_result in one continuation'
   for await (const _ev of runTurn(
     {
       profile: 'host_assistant_multi_fn',
-      dynamicTools: [
-        { name: 'fetch_sensor', handler: () => ({ status: 'ok', finding: '22%' }) },
-        { name: 'lookup_order', handler: () => ({ status: 'ok', finding: 'shipped' }) },
-      ],
+      tools: gateTools('fetch_sensor', 'lookup_order'),
       input: { text: 'Check both' },
     },
     mockProvider,
@@ -1090,28 +1076,24 @@ Deno.test('runTurn sends every Interactions function_result in one continuation'
   }
 
   assertEquals(callCount, 2);
-  assertEquals(requestLog[1]?.interactionOnlyInput, [
-    {
-      type: 'function_result',
-      name: 'fetch_sensor',
-      call_id: 'call_a',
-      result: [{ type: 'text', text: '22%' }],
-    },
-    {
-      type: 'function_result',
-      name: 'lookup_order',
-      call_id: 'call_b',
-      result: [{ type: 'text', text: 'shipped' }],
-    },
-  ]);
+  const continuation = requestLog[1]?.interactionOnlyInput ?? [];
+  assertEquals(continuation.length, 2);
+  assertStringIncludes(
+    String((continuation[0] as { result?: Array<{ text?: string }> }).result?.[0]?.text),
+    '22%',
+  );
+  assertStringIncludes(
+    String((continuation[1] as { result?: Array<{ text?: string }> }).result?.[0]?.text),
+    'shipped',
+  );
 });
 
 Deno.test('runTurn falls back to function_result history when Interactions id is missing', async () => {
-  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
   registerProfile(
     defineProfile({
       id: 'host_assistant_history_fallback',
       model: { ...modelAllow('gemini35FlashLite'), maxSteps: 2 },
+      tools: { allow: ['fetch_sensor'] },
       inputs: { text: true },
       guardrails: { quota: { perDay: 100 } },
     }),
@@ -1120,7 +1102,7 @@ Deno.test('runTurn falls back to function_result history when Interactions id is
   let callCount = 0;
   const historyLog: import('../../src/kernel/types.ts').TurnHistoryMessage[][] = [];
 
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+  const mockProvider: ModelProvider = {
     async *complete(req) {
       callCount++;
       historyLog.push([...(req.history ?? [])]);
@@ -1138,7 +1120,7 @@ Deno.test('runTurn falls back to function_result history when Interactions id is
   for await (const _ev of runTurn(
     {
       profile: 'host_assistant_history_fallback',
-      dynamicTools: [{ name: 'fetch_sensor', handler: () => ({ status: 'ok', finding: '22%' }) }],
+      tools: gateTools('fetch_sensor'),
       input: { text: 'Check soil' },
     },
     mockProvider,
@@ -1270,12 +1252,12 @@ Deno.test('outputs.streaming.streamThoughts=false filters out thought events fro
   );
 });
 
-Deno.test('dynamic tool exception is safely caught and converted to error finding', async () => {
-  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
+Deno.test('registered tool exception is safely caught and converted to error finding', async () => {
   registerProfile(
     defineProfile({
       id: 'fault_tolerant_bot',
       model: { ...modelAllow('gemini35FlashLite'), maxSteps: 2 },
+      tools: { allow: ['crashing_tool'] },
       inputs: { text: true },
       guardrails: { quota: { perDay: 100 } },
     }),
@@ -1283,7 +1265,7 @@ Deno.test('dynamic tool exception is safely caught and converted to error findin
 
   let callCount = 0;
   let receivedToolError = '';
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+  const mockProvider: ModelProvider = {
     async *complete(req) {
       callCount++;
       if (callCount === 1) {
@@ -1309,20 +1291,11 @@ Deno.test('dynamic tool exception is safely caught and converted to error findin
     },
   };
 
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'crashing_tool',
-      handler: () => {
-        throw new Error('Database connection timed out');
-      },
-    },
-  ];
-
-  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  const events: TurnEvent[] = [];
   for await (const ev of runTurn(
     {
       profile: 'fault_tolerant_bot',
-      dynamicTools,
+      tools: gateTools('crashing_tool'),
       input: { text: 'Run crashing tool' },
     },
     mockProvider,
@@ -1332,7 +1305,7 @@ Deno.test('dynamic tool exception is safely caught and converted to error findin
 
   assertEquals(callCount, 2);
   assertEquals(
-    events.some((e) => e.type === 'tool' && e.tool?.result?.status === 'error'),
+    events.some((e) => e.type === 'tool' && e.tool?.phase === 'error'),
     true,
   );
   assertEquals(receivedToolError.includes('Database connection timed out'), true);
@@ -1343,21 +1316,20 @@ Deno.test('dynamic tool exception is safely caught and converted to error findin
 });
 
 Deno.test('autonomous loop strictly enforces maxSteps ceiling when tool requests repeat endlessly', async () => {
-  const { defineProfile, registerProfile } = await import('../../src/kernel/registry/profiles.ts');
   registerProfile(
     defineProfile({
       id: 'loop_capped_bot',
       model: { ...modelAllow('gemini35FlashLite'), maxSteps: 2 },
+      tools: { allow: ['ping_tool'] },
       inputs: { text: true },
       guardrails: { quota: { perDay: 100 } },
     }),
   );
 
   let callCount = 0;
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+  const mockProvider: ModelProvider = {
     async *complete() {
       callCount++;
-      // Endless loop requesting tool call on every step
       yield {
         type: 'tool',
         tool: {
@@ -1369,18 +1341,11 @@ Deno.test('autonomous loop strictly enforces maxSteps ceiling when tool requests
     },
   };
 
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'ping_tool',
-      handler: (args) => ({ status: 'ok', finding: `pong ${args.step}` }),
-    },
-  ];
-
-  const events: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  const events: TurnEvent[] = [];
   for await (const ev of runTurn(
     {
       profile: 'loop_capped_bot',
-      dynamicTools,
+      tools: gateTools('ping_tool'),
       input: { text: 'Loop test' },
     },
     mockProvider,
@@ -1388,12 +1353,11 @@ Deno.test('autonomous loop strictly enforces maxSteps ceiling when tool requests
     events.push(ev);
   }
 
-  // maxSteps: 2 should cap total provider calls to exactly 2
   assertEquals(callCount, 2);
   assertEquals(events.at(-1)?.type, 'done');
 });
 
-Deno.test('dynamic tool enforces permissionTier session_consent pause unless granted', async () => {
+Deno.test('registered tool enforces session_consent pause unless granted', async () => {
   registerProfile({
     id: 'consent_tool_bot',
     identity: { handle: 'consent_bot', chat: true },
@@ -1404,13 +1368,13 @@ Deno.test('dynamic tool enforces permissionTier session_consent pause unless gra
       thinking: 'minimal',
       maxSteps: 2,
     },
-    tools: { allow: [] },
+    tools: { allow: ['delete_resource'] },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 50 } },
   });
 
-  const mockProvider: import('../../src/kernel/types.ts').ModelProvider = {
+  const mockProvider: ModelProvider = {
     async *complete() {
       yield {
         type: 'tool',
@@ -1423,21 +1387,11 @@ Deno.test('dynamic tool enforces permissionTier session_consent pause unless gra
     },
   };
 
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'delete_resource',
-      loadTier: 'T1',
-      permissionTier: 'session_consent',
-      handler: (args) => ({ status: 'ok', finding: `deleted ${args.id}` }),
-    },
-  ];
-
-  // Turn 1: No session permission granted -> returns pause status
-  const events1: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  const events1: TurnEvent[] = [];
   for await (const ev of runTurn(
     {
       profile: 'consent_tool_bot',
-      dynamicTools,
+      tools: gateTools('delete_resource'),
       input: { text: 'Delete resource 123' },
     },
     mockProvider,
@@ -1445,20 +1399,16 @@ Deno.test('dynamic tool enforces permissionTier session_consent pause unless gra
     events1.push(ev);
   }
 
-  const toolEv1 = events1.find((e) => e.type === 'tool');
-  assertEquals(toolEv1?.tool?.result?.status, 'pause');
-  assertStringIncludes(
-    toolEv1?.tool?.result?.finding ?? '',
-    'requires session_consent authorization',
-  );
+  const toolEv1 = events1.findLast((e) => e.type === 'tool' && e.tool?.name === 'delete_resource');
+  assertEquals(toolEv1?.tool?.phase, 'pause');
+  assertEquals(toolEv1?.tool?.pause?.kind, 'permission');
 
-  // Turn 2: With session permission granted -> returns ok status
-  const events2: import('../../src/kernel/types.ts').TurnEvent[] = [];
+  const events2: TurnEvent[] = [];
   for await (const ev of runTurn(
     {
       profile: 'consent_tool_bot',
       sessionPermissions: ['delete_resource'],
-      dynamicTools,
+      tools: gateTools('delete_resource'),
       input: { text: 'Delete resource 123' },
     },
     mockProvider,
@@ -1466,12 +1416,12 @@ Deno.test('dynamic tool enforces permissionTier session_consent pause unless gra
     events2.push(ev);
   }
 
-  const toolEv2 = events2.find((e) => e.type === 'tool');
-  assertEquals(toolEv2?.tool?.result?.status, 'ok');
-  assertEquals(toolEv2?.tool?.result?.finding, 'deleted res_123');
+  const toolEv2 = events2.find((e) => e.type === 'tool' && e.tool?.phase === 'complete');
+  assertEquals(Boolean(toolEv2), true);
+  assertEquals((toolEv2?.tool?.output as { finding?: string })?.finding, 'deleted res_123');
 });
 
-Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', async () => {
+Deno.test('loader promotes deferred tools and continues the same turn loop', async () => {
   registerProfile({
     id: 'loader_bot',
     identity: { handle: 'loader_bot', chat: true },
@@ -1482,7 +1432,7 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
       thinking: 'minimal',
       maxSteps: 3,
     },
-    tools: { allow: [] },
+    tools: { allow: ['load_tools', 'record_lookup'] },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 50 } },
@@ -1490,10 +1440,10 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
 
   let callCount = 0;
   const seenToolLists: string[][] = [];
-  const provider: import('../../src/kernel/types.ts').ModelProvider = {
+  const provider: ModelProvider = {
     async *complete(req) {
       callCount++;
-      seenToolLists.push((req.dynamicTools ?? []).map((tool) => tool.name));
+      seenToolLists.push((req.wireTools ?? []).map((tool) => tool.name));
       if (callCount === 1) {
         yield {
           type: 'tool',
@@ -1521,20 +1471,7 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
     runTurn(
       {
         profile: 'loader_bot',
-        dynamicTools: [
-          {
-            name: 'load_tools',
-            loadTier: 'T0',
-            loadsDynamicTools: true,
-          },
-        ],
-        dynamicToolLoader: () => [
-          {
-            name: 'record_lookup',
-            loadTier: 'T2',
-            handler: (args) => ({ status: 'ok', finding: `found ${args.q}` }),
-          },
-        ],
+        tools: gateTools('load_tools', 'record_lookup'),
         input: { text: 'load then lookup' },
       },
       provider,
@@ -1545,18 +1482,19 @@ Deno.test('dynamic loader injects T2 schemas and continues the same turn loop', 
   assertEquals(seenToolLists[0], ['load_tools']);
   assertEquals(seenToolLists[1], ['load_tools', 'record_lookup']);
   assertEquals(
-    events.some((event) => event.tool?.result?.data?.loadedTools),
+    events.some((event) => {
+      const loaded = event.tool?.output as { loaded?: string[] } | undefined;
+      return event.tool?.name === 'load_tools' && Array.isArray(loaded?.loaded);
+    }),
     true,
   );
   assertEquals(
-    events.some(
-      (event) => event.tool?.name === 'record_lookup' && event.tool.result?.status === 'ok',
-    ),
+    events.some((event) => event.tool?.name === 'record_lookup' && event.tool.phase === 'complete'),
     true,
   );
 });
 
-Deno.test('dynamic loader does not inject T2 schemas before required permission is granted', async () => {
+Deno.test('loader does not promote deferred tools before required permission is granted', async () => {
   registerProfile({
     id: 'loader_permission_bot',
     identity: { handle: 'loader_permission_bot', chat: true },
@@ -1567,22 +1505,21 @@ Deno.test('dynamic loader does not inject T2 schemas before required permission 
       thinking: 'minimal',
       maxSteps: 2,
     },
-    tools: { allow: [] },
+    tools: { allow: ['load_tools_consent', 'record_lookup'] },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 50 } },
   });
 
-  let loaderCalled = false;
   const seenToolLists: string[][] = [];
   const provider: ModelProvider = {
     async *complete(req) {
-      seenToolLists.push((req.dynamicTools ?? []).map((tool) => tool.name));
+      seenToolLists.push((req.wireTools ?? []).map((tool) => tool.name));
       if (seenToolLists.length === 1) {
         yield {
           type: 'tool',
           tool: {
-            name: 'load_tools',
+            name: 'load_tools_consent',
             arguments: { names: ['record_lookup'] },
             id: 'call_load',
           },
@@ -1597,30 +1534,18 @@ Deno.test('dynamic loader does not inject T2 schemas before required permission 
     runTurn(
       {
         profile: 'loader_permission_bot',
-        dynamicTools: [
-          {
-            name: 'load_tools',
-            loadTier: 'T0',
-            permissionTier: 'session_consent',
-            loadsDynamicTools: true,
-          },
-        ],
-        dynamicToolLoader: () => {
-          loaderCalled = true;
-          return [{ name: 'record_lookup', loadTier: 'T2' }];
-        },
+        tools: gateTools('load_tools_consent', 'record_lookup'),
         input: { text: 'try loading without consent' },
       },
       provider,
     ),
   );
 
-  assertEquals(loaderCalled, false);
-  assertEquals(seenToolLists, [['load_tools'], ['load_tools']]);
-  const loadEvent = events.find((event) => event.tool?.name === 'load_tools');
-  assertEquals(loadEvent?.tool?.result?.status, 'pause');
+  assertEquals(seenToolLists, [['load_tools_consent']]);
+  const loadEvent = events.findLast((event) => event.tool?.name === 'load_tools_consent');
+  assertEquals(loadEvent?.tool?.phase, 'pause');
   assertEquals(
-    events.some((event) => event.tool?.result?.data?.loadedTools),
+    events.some((event) => event.tool?.name === 'record_lookup'),
     false,
   );
 });
@@ -1886,7 +1811,7 @@ Deno.test('guardrails.egress withholds media until prose clears', async () => {
   );
 });
 
-function createCanExecBotProfile(id: string): void {
+function createCanExecBotProfile(id: string, toolName: string): void {
   registerProfile({
     id,
     identity: { handle: id, chat: true },
@@ -1897,7 +1822,7 @@ function createCanExecBotProfile(id: string): void {
       thinking: 'minimal',
       maxSteps: 2,
     },
-    tools: { allow: [] },
+    tools: { allow: [toolName] },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 50 } },
@@ -1915,61 +1840,36 @@ function createToolProvider(toolName: string): import('../../src/kernel/types.ts
   };
 }
 
-Deno.test('dynamic tool canExecute returning false yields unauthorized error', async () => {
-  createCanExecBotProfile('can_exec_bot_1');
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    { name: 'denied_tool', canExecute: () => false },
-  ];
+Deno.test('registered tool canExecute returning false yields unauthorized error', async () => {
+  createCanExecBotProfile('can_exec_bot_1', 'denied_tool');
   const events = await collect(
     runTurn(
-      { profile: 'can_exec_bot_1', dynamicTools, input: { text: 'test' } },
+      {
+        profile: 'can_exec_bot_1',
+        tools: gateTools('denied_tool'),
+        input: { text: 'test' },
+      },
       createToolProvider('denied_tool'),
     ),
   );
-  const toolEv = events.find((e) => e.type === 'tool');
-  assertEquals(toolEv?.tool?.result?.status, 'error');
-  assertStringIncludes(toolEv?.tool?.result?.finding ?? '', 'execution not authorized');
+  const toolEv = events.findLast((e) => e.type === 'tool' && e.tool?.name === 'denied_tool');
+  assertEquals(toolEv?.tool?.phase, 'error');
+  assertStringIncludes(toolEv?.tool?.failure?.message ?? '', 'not authorized');
 });
 
-Deno.test('dynamic tool canExecute returning envelope yields custom status', async () => {
-  createCanExecBotProfile('can_exec_bot_2');
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'custom_auth_tool',
-      canExecute: () => ({
-        status: 'pause',
-        finding: 'custom auth challenge',
-      }),
-    },
-  ];
+Deno.test('registered tool canExecute throwing error is caught safely', async () => {
+  createCanExecBotProfile('can_exec_bot_3', 'throwing_auth_tool');
   const events = await collect(
     runTurn(
-      { profile: 'can_exec_bot_2', dynamicTools, input: { text: 'test' } },
-      createToolProvider('custom_auth_tool'),
-    ),
-  );
-  const toolEv = events.find((e) => e.type === 'tool');
-  assertEquals(toolEv?.tool?.result?.status, 'pause');
-  assertEquals(toolEv?.tool?.result?.finding, 'custom auth challenge');
-});
-
-Deno.test('dynamic tool canExecute throwing error is caught safely', async () => {
-  createCanExecBotProfile('can_exec_bot_3');
-  const dynamicTools: import('../../src/kernel/types.ts').DynamicToolDeclaration[] = [
-    {
-      name: 'throwing_auth_tool',
-      canExecute: () => {
-        throw new Error('auth network failure');
+      {
+        profile: 'can_exec_bot_3',
+        tools: gateTools('throwing_auth_tool'),
+        input: { text: 'test' },
       },
-    },
-  ];
-  const events = await collect(
-    runTurn(
-      { profile: 'can_exec_bot_3', dynamicTools, input: { text: 'test' } },
       createToolProvider('throwing_auth_tool'),
     ),
   );
-  const toolEv = events.find((e) => e.type === 'tool');
-  assertEquals(toolEv?.tool?.result?.status, 'error');
-  assertStringIncludes(toolEv?.tool?.result?.finding ?? '', 'Authorization error for');
+  const toolEv = events.findLast((e) => e.type === 'tool' && e.tool?.name === 'throwing_auth_tool');
+  assertEquals(toolEv?.tool?.phase, 'error');
+  assertStringIncludes(toolEv?.tool?.failure?.message ?? '', 'Authorization failed for');
 });

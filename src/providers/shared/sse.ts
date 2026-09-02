@@ -57,11 +57,10 @@ function takeSsePayloads(
 }
 
 /**
- * Generic async SSE stream parser built on `takeSsePayloads`.
- * Yields parsed JSON objects from `data:` lines; silently skips malformed
- * payloads and terminates on `[DONE]`.
+ * Async SSE stream chunk reader built on `takeSsePayloads`.
+ * Yields every raw payload record (including `sse_done` and `sse_unparsed`).
  */
-async function* parseSseStream(
+async function* readSseChunks(
   body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<Record<string, unknown>> {
   const reader = body.getReader();
@@ -76,13 +75,26 @@ async function* parseSseStream(
     buffer = result.rest;
     pendingEvent = result.pendingEvent;
     for (const payload of result.payloads) {
-      if (payload.eventType === 'sse_done') return;
-      if (payload.eventType === 'sse_unparsed') continue;
       yield payload;
     }
   }
 }
 
-export { parseSseStream, takeSsePayloads };
+/**
+ * Generic async SSE stream parser built on `readSseChunks`.
+ * Yields parsed JSON objects from `data:` lines; silently skips malformed
+ * payloads and terminates on `[DONE]`.
+ */
+async function* parseSseStream(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<Record<string, unknown>> {
+  for await (const payload of readSseChunks(body)) {
+    if (payload.eventType === 'sse_done') return;
+    if (payload.eventType === 'sse_unparsed') continue;
+    yield payload;
+  }
+}
 
-exposeForTests('sse', { asObject, dataRecord, takeSsePayloads, parseSseStream });
+export { parseSseStream, readSseChunks, takeSsePayloads };
+
+exposeForTests('sse', { asObject, dataRecord, parseSseStream, readSseChunks, takeSsePayloads });

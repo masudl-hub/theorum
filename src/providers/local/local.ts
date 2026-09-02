@@ -77,7 +77,7 @@ function buildBody(req: ProviderCompleteRequest): Record<string, unknown> {
     temperature: req.temperature,
     max_tokens: req.maxOutputTokens,
   };
-  const tools = wireTools(req.dynamicTools);
+  const tools = wireTools(req.wireTools);
   if (tools) body.tools = tools;
   return body;
 }

@@ -5,8 +5,8 @@ import { wrapUserData } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
-import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions.ts';
-import { CHAT_MEDIA_LIMITS, modelAllow } from '../fixtures/models.ts';
+import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
+import { CHAT_MEDIA_LIMITS, HOST_MODELS, modelAllow } from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -193,8 +193,16 @@ Deno.test('media validations reject missing image pins, structured mixing, groun
   registerProfile(
     defineProfile({
       id: 'image_with_search',
-      model: { ...modelAllow('gemini31FlashLiteImage') },
-      tools: { allow: ['googleSearch'] },
+      model: {
+        allow: ['gemini31FlashLiteImage'],
+        config: {
+          gemini31FlashLiteImage: {
+            ...HOST_MODELS.gemini31FlashLiteImage,
+            builtInTools: ['googleSearch'],
+          },
+        },
+      },
+      tools: { allow: [] },
       inputs: { text: true },
       outputs: {
         structured: null,

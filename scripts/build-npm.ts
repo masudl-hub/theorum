@@ -12,6 +12,7 @@ await build({
     { name: './providers', path: './src/providers/mod.ts' },
     { name: './providers/local', path: './src/providers/local/mod.ts' },
     { name: './guardrails', path: './src/guardrails/mod.ts' },
+    { name: './guardrails/testing', path: './src/guardrails/testing.ts' },
     { name: './observability', path: './src/observability/mod.ts' },
     { name: './host', path: './src/host/mod.ts' },
     { name: './cli', path: './src/cli/index.ts' },
@@ -39,7 +40,7 @@ await build({
     name: 'theorum',
     version,
     description:
-      'A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.',
+      'A flat TypeScript agent kernel for typed profiles, deterministic turn execution, registered tools, provider adapters, guardrails, and host-injected traces.',
     license: 'MIT',
     type: 'module',
     keywords: [
@@ -54,6 +55,9 @@ await build({
       'gemini',
     ],
     sideEffects: false,
+    peerDependencies: {
+      zod: '^3.24.0',
+    },
     repository: {
       type: 'git',
       url: 'https://github.com/masudl-hub/theorum',

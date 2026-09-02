@@ -10,7 +10,8 @@ detectors, sanitizers, public error mapping, and optional per-day quota slots.
 | --- | --- |
 | Import | `theorum/guardrails` / `jsr:@theorum/core/guardrails` |
 | Module | `src/guardrails/mod.ts` |
-| Also on | Root `theorum` re-exports common error/sanitize/quota helpers |
+| Testing | `theorum/guardrails/testing` → `src/guardrails/testing.ts` (corpus / fuzz only) |
+| Also on | Root `theorum` re-exports common error/sanitize/quota/canary helpers |
 
 ## Ownership
 
@@ -22,8 +23,61 @@ Owns every module under `src/guardrails/`.
 | `sanitize.ts` | Turn + text sanitization |
 | `injection.ts` | Prompt-injection span patterns |
 | `sensitive.ts` | Credential / PII span patterns |
+| `canary.ts` | Per-turn canary mint/bind, stream gate, leak scan |
+| `canary-gate.ts` | Stateful Live batch canary gate |
+| `live-outbound-gate.ts` | Live outbound canary + egress holdback |
+| `egress.ts` | `standardEgressEnforce` bundled outbound policy |
+| `corpus/` | Adversarial bank (live attacks, inbound fuzz, canary egress catalog) |
+| `testing.ts` | Test-only re-exports (`theorum/guardrails/testing`) |
 | `normalize.ts` | Detection normalization |
 | `quota.ts` | In-memory daily slots for HTTP hosts |
+
+Kernel re-exports (`src/kernel/engine/boundary.ts`, etc.) point here for backward
+compatible import paths.
+
+## Canary
+
+| API | Role |
+| --- | --- |
+| `mintCanary` | Generate per-turn `theo-` + 32 hex token |
+| `bindCanary` | Append canary note to system prompt |
+| `wrapUserData` | Fence untrusted user text in `<user_data>` |
+| `createCanaryStreamGate` | Rolling holdback for split-token streaming |
+| `scanTextForCanaryLeak` | Literal + base64 + spaced-hex detection |
+| `eventHasCanary` | Scan any `TurnEvent` wire shape |
+| `createCanaryGateSession` / `filterCanaryGatedEvents` | Live batch path |
+
+## Egress
+
+Hosts may supply `guardrails.egress.enforce` or use the bundled helper:
+
+```ts
+import { standardEgressEnforce } from 'theorum/guardrails';
+
+guardrails: {
+  egress: { enforce: standardEgressEnforce, onBlock: 'refuse_to_user' },
+}
+```
+
+`standardEgressEnforce` blocks canary leaks, sensitive echoes, system-boundary
+markers, and injection-pattern echoes in assistant text.
+
+## Adversarial testing
+
+Import corpus helpers from **`theorum/guardrails/testing`** (not the production guardrails entry).
+
+| API / task | Role |
+| --- | --- |
+| `inboundFuzzPayloads` | Corpus entries for inbound sanitize |
+| `runInboundGuardrailFuzz` | Run fuzz programmatically; `false` on miss |
+| `buildLiveAttacks` | Live red-team cases from same corpus |
+| `buildCanaryEgressAttacks` | Synthetic canary egress leak attempts |
+| `deno task fuzz` | CLI inbound fuzz; exit `1` on expected miss |
+| `deno task fuzz-canary` | CLI canary egress fuzz (stream + Live gates) |
+| `deno task test:guardrails` | Unit tests + inbound + canary fuzz (no live API) |
+| `deno task verify:guardrails-live` | Live provider red-team (`scripts/verify-guardrails-live.ts`) |
+
+Extend attack cases under **`src/guardrails/corpus/`** only (`strings.ts` / `secrets.ts` for shared literals).
 
 ## Public errors
 
@@ -37,6 +91,7 @@ streams).
 | `canary leaked` / egress violations | `PUBLIC_CANARY` |
 | Abort | `PUBLIC_CANCELLED` |
 | Tool / MIME / size denials | `PUBLIC_ACTION` / `PUBLIC_FILE_*` |
+| Tool not registered / not enabled on turn / not allowed on profile | `PUBLIC_ACTION` |
 
 `describeError` returns structured detail for logs. `throwIfAborted(signal)`
 rethrows `AbortError` when a turn should stop early.
@@ -52,7 +107,7 @@ Driven by profile `guardrails.sanitizeInput` and `guardrails.redactSensitive`
 | API | Role |
 | --- | --- |
 | `sanitizeText` | Strip injection + sensitive spans from one string |
-| `sanitizeTurnRequest` | Full turn: text, slots, dynamic tool args, blobs |
+| `sanitizeTurnRequest` | Full turn: text, slots, tool arguments, blobs |
 | `sanitizeProjectId` | Bound project id strings (`PROJECT_ID_MAX`) |
 
 `injectionSpans` and `sensitiveSpans` return `RedactSpan[]`; `applySpans`
@@ -70,8 +125,8 @@ Patterns target untrusted user text before provider submission:
 - Prompt exfiltration (`reveal your system prompt`, …)
 - Multilingual override fragments
 
-False-positive tuning belongs in `injection.ts` tests
-(`tests/guardrails/false-positives.test.ts`).
+False-positive tuning: `tests/guardrails/false-positives.test.ts` and
+`tests/guardrails/injection.test.ts`.
 
 ## Sensitive data
 
@@ -118,8 +173,16 @@ From `src/guardrails/mod.ts`:
 | --- | --- |
 | Public errors | `describeError`, `isAbortError`, `publicError`, `TheorumError`, `throwIfAborted`, `toErrorEvent`, `PUBLIC_ACTION`, `PUBLIC_CANARY`, `PUBLIC_CANCELLED`, `PUBLIC_FILE_COUNT`, `PUBLIC_FILE_SIZE`, `PUBLIC_FILE_TYPE`, `PUBLIC_GENERIC`, `PUBLIC_IMAGE_SIZE`, `PUBLIC_UNAVAILABLE`, `UPSTREAM_FAILED` |
 | Injection / sensitive | `injectionSpans`, `sensitiveSpans` |
+| Sanitize | `PROJECT_ID_MAX`, `sanitizeProjectId`, `sanitizeText`, `sanitizeTurnRequest`, `redactSensitiveOnly` |
+| Canary | `mintCanary`, `bindCanary`, `wrapUserData`, `scanTextForCanaryLeak`, `createCanaryStreamGate`, `eventHasCanary`, `isStreamedCanaryEvent`, `redactCanary`, `OMIT_CANARY`, `USER_OPEN`, `USER_CLOSE`, `createCanaryGateSession`, `filterCanaryGatedEvents`, `CanaryGateResult`, `CanaryGateSession`, `CanaryStreamGate` |
+| Egress / Live | `standardEgressEnforce`, `createLiveOutboundGateSession`, `processLiveOutboundBatch`, `finalizeLiveOutboundTurn`, `abortLiveOutboundTurn`, `LiveOutboundBatchResult`, `LiveOutboundGateSession` |
 | Quota | `QuotaSlotStatus`, `clientIp`, `quotaMessage`, `releaseSlot`, `resetSlots`, `skipQuota`, `takeSlot` |
-| Sanitize | `PROJECT_ID_MAX`, `sanitizeProjectId`, `sanitizeText`, `sanitizeTurnRequest` |
+
+From `src/guardrails/testing.ts` (test / harness only):
+
+| Group | Symbols |
+| --- | --- |
+| Fuzz / red-team | `inboundFuzzPayloads`, `runInboundGuardrailFuzz`, `buildLiveAttacks`, `buildCanaryEgressAttacks`, `filterLiveAttacks`, `summarizeAttackBank` |
 
 ```theorum-evidence
 {
@@ -165,6 +228,13 @@ From `src/guardrails/mod.ts`:
       "supports": [
         { "kind": "source", "path": "src/guardrails/quota.ts" },
         { "kind": "contract_test", "path": "tests/guardrails/quota.test.ts" }
+      ]
+    },
+    "Adversarial testing": {
+      "supports": [
+        { "kind": "source", "path": "src/guardrails/testing.ts" },
+        { "kind": "contract_test", "path": "tests/cli/fuzz-guardrails.test.ts" },
+        { "kind": "contract_test", "path": "tests/cli/fuzz-canary.test.ts" }
       ]
     },
     "Exported API": {

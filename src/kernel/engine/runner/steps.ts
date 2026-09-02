@@ -1,21 +1,22 @@
 import { throwIfAborted } from '../../../guardrails/error.ts';
+import {
+  executeRegisteredTool,
+  formatToolResult,
+  newCallId,
+  projectForModel,
+} from '../../tools/execute.ts';
+import { getTool } from '../../tools/registry.ts';
+import type { ModelToolResult } from '../../tools/types.ts';
 import type {
   ModelProvider,
   Profile,
   ResolvedGeneration,
-  ToolEnvelope,
   TurnEvent,
   TurnHistoryMessage,
   TurnRequest,
 } from '../../types.ts';
 import { recordStepEvent, type StepExecutionState } from './state.ts';
 import { yieldProviderEvents } from './stream.ts';
-import {
-  executeDynamicDeclaration,
-  findDynamicDeclaration,
-  formatToolFinding,
-  isActionableDynamicDeclaration,
-} from './tools.ts';
 
 function isStepLimitReached(step: number, maxSteps: number): boolean {
   if (maxSteps <= 0) {
@@ -63,13 +64,12 @@ async function* executeAutonomousStep(
     holdUserVisible: false,
   },
 ): AsyncGenerator<TurnEvent, { pendingTools: TurnEvent[]; latestStructured?: unknown }> {
-  const { profile, generation, system, provider, upstream, signal } = args;
+  const { generation, system, provider, upstream, signal } = args;
   const genForStep = generationForProviderStep(generation, state);
   const pendingTools: TurnEvent[] = [];
   let latestStructured: unknown;
 
   for await (const event of yieldProviderEvents({
-    profile,
     generation: genForStep,
     system,
     provider,
@@ -92,8 +92,6 @@ async function* executeAutonomousStep(
     }
     recordStepEvent(event, state);
     const isUserVisible = event.type === 'thought' || event.type === 'text';
-    // Egress must not stream user-visible text before the gate runs.
-    // Validation-only may stream thought/text live and only hold structured.
     const streamNow =
       !buffer.holdLate || event.type === 'tokens' || (isUserVisible && !buffer.holdUserVisible);
     if (streamNow) {
@@ -107,7 +105,7 @@ async function* executeAutonomousStep(
 function appendInteractionsToolResultToHistory(
   history: TurnHistoryMessage[],
   toolEv: TurnEvent,
-  res: ToolEnvelope,
+  result: ModelToolResult,
 ): void {
   const tool = toolEv.tool;
   if (!tool) {
@@ -115,22 +113,22 @@ function appendInteractionsToolResultToHistory(
   }
   history.push({
     role: 'tool',
-    tool_call_id: tool.id ?? `call_${tool.name}`,
+    tool_call_id: tool.id ?? tool.callId ?? `call_${tool.name}`,
     name: tool.name,
-    content: formatToolFinding(res),
+    content: formatToolResult(result),
   });
 }
 
 function appendToolTurnToHistory(
   history: TurnHistoryMessage[],
   toolEv: TurnEvent,
-  res: ToolEnvelope,
+  result: ModelToolResult,
 ): void {
   const tool = toolEv.tool;
   if (!tool) {
     return;
   }
-  const callId = tool.id ?? `call_${tool.name}_${String(Date.now())}`;
+  const callId = tool.id ?? tool.callId ?? newCallId(tool.name);
   history.push({
     role: 'assistant',
     tool_calls: [
@@ -148,14 +146,14 @@ function appendToolTurnToHistory(
     role: 'tool',
     tool_call_id: callId,
     name: tool.name,
-    content: formatToolFinding(res),
+    content: formatToolResult(result),
   });
 }
 
 function queueInteractionsToolContinuation(
   state: StepExecutionState,
   toolEv: TurnEvent,
-  res: ToolEnvelope,
+  result: ModelToolResult,
   fallbackInteractionId?: string,
 ): void {
   const tool = toolEv.tool;
@@ -169,8 +167,8 @@ function queueInteractionsToolContinuation(
   const step = {
     type: 'function_result',
     name: tool.name,
-    call_id: tool.id ?? `call_${tool.name}`,
-    result: [{ type: 'text', text: formatToolFinding(res) }],
+    call_id: tool.id ?? tool.callId ?? `call_${tool.name}`,
+    result: [{ type: 'text', text: formatToolResult(result) }],
   };
   if (
     state.interactionsContinuation &&
@@ -185,54 +183,94 @@ function queueInteractionsToolContinuation(
   };
 }
 
-async function* handlePendingDynamicTools(
+async function* handlePendingTools(
   pendingTools: TurnEvent[],
   generation: ResolvedGeneration,
   profile: Profile,
   state: StepExecutionState,
 ): AsyncGenerator<TurnEvent, boolean> {
-  let hasRunnableHandler = false;
+  let executed = false;
   const useInteractionsContinuation = generation.transport === 'interactions';
   for (const toolEv of pendingTools) {
     const tool = toolEv.tool;
     if (!tool) {
       continue;
     }
-    const decl = findDynamicDeclaration(generation.dynamicTools, tool.name);
-    if (!isActionableDynamicDeclaration(decl)) {
+    const registered = getTool(tool.name);
+    if (!registered || registered.type === 'builtin') {
       state.allEmittedEvents.push(toolEv);
       yield toolEv;
       continue;
     }
 
-    hasRunnableHandler = true;
-    const finalResult = await executeDynamicDeclaration({
-      decl,
-      toolArgs: tool.arguments ?? {},
+    executed = true;
+    const callId = tool.id ?? tool.callId ?? newCallId(tool.name);
+    let modelResult: ModelToolResult | undefined;
+    let paused = false;
+    for await (const event of executeRegisteredTool({
       profile,
-      generation,
-    });
-    const enrichedEvent: TurnEvent = {
-      type: 'tool',
-      tool: { ...tool, result: finalResult },
-    };
-    state.allEmittedEvents.push(enrichedEvent);
-    yield enrichedEvent;
+      name: tool.name,
+      input: tool.arguments ?? {},
+      callId,
+      ctx: {
+        sessionPermissions: generation.sessionPermissions,
+        path: generation.tools.path,
+        turn: { step: state.stepCount },
+      },
+      snapshot: generation.tools,
+    })) {
+      const enriched: TurnEvent = {
+        type: 'tool',
+        tool: {
+          ...tool,
+          ...event.tool,
+          callId,
+          id: tool.id ?? callId,
+        },
+      };
+      state.allEmittedEvents.push(enriched);
+      yield enriched;
+      if (event.tool?.phase === 'complete') {
+        const fnTool = registered?.type === 'function' ? registered : undefined;
+        modelResult = fnTool
+          ? projectForModel(fnTool, event.tool.output)
+          : {
+              finding: formatToolResult({
+                finding: JSON.stringify(event.tool.output),
+                data: event.tool.output,
+              }),
+            };
+      }
+      if (event.tool?.phase === 'error' && event.tool.failure) {
+        modelResult = { finding: event.tool.failure.message };
+      }
+      if (event.tool?.phase === 'pause') {
+        modelResult = undefined;
+        paused = true;
+      }
+    }
+    if (paused) {
+      state.lastStop = { kind: 'tool' };
+      return false;
+    }
+    if (!modelResult) {
+      continue;
+    }
     if (useInteractionsContinuation) {
       queueInteractionsToolContinuation(
         state,
         toolEv,
-        finalResult,
+        modelResult,
         generation.previousInteractionId,
       );
       if (!state.interactionsContinuation) {
-        appendInteractionsToolResultToHistory(state.currentHistory, toolEv, finalResult);
+        appendInteractionsToolResultToHistory(state.currentHistory, toolEv, modelResult);
       }
     } else {
-      appendToolTurnToHistory(state.currentHistory, toolEv, finalResult);
+      appendToolTurnToHistory(state.currentHistory, toolEv, modelResult);
     }
   }
-  return hasRunnableHandler;
+  return executed;
 }
 
 async function* executeAttempt(args: {
@@ -269,13 +307,8 @@ async function* executeAttempt(args: {
       break;
     }
 
-    const hasRunnableHandler = yield* handlePendingDynamicTools(
-      pendingTools,
-      generation,
-      profile,
-      state,
-    );
-    if (!hasRunnableHandler) {
+    const executed = yield* handlePendingTools(pendingTools, generation, profile, state);
+    if (!executed) {
       break;
     }
   }

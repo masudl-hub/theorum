@@ -17,17 +17,11 @@ import type {
   TurnEvent,
 } from '../../kernel/types.ts';
 import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
-import { wrapPcmAsWav } from '../shared/pcm.ts';
+import { bytesToBase64, wrapPcmAsWav } from '../shared/pcm.ts';
 import type { OpenAiGatewayConfig } from '../types.ts';
 import { openAiGatewayHeaders } from './openai/compat.ts';
 
 const HTTP_OK = 200;
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
-}
 
 /** Credentials for the openAi speech path — gateway config + optional voice. */
 export type SpeechProviderConfig = OpenAiGatewayConfig & {

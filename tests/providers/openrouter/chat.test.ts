@@ -7,6 +7,7 @@ import { resolveTurn } from '../../../src/kernel/registry/resolve.ts';
 import type { ProviderCompleteRequest, TurnEvent } from '../../../src/kernel/types.ts';
 import { createOpenRouterProvider } from '../../../src/providers/openrouter/chat.ts';
 import { testInternals } from '../../fixtures/testInternals.js';
+import { testWireTool } from '../../fixtures/wire-tools.ts';
 
 const _internals = testInternals('openrouter');
 
@@ -137,16 +138,15 @@ Deno.test('createOpenRouterProvider streams reasoning, text, tools, tokens, and 
     },
     { role: 'tool', name: 'lookup', tool_call_id: 'tc_1', content: 'Monstera' },
   ];
-  req.dynamicTools = [
-    {
-      name: 'lookup',
+  req.wireTools = [
+    testWireTool('lookup', {
       description: 'Lookup a plant record',
       parameters: {
         type: 'object',
         properties: { q: { type: 'string' } },
         required: ['q'],
       },
-    },
+    }),
   ];
   const events = await collect(provider.complete(req));
 
@@ -296,16 +296,15 @@ Deno.test('createOpenRouterProvider handles missing API key, empty stream, think
   });
 
   const structuredReq = createMockTurnRequest('formatter', 'x');
-  structuredReq.dynamicTools = [
-    {
-      name: 'rawFn',
+  structuredReq.wireTools = [
+    testWireTool('rawFn', {
       description: 'Raw function probe',
       parameters: {
         type: 'object',
         properties: {},
         additionalProperties: true,
       },
-    },
+    }),
   ];
   const fullEvents = await collect(fullStreamProvider.complete(structuredReq));
   assertEquals(capturedHeaders?.get('HTTP-Referer'), 'https://theorum.dev');
@@ -399,12 +398,11 @@ Deno.test('createOpenRouterProvider emits tool call events with id, name, and pa
   });
 
   const req = createMockTurnRequest('pinned', 'weather');
-  req.dynamicTools = [
-    {
-      name: 'get_weather',
+  req.wireTools = [
+    testWireTool('get_weather', {
       description: 'Get weather',
       parameters: { type: 'object', properties: { city: { type: 'string' } } },
-    },
+    }),
   ];
   const events = await collect(provider.complete(req));
   const toolEv = events.find((e) => e.type === 'tool');
@@ -1016,7 +1014,7 @@ Deno.test('createOpenRouterProvider wires tools with additionalProperties schema
   });
 
   const req = createMockTurnRequest('pinned', 'test');
-  req.dynamicTools = [{ name: 'flexible' }];
+  req.wireTools = [testWireTool('flexible')];
   await collect(provider.complete(req));
   assertEquals(capturedBody?.tools !== undefined, true);
 });
@@ -1433,11 +1431,11 @@ Deno.test('_internals.toolResultEvent maps tool result part', () => {
     part as unknown as Parameters<typeof _internals.toolResultEvent>[0],
   );
   assertEquals(ev.type, 'tool');
-  assertEquals(field(ev, 'tool', 'result', 'status'), 'ok');
-  assertEquals(field(ev, 'tool', 'result', 'data'), { answer: 'found' });
+  assertEquals(field(ev, 'tool', 'phase'), 'complete');
+  assertEquals(field(ev, 'tool', 'output'), { answer: 'found' });
 });
 
-Deno.test('_internals.toolResultEvent includes finding for string output', () => {
+Deno.test('_internals.toolResultEvent includes string output on complete phase', () => {
   const part = {
     type: 'tool-result' as const,
     toolName: 'fn',
@@ -1448,7 +1446,8 @@ Deno.test('_internals.toolResultEvent includes finding for string output', () =>
   const ev = _internals.toolResultEvent(
     part as unknown as Parameters<typeof _internals.toolResultEvent>[0],
   );
-  assertEquals(field(ev, 'tool', 'result', 'finding'), 'text result');
+  assertEquals(field(ev, 'tool', 'phase'), 'complete');
+  assertEquals(field(ev, 'tool', 'output'), 'text result');
 });
 
 Deno.test('_internals.tokenEvent returns undefined for zero usage', () => {

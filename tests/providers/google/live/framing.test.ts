@@ -1,0 +1,321 @@
+import { assertEquals, assertExists } from '@std/assert';
+import { registerTool } from '../../../../src/kernel/tools/mod.ts';
+import type { ProviderCompleteRequest } from '../../../../src/kernel/types.ts';
+import {
+  buildGeminiLiveClientContent,
+  buildGeminiLiveRealtimeInput,
+  buildGeminiLiveRealtimeText,
+  buildGeminiLiveSetupMessage,
+  buildGeminiLiveToolResponse,
+  buildGeminiLiveWebSocketUrl,
+  foldGeminiLiveServerMessage,
+  parseGeminiLiveMessage,
+} from '../../../../src/providers/google/live/framing.ts';
+import { testInternals } from '../../../fixtures/testInternals.js';
+
+const _internals = testInternals('google-live-framing');
+
+Deno.test('buildGeminiLiveWebSocketUrl encodes api key parameter', () => {
+  const url = buildGeminiLiveWebSocketUrl('test-key-123');
+  assertEquals(url.includes('key=test-key-123'), true);
+  assertEquals(url.startsWith('wss://generativelanguage.googleapis.com/ws/'), true);
+});
+
+Deno.test('buildGeminiLiveSetupMessage constructs standard setup frame', () => {
+  const req: ProviderCompleteRequest = {
+    model: 'gemini-3.1-flash-live-preview',
+    apiId: 'gemini-3.1-flash-live-preview',
+    temperature: 0.7,
+    maxOutputTokens: 2048,
+    system: 'You are a helpful live assistant.',
+    builtins: [],
+    thinking: 'low',
+    input: [],
+    structured: null,
+    image: null,
+    live: {
+      voice: 'Puck',
+      vad: {
+        activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+        startSensitivity: 'START_SENSITIVITY_HIGH',
+        endSensitivity: 'START_SENSITIVITY_LOW',
+        prefixPaddingMs: 300,
+        silenceDurationMs: 1200,
+      },
+      sessionResumption: true,
+      contextCompression: 'slidingWindow',
+      proactiveAudio: true,
+      transcription: {
+        input: true,
+        output: true,
+      },
+    },
+  };
+
+  const setupMsg = buildGeminiLiveSetupMessage(req) as {
+    setup: {
+      model: string;
+      generationConfig: Record<string, unknown>;
+      systemInstruction: { parts: Array<{ text: string }> };
+      realtimeInputConfig: Record<string, unknown>;
+      sessionResumption: Record<string, unknown>;
+      contextWindowCompression: Record<string, unknown>;
+      inputAudioTranscription: Record<string, unknown>;
+      outputAudioTranscription: Record<string, unknown>;
+      proactivity: Record<string, unknown>;
+    };
+  };
+
+  assertEquals(setupMsg.setup.model, 'models/gemini-3.1-flash-live-preview');
+  assertEquals(
+    setupMsg.setup.systemInstruction.parts[0]?.text,
+    'You are a helpful live assistant.',
+  );
+  assertEquals(
+    (
+      setupMsg.setup.generationConfig.speechConfig as {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: string } };
+      }
+    ).voiceConfig.prebuiltVoiceConfig.voiceName,
+    'Puck',
+  );
+  assertEquals(
+    (setupMsg.setup.generationConfig.thinkingConfig as { thinkingLevel: string }).thinkingLevel,
+    'low',
+  );
+  assertExists(setupMsg.setup.sessionResumption);
+  assertExists(setupMsg.setup.contextWindowCompression);
+  assertExists(setupMsg.setup.inputAudioTranscription);
+  assertExists(setupMsg.setup.outputAudioTranscription);
+});
+
+Deno.test('buildGeminiLiveSetupMessage includes tool declarations when provided', () => {
+  registerTool({
+    type: 'builtin',
+    name: 'liveSearch',
+    description: 'Google Live web search',
+    category: 'web',
+    access: 'read-only',
+    paths: ['*'],
+    loadTier: 'T0',
+    permission: 'auto',
+    wire: { live: 'google_search' },
+  });
+
+  const req: ProviderCompleteRequest = {
+    model: 'gemini-3.1-flash-live-preview',
+    apiId: 'gemini-3.1-flash-live-preview',
+    system: '',
+    thinking: 'none',
+    maxOutputTokens: 100,
+    temperature: 0,
+    builtins: ['liveSearch'],
+    input: [],
+    structured: null,
+    image: null,
+    wireTools: [
+      {
+        type: 'function',
+        name: 'getCurrentWeather',
+        description: 'Get weather for location',
+        parameters: { type: 'object', properties: { location: { type: 'string' } } },
+      },
+    ],
+  };
+
+  const setupMsg = buildGeminiLiveSetupMessage(req) as {
+    setup: {
+      tools: Array<{ functionDeclarations: Array<{ name: string; description?: string }> }>;
+    };
+  };
+
+  assertEquals(Array.isArray(setupMsg.setup.tools), true);
+  assertEquals(setupMsg.setup.tools.length, 1);
+  const decls = setupMsg.setup.tools[0]?.functionDeclarations ?? [];
+  assertEquals(
+    decls.some((d) => d.name === 'liveSearch'),
+    true,
+  );
+  assertEquals(
+    decls.some((d) => d.name === 'getCurrentWeather'),
+    true,
+  );
+});
+
+Deno.test('buildGeminiLiveClientContent formats conversation history', () => {
+  const content = buildGeminiLiveClientContent([
+    { role: 'user', content: 'Hello there' },
+    { role: 'assistant', content: 'General Kenobi!' },
+  ]) as {
+    clientContent: {
+      turns: Array<{ role: string; parts: Array<{ text: string }> }>;
+      turnComplete: boolean;
+    };
+  };
+
+  assertEquals(content.clientContent.turnComplete, true);
+  assertEquals(content.clientContent.turns.length, 2);
+  assertEquals(content.clientContent.turns[0]?.role, 'user');
+  assertEquals(content.clientContent.turns[0]?.parts[0]?.text, 'Hello there');
+  assertEquals(content.clientContent.turns[1]?.role, 'model');
+  assertEquals(content.clientContent.turns[1]?.parts[0]?.text, 'General Kenobi!');
+});
+
+Deno.test('buildGeminiLiveRealtimeInput serializes audio, video, and text parts', () => {
+  const textMsg = buildGeminiLiveRealtimeInput({ type: 'text', text: 'Live prompt' }) as {
+    realtimeInput: { text: string };
+  };
+  assertEquals(textMsg.realtimeInput.text, 'Live prompt');
+
+  const audioMsg = buildGeminiLiveRealtimeInput({
+    type: 'audio',
+    mimeType: 'audio/pcm;rate=16000',
+    data: 'AQIDBA==',
+  }) as { realtimeInput: { audio: { mimeType: string; data: string } } };
+  assertEquals(audioMsg.realtimeInput.audio.mimeType, 'audio/pcm;rate=16000');
+  assertEquals(audioMsg.realtimeInput.audio.data, 'AQIDBA==');
+
+  const videoMsg = buildGeminiLiveRealtimeInput({
+    type: 'video',
+    mimeType: 'image/jpeg',
+    data: 'dGVzdA==',
+  }) as { realtimeInput: { video: { mimeType: string; data: string } } };
+  assertEquals(videoMsg.realtimeInput.video.mimeType, 'image/jpeg');
+  assertEquals(videoMsg.realtimeInput.video.data, 'dGVzdA==');
+});
+
+Deno.test('buildGeminiLiveRealtimeText creates text input payload', () => {
+  const textMsg = buildGeminiLiveRealtimeText('hello') as { realtimeInput: { text: string } };
+  assertEquals(textMsg.realtimeInput.text, 'hello');
+});
+
+Deno.test('buildGeminiLiveToolResponse formats function responses', () => {
+  const resp = buildGeminiLiveToolResponse('call_123', 'get_weather', {
+    temp: 72,
+    condition: 'Sunny',
+  }) as {
+    toolResponse: {
+      functionResponses: Array<{ id: string; name: string; response: { output: unknown } }>;
+    };
+  };
+  const firstFn = resp.toolResponse.functionResponses[0];
+  assertEquals(firstFn?.id, 'call_123');
+  assertEquals(firstFn?.name, 'get_weather');
+  assertEquals((firstFn?.response?.output as { temp: number } | undefined)?.temp, 72);
+});
+
+Deno.test('foldGeminiLiveServerMessage handles model audio, text, transcriptions, and interruption', () => {
+  // 1. Text and thinking
+  const textEvts = foldGeminiLiveServerMessage({
+    serverContent: {
+      modelTurn: {
+        parts: [
+          { thought: true, text: 'Thinking about the answer' },
+          { text: 'Here is the answer' },
+        ],
+      },
+    },
+  });
+  assertEquals(textEvts.length, 2);
+  assertEquals(textEvts[0]?.type, 'thought');
+  assertEquals(textEvts[0]?.text, 'Thinking about the answer');
+  assertEquals(textEvts[1]?.type, 'text');
+  assertEquals(textEvts[1]?.text, 'Here is the answer');
+
+  // 2. Interruption
+  const interruptedEvts = foldGeminiLiveServerMessage({
+    serverContent: {
+      interrupted: true,
+    },
+  });
+  assertEquals(interruptedEvts.length, 1);
+  assertEquals(interruptedEvts[0]?.type, 'done');
+  assertEquals(interruptedEvts[0]?.interrupted, true);
+  assertEquals(interruptedEvts[0]?.stop?.kind, 'interrupted');
+
+  // 3. Audio chunk wrapped into WAV
+  // 4 bytes of PCM (2 samples: 0, 0)
+  const pcmBase64 = btoa(String.fromCharCode(0, 0, 0, 0));
+  const audioEvts = foldGeminiLiveServerMessage({
+    serverContent: {
+      modelTurn: {
+        parts: [{ inlineData: { mimeType: 'audio/pcm;rate=24000', data: pcmBase64 } }],
+      },
+    },
+  });
+  assertEquals(audioEvts.length, 1);
+  assertEquals(audioEvts[0]?.type, 'media');
+  assertEquals(audioEvts[0]?.media?.mimeType, 'audio/wav');
+  assertExists(audioEvts[0]?.media?.data);
+
+  // 4. Session resumption update
+  const resumeEvts = foldGeminiLiveServerMessage({
+    sessionResumptionUpdate: {
+      newHandle: 'handle_xyz_987',
+      resumable: true,
+    },
+  });
+  assertEquals(resumeEvts.length, 1);
+  assertEquals(resumeEvts[0]?.sessionResumptionHandle, 'handle_xyz_987');
+});
+
+Deno.test('parseGeminiLiveMessage parses valid JSON and ignores invalid', () => {
+  assertEquals(parseGeminiLiveMessage('{"setupComplete": true}'), { setupComplete: true });
+  assertEquals(parseGeminiLiveMessage(''), null);
+  assertEquals(parseGeminiLiveMessage('invalid json'), null);
+});
+
+Deno.test('_internals.extractUsageTokens parses token counts', () => {
+  const empty = _internals.extractUsageTokens({});
+  assertEquals(empty, undefined);
+
+  const tokens = _internals.extractUsageTokens({
+    promptTokenCount: 15,
+    responseTokenCount: 25,
+    thoughtsTokenCount: 5,
+    totalTokenCount: 40,
+  });
+  assertEquals(tokens?.input, 15);
+  assertEquals(tokens?.output, 25);
+  assertEquals(tokens?.thinking, 5);
+  assertEquals(tokens?.total, 40);
+
+  const snakeTokens = _internals.extractUsageTokens({
+    prompt_token_count: 10,
+    response_token_count: 20,
+    total_token_count: 30,
+  });
+  assertEquals(snakeTokens?.input, 10);
+  assertEquals(snakeTokens?.output, 20);
+  assertEquals(snakeTokens?.total, 30);
+  assertEquals(snakeTokens?.thinking, undefined);
+});
+
+Deno.test('_internals.parseFunctionArguments handles strings, objects, and malformed inputs', () => {
+  assertEquals(_internals.parseFunctionArguments('{"loc": "Paris"}'), { loc: 'Paris' });
+  assertEquals(_internals.parseFunctionArguments({ loc: 'Tokyo' }), { loc: 'Tokyo' });
+  assertEquals(_internals.parseFunctionArguments('invalid json'), {});
+  assertEquals(_internals.parseFunctionArguments(123), {});
+  assertEquals(_internals.parseFunctionArguments(null), {});
+});
+
+Deno.test('foldGeminiLiveServerMessage handles tool calls and usage tokens', () => {
+  const events = foldGeminiLiveServerMessage({
+    toolCall: {
+      functionCalls: [{ id: 'call_1', name: 'search', args: '{"q": "deno"}' }],
+    },
+    usageMetadata: {
+      promptTokenCount: 12,
+      responseTokenCount: 8,
+      totalTokenCount: 20,
+    },
+  });
+  assertEquals(events.length, 2);
+  assertEquals(events[0]?.type, 'tool');
+  assertEquals(events[0]?.tool?.id, 'call_1');
+  assertEquals(events[0]?.tool?.name, 'search');
+  assertEquals(events[0]?.tool?.arguments, { q: 'deno' });
+  assertEquals(events[1]?.type, 'tokens');
+  assertEquals(events[1]?.tokens?.input, 12);
+  assertEquals(events[1]?.tokens?.output, 8);
+});

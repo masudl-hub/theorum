@@ -8,6 +8,8 @@
  * @module
  */
 
+import { GOOGLE_SPEECH_VOICES } from '../presets/google/speech-voices.ts';
+
 /** Model reasoning effort level normalized across provider adapters. */
 export const THINKING_LEVELS = [
   'none',
@@ -21,7 +23,7 @@ export const THINKING_LEVELS = [
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /** Wire protocol for a profile. */
-export const PROTOCOLS = ['geminiInteractions', 'openAi'] as const;
+export const PROTOCOLS = ['geminiInteractions', 'geminiLive', 'openAi'] as const;
 export type Protocol = (typeof PROTOCOLS)[number];
 
 /** Transport provider for a profile. */
@@ -34,6 +36,7 @@ export type Provider = (typeof PROVIDERS)[number];
  */
 export const PROTOCOL_PROVIDERS = {
   geminiInteractions: ['google'],
+  geminiLive: ['google'],
   openAi: ['openrouter', 'local'],
 } as const satisfies Record<Protocol, readonly Provider[]>;
 
@@ -68,6 +71,23 @@ export type StreamMode = (typeof STREAM_MODES)[number];
 export const SPEECH_AUDIO_FORMATS = ['pcm', 'mp3'] as const;
 export type SpeechAudioFormat = (typeof SPEECH_AUDIO_FORMATS)[number];
 
+/** Live session activity handling (barge-in behavior). */
+export const LIVE_ACTIVITY_HANDLINGS = ['START_OF_ACTIVITY_INTERRUPTS', 'NO_INTERRUPTION'] as const;
+export type LiveActivityHandling = (typeof LIVE_ACTIVITY_HANDLINGS)[number];
+
+/** Live session voice activity detection sensitivity. */
+export const LIVE_SPEECH_SENSITIVITIES = [
+  'START_SENSITIVITY_LOW',
+  'START_SENSITIVITY_HIGH',
+  'END_SENSITIVITY_LOW',
+  'END_SENSITIVITY_HIGH',
+] as const;
+export type LiveSpeechSensitivity = (typeof LIVE_SPEECH_SENSITIVITIES)[number];
+
+/** Live session context window compression mode. */
+export const LIVE_CONTEXT_COMPRESSIONS = ['slidingWindow', 'none'] as const;
+export type LiveContextCompression = (typeof LIVE_CONTEXT_COMPRESSIONS)[number];
+
 /** Structured-output enforcement mode. */
 export const SCHEMA_ENFORCEMENTS = ['responseFormat', 'prompt'] as const;
 export type SchemaEnforcement = (typeof SCHEMA_ENFORCEMENTS)[number];
@@ -93,16 +113,22 @@ export const TURN_STOP_KINDS = [
   'provider_error',
   'cancelled',
   'stream_incomplete',
+  'interrupted',
 ] as const;
 export type TurnStopKind = (typeof TURN_STOP_KINDS)[number];
 
-/** Tool visibility tier used by host dynamic-loading strategies. */
+/** Per-tool visibility tier — enforced by the kernel at resolve time. */
 export const TOOL_LOAD_TIERS = ['T0', 'T1', 'T2'] as const;
 export type ToolLoadTier = (typeof TOOL_LOAD_TIERS)[number];
 
-/** Execution authorization tier for dynamic tools. */
+/** Registered tool discriminant (`defineTool` / `registerTool`). */
+export const TOOL_TYPES = ['builtin', 'function', 'loader'] as const;
+export type ToolType = (typeof TOOL_TYPES)[number];
+
+export const TOOL_ACCESS_LEVELS = ['read-only', 'read-write', 'destructive'] as const;
+
+/** Execution authorization tier for registered tools. */
 export const TOOL_PERMISSION_TIERS = ['auto', 'session_consent', 'always_confirm'] as const;
-export type ToolPermissionTier = (typeof TOOL_PERMISSION_TIERS)[number];
 
 /** MIME essence → normalized media part category (shared ingress map). */
 export const MEDIA_INPUT_KINDS: Record<string, MediaInputKind> = {
@@ -375,9 +401,9 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   ),
   'model.config.*.maxOutputTokens': field('number', 'Maximum tokens the model may emit.'),
   'model.config.*.temperature': field('number', 'Sampling temperature.'),
-  'model.config.*.keyBuiltins': field(
+  'model.config.*.builtInTools': field(
     'BuiltinToolId[]',
-    'Builtins that may use profile.model.key. Any other enabled builtin selects paid.',
+    'Provider-native builtins this model supports. Opt in per turn with tools[id]: true.',
   ),
   'model.config.*.key': field(
     unionType(GEMINI_BUCKETS),
@@ -464,9 +490,12 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   ),
   tools: field(
     '{ allow: ToolId[] }',
-    'Hard ceiling — the turn cannot enable tools outside this list.',
+    'Custom function/loader tools the profile may run. Builtins belong on model.config.*.builtInTools.',
   ),
-  'tools.allow': field('ToolId[]', 'Maximum set of tools the agent may call.'),
+  'tools.allow': field(
+    'ToolId[]',
+    'Custom tools the agent may call. Builtins are declared per model, not here.',
+  ),
   inputs: field('ProfileInputsSpec', 'Text, attachment, voice, slot, and size rules.'),
   'inputs.text': field('boolean', 'Whether the profile accepts text on a turn. Defaults to true.'),
   'inputs.attachments': field('{ accept: string[] }', 'File upload allowlist.'),
@@ -545,6 +574,59 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
       mp3: 'MP3 encoded stream. Requires openAi protocol.',
     },
   ),
+  'outputs.live': field(
+    'ProfileLiveSpec',
+    'Bidirectional live audio/video streaming session pins.',
+  ),
+  'outputs.live.voice': field(
+    'string',
+    'TTS voice name for live audio output (e.g. Puck, Aoede, Charon).',
+    GOOGLE_SPEECH_VOICES,
+    'Google preset vocabulary; kernel accepts any string.',
+  ),
+  'outputs.live.vad': field(
+    'LiveVadSpec',
+    'Voice activity detection, barge-in, and endpointing sensitivity.',
+  ),
+  'outputs.live.vad.activityHandling': field(
+    unionType(LIVE_ACTIVITY_HANDLINGS),
+    'Barge-in handling when user speaks.',
+    LIVE_ACTIVITY_HANDLINGS,
+  ),
+  'outputs.live.vad.startSensitivity': field(
+    unionType(LIVE_SPEECH_SENSITIVITIES),
+    'Sensitivity for detecting start of speech.',
+    LIVE_SPEECH_SENSITIVITIES,
+  ),
+  'outputs.live.vad.endSensitivity': field(
+    unionType(LIVE_SPEECH_SENSITIVITIES),
+    'Sensitivity for detecting end of speech.',
+    LIVE_SPEECH_SENSITIVITIES,
+  ),
+  'outputs.live.vad.prefixPaddingMs': field('number', 'Speech prefix buffer duration in ms.'),
+  'outputs.live.vad.silenceDurationMs': field(
+    'number',
+    'Required silence before committing end-of-speech in ms.',
+  ),
+  'outputs.live.sessionResumption': field(
+    'boolean',
+    'Enable session resumption handles across WebSocket reconnects.',
+  ),
+  'outputs.live.contextCompression': field(
+    unionType(LIVE_CONTEXT_COMPRESSIONS),
+    'Context window compression mechanism.',
+    LIVE_CONTEXT_COMPRESSIONS,
+  ),
+  'outputs.live.proactiveAudio': field(
+    'boolean',
+    'Allow model to reject responding or stay silent if unprompted.',
+  ),
+  'outputs.live.transcription': field(
+    'LiveTranscriptionSpec',
+    'Enable real-time input/output audio transcriptions.',
+  ),
+  'outputs.live.transcription.input': field('boolean', 'Transcribe user input speech.'),
+  'outputs.live.transcription.output': field('boolean', 'Transcribe model output speech.'),
   'outputs.validation': field('ProfileValidationSpec', 'Host domain validators and repair policy.'),
   'outputs.validation.fields': field(
     'Record<string, ProfileValidator>',
@@ -636,37 +718,58 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   ),
 };
 
-/** Adjacent turn / dynamic-tool fields that appear next to profile examples. */
+/** Adjacent tool catalog fields that appear next to profile examples. */
 export const EXTRA_FIELDS: Record<string, FieldMeta> = {
+  type: field(
+    unionType(TOOL_TYPES),
+    'Discriminator: builtin (provider-native), function (host handler), or loader (mid-turn expansion).',
+    TOOL_TYPES,
+    {
+      builtin: 'Provider-native capability; wire maps to the provider adapter.',
+      function: 'Host-owned tool with Zod input/output and a handler.',
+      loader: 'Mid-turn tool that promotes deferred tools into the visible set.',
+    },
+  ),
+  name: field('string', 'Wire tool id — referenced in tools.allow and per-turn tools gates.'),
+  description: field('string', 'Model-facing description included in function declarations.'),
+  input: field(
+    'ZodSchema',
+    'Zod input schema for function and loader tools; converted to JSON Schema at registration.',
+  ),
+  output: field(
+    'ZodSchema',
+    'Zod output schema for function and loader tools; validates handler results.',
+  ),
+  handler: field(
+    'ToolHandler',
+    'Host function or async generator run on model tool calls and invokeTool resumes.',
+  ),
+  resolve: field(
+    '(input, ctx) => { loaded: string[] }',
+    'Loader-only: returns tool ids to promote into the visible set for the rest of the turn.',
+  ),
+  access: field(
+    unionType(TOOL_ACCESS_LEVELS),
+    'Semantic access level for policy and UI.',
+    TOOL_ACCESS_LEVELS,
+  ),
   loadTier: field(
     unionType(TOOL_LOAD_TIERS),
-    'Dynamic tool visibility strategy (host-owned).',
+    'When this tool is wired to the model (profile allow is still required).',
     TOOL_LOAD_TIERS,
     {
-      T0: 'Always loaded on every turn.',
-      T1: 'Loaded conditionally based on turn context.',
-      T2: 'Deferred until requested dynamically by agent.',
+      T0: 'Always wired at turn start when gated on.',
+      T1: 'Wired when the turn toolLoader selects it.',
+      T2: 'Deferred until a loader tool promotes it.',
     },
   ),
-  permissionTier: field(
+  permission: field(
     unionType(TOOL_PERMISSION_TIERS),
-    'When the host must confirm before executing this tool.',
+    'Default permission tier for this tool.',
     TOOL_PERMISSION_TIERS,
-    {
-      auto: 'Executes automatically without user prompt.',
-      session_consent: 'Prompt user once per session for consent.',
-      always_confirm: 'Prompt user before every tool execution.',
-    },
   ),
-  dynamicTools: field(
-    'DynamicToolDeclaration[]',
-    'Runtime tool declarations on the turn request — not on the profile.',
-  ),
-  parameters: field('Record<string, unknown>', 'JSON Schema fragment sent to the provider.'),
-  handler: field(
-    '(args) => ToolEnvelope | Promise<ToolEnvelope>',
-    'Host function that executes this dynamic tool.',
-  ),
+  category: field('string', 'Grouping label for settings and discovery.'),
+  paths: field('string[]', 'Channel/path availability for this tool.'),
 };
 
 /** Look up hover metadata for a dotted path (profile first, then extra). */

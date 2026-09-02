@@ -1,7 +1,7 @@
 {
   "name": "@theorum/core",
   "version": "0.1.15",
-  "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
+  "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, registered tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "keywords": [
     "agent",
@@ -20,6 +20,7 @@
     "./providers": "./src/providers/mod.ts",
     "./providers/local": "./src/providers/local/mod.ts",
     "./guardrails": "./src/guardrails/mod.ts",
+    "./guardrails/testing": "./src/guardrails/testing.ts",
     "./observability": "./src/observability/mod.ts",
     "./host": "./src/host/mod.ts",
     "./cli": "./src/cli/index.ts",
@@ -59,17 +60,25 @@
     "@openrouter/ai-sdk-provider": "npm:@openrouter/ai-sdk-provider@^3.0.0",
     "ai": "npm:ai@^7.0.0",
     "gpt-tokenizer": "npm:gpt-tokenizer@^4.0.0",
+    "zod": "npm:zod@^3.24.0",
+    "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "@deno/dnt": "jsr:@deno/dnt@0.43.2"
   },
   "tasks": {
     "theorum": "deno run --allow-read --allow-write --allow-net src/cli/index.ts",
+    "fuzz": "deno run --allow-read --allow-write --allow-net src/cli/index.ts fuzz",
+    "fuzz-canary": "deno run --allow-read --allow-write --allow-net src/cli/index.ts fuzz-canary",
+    "test:guardrails": "deno test --allow-read --allow-write --allow-net --allow-env --allow-sys tests/guardrails/ tests/cli/fuzz-guardrails.test.ts && deno run --allow-read --allow-write --allow-net src/cli/index.ts fuzz-canary",
     "test": "deno test --allow-read --allow-write --allow-net --allow-env --allow-sys --allow-run --ignore=npm/ tests/",
     "check": "deno check mod.ts",
     "verify:publish": "deno run --allow-read scripts/verify-publish-bundle.ts",
     "lint": "npm run lint",
     "lint:docs": "npm run lint:docs",
     "hooks:install": "npm run hooks:install",
-    "verify:live": "deno run --allow-net scripts/verify-live.ts"
+    "verify:live": "deno run --allow-net scripts/verify-live.ts",
+    "verify:canary-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-guardrails-live.ts",
+    "verify:guardrails-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-guardrails-live.ts",
+    "stryker:guardrails": "npx stryker run --configFile stryker.guardrails.config.json"
   }
 }

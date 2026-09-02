@@ -96,3 +96,31 @@ Deno.test('profile quotas do not share a bucket', () => {
 Deno.test('quotaMessage names the profile handle', () => {
   assertEquals(quotaMessage(getProfile('image')), "Enjoying image? You've reached today's limit");
 });
+
+Deno.test('takeSlot resets count on a new UTC day', () => {
+  resetSlots();
+  const profile = getProfile('image');
+  const ip = '10.0.0.99';
+  const day1 = Date.parse('2026-01-01T12:00:00Z');
+  const day2 = Date.parse('2026-01-02T12:00:00Z');
+
+  // exhaust the day-1 quota (perDay = 4 for image profile)
+  takeSlot(profile, ip, day1); releaseSlot(profile, ip);
+  takeSlot(profile, ip, day1); releaseSlot(profile, ip);
+  takeSlot(profile, ip, day1); releaseSlot(profile, ip);
+  takeSlot(profile, ip, day1); releaseSlot(profile, ip);
+  assertEquals(takeSlot(profile, ip, day1), 'quota');
+
+  // day 2 resets the bucket
+  assertEquals(takeSlot(profile, ip, day2), 'ok');
+  releaseSlot(profile, ip);
+});
+
+Deno.test('clientIp returns unknown for empty peer string', () => {
+  assertEquals(clientIp('', new Request('http://x.com/')), 'unknown');
+});
+
+Deno.test('clientIp ignores x-forwarded-for when peer is not loopback', () => {
+  const req = new Request('http://x.com/', { headers: { 'x-forwarded-for': '9.9.9.9' } });
+  assertEquals(clientIp('203.0.113.5', req), '203.0.113.5');
+});

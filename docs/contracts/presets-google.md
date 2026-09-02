@@ -28,8 +28,8 @@ for image and speech-adjacent profile fields.
 | `urlContext` | Interactions `url_context` |
 | `codeExecution` | Interactions `code_execution` (server-side Python sandbox) |
 
-All are `kind: 'builtin'` with `ui: true`. Profiles must allowlist ids they use;
-`codeExecution` combines with `googleSearch` on Gemini 3+ and with host function tools when `dynamicTools` are wired on Interactions. THEORUM also sends structured `responseFormat` on the same request when both are configured; Google may still reject that pairing at the API. List `codeExecution` on `ModelSpec.keyBuiltins` to keep it on the profile's free vault slot; otherwise an enabled builtin that is not in `keyBuiltins` selects `paid`. Google's sandbox runtime (~30s) is not a THEORUM knob.
+All are `kind: 'builtin'` with `ui: true`. Declare ids on `ModelSpec.builtInTools` and opt in per turn with `tools[id]: true`.
+`codeExecution` combines with `googleSearch` on Gemini 3+ and with registered function tools when the profile allows them on Interactions. THEORUM also sends structured `responseFormat` on the same request when both are configured; Google may still reject that pairing at the API. `googleSearch` sets `forcePaidKey: true`, so enabling it selects the paid vault slot unless the model pins `key`. Google's sandbox runtime (~30s) is not a THEORUM knob.
 `conflictsWith` drops maps when search/urlContext are also requested.
 
 ## Vocabularies
@@ -54,7 +54,7 @@ Kernel types stay stringly; these packs make Google hosts typed when they opt in
 | `registerGooglePreset` | Register builtins into catalog |
 | `GOOGLE_BUILTIN_TOOLS` | Static catalog entries |
 | `GOOGLE_IMAGE_ASPECT_RATIOS`, `GOOGLE_IMAGE_INPUT_MIMES`, `GOOGLE_IMAGE_SIZES`, `GOOGLE_VOICE_INPUT_MIMES`, `GOOGLE_SPEECH_VOICES` | Typed profile authoring constants |
-| `GoogleImageAspectRatio`, `GoogleImageInputMime`, `GoogleImageSize`, `GoogleVoiceInputMime`, `GoogleImagePins`, `GoogleSpeechPins`, `GoogleSpeechVoice` | Typed pins and vocabularies |
+| `GoogleImageAspectRatio`, `GoogleImageInputMime`, `GoogleImageSize`, `GoogleVoiceInputMime`, `GoogleImagePins`, `GoogleLivePins`, `GoogleSpeechPins`, `GoogleSpeechVoice` | Typed pins and vocabularies |
 
 ```theorum-evidence
 {

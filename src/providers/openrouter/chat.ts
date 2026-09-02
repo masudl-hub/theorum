@@ -21,11 +21,11 @@ import { isAbortError, toErrorEvent } from '../../guardrails/error.ts';
 import { tryStructured } from '../../kernel/engine/delta.ts';
 import { turnStopFromOpenAiFinishReason } from '../../kernel/stop.ts';
 import type {
-  DynamicToolDeclaration,
   ModelProvider,
   ProviderCompleteRequest,
   TurnEvent,
   TurnTokens,
+  WireFunctionTool,
 } from '../../kernel/types.ts';
 import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
 import type { OpenAiGatewayConfig } from '../types.ts';
@@ -93,18 +93,18 @@ function sourceEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'source' }>)
   };
 }
 
-function schemaForTool(decl: DynamicToolDeclaration): Record<string, unknown> {
+function schemaForTool(decl: WireFunctionTool): Record<string, unknown> {
   return decl.parameters ?? { type: 'object', properties: {}, additionalProperties: true };
 }
 
-function buildTools(dynamicTools?: DynamicToolDeclaration[]): ToolSet | undefined {
-  if (!dynamicTools || dynamicTools.length === 0) {
+function buildTools(wireTools?: WireFunctionTool[]): ToolSet | undefined {
+  if (!wireTools || wireTools.length === 0) {
     return undefined;
   }
   const tools: ToolSet = {};
-  for (const decl of dynamicTools) {
+  for (const decl of wireTools) {
     tools[decl.name] = tool({
-      description: decl.description ?? '',
+      description: decl.description,
       inputSchema: jsonSchema(schemaForTool(decl)),
     });
   }
@@ -303,17 +303,15 @@ function toolCallEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'tool-call
 function toolResultEvent(
   part: Extract<TextStreamPart<ToolSet>, { type: 'tool-result' }>,
 ): TurnEvent {
+  const output = typeof part.output === 'string' ? part.output : toolResultData(part.output);
   return {
     type: 'tool',
     tool: {
       name: part.toolName,
       arguments: toolArguments(part.input),
-      result: {
-        status: 'ok',
-        data: toolResultData(part.output),
-        finding: typeof part.output === 'string' ? part.output : undefined,
-      },
       id: part.toolCallId,
+      phase: 'complete',
+      output,
     },
   };
 }
@@ -435,7 +433,7 @@ function streamTextOptions(
     allowSystemInMessages: true,
     temperature: req.temperature,
     maxOutputTokens: req.maxOutputTokens,
-    tools: buildTools(req.dynamicTools),
+    tools: buildTools(req.wireTools),
     providerOptions: providerOptionsFor(req),
     include: { rawChunks: true },
     abortSignal: req.signal,

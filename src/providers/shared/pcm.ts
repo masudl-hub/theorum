@@ -12,6 +12,21 @@ function writeAscii(view: DataView, offset: number, str: string): void {
   for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
 }
 
+/** Decode base64 ASCII string to raw byte array. */
+export function base64ToBytes(data: string): Uint8Array {
+  const bin = atob(data);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** Encode raw byte array to base64 ASCII string. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
 /** Wrap raw PCM bytes in a RIFF/WAVE container. */
 export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Array {
   const numChannels = 1;
@@ -38,4 +53,4 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Ar
   return new Uint8Array(buf);
 }
 
-exposeForTests('pcm', { writeAscii, wrapPcmAsWav });
+exposeForTests('pcm', { base64ToBytes, bytesToBase64, writeAscii, wrapPcmAsWav });

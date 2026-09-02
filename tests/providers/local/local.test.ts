@@ -7,6 +7,7 @@ import type {
 } from '../../../src/kernel/types.ts';
 import { createLocalProvider, DEFAULT_LOCAL_BASE_URL } from '../../../src/providers/local/local.ts';
 import { testInternals } from '../../fixtures/testInternals.js';
+import { testWireTool } from '../../fixtures/wire-tools.ts';
 
 const internals = testInternals('local');
 
@@ -223,9 +224,7 @@ Deno.test('createLocalProvider maps finish_reason length and tool_calls', async 
   const toolEvents = await collect(
     toolProvider.complete(
       baseReq({
-        dynamicTools: [
-          { name: 'ping', description: '', parameters: { type: 'object', properties: {} } },
-        ],
+        wireTools: [testWireTool('ping')],
       }),
     ),
   );

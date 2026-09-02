@@ -12,12 +12,12 @@
 
 import { getStructured } from '../../../kernel/registry/schemas.ts';
 import type {
-  DynamicToolDeclaration,
   InteractionMediaPart,
   InteractionPart,
   ProviderCompleteRequest,
   StructuredSchemaId,
   TurnHistoryMessage,
+  WireFunctionTool,
 } from '../../../kernel/types.ts';
 import { exposeForTests } from '../../expose-for-tests.ts';
 
@@ -173,19 +173,19 @@ function buildChatMessages(
 // ── tool declarations ───────────────────────────────
 
 /**
- * Map DynamicToolDeclaration[] to OpenAI-compat function tool format.
+ * Map wire function tools to OpenAI-compat function tool format.
  * Returns undefined when there are no tools.
  */
-function wireTools(dynamicTools?: DynamicToolDeclaration[]): Record<string, unknown>[] | undefined {
-  if (!dynamicTools || dynamicTools.length === 0) {
+function wireTools(wireTools?: WireFunctionTool[]): Record<string, unknown>[] | undefined {
+  if (!wireTools || wireTools.length === 0) {
     return undefined;
   }
-  return dynamicTools.map((t) => ({
+  return wireTools.map((t) => ({
     type: 'function',
     function: {
       name: t.name,
-      description: t.description ?? '',
-      parameters: t.parameters ?? { type: 'object', properties: {} },
+      description: t.description,
+      parameters: t.parameters,
     },
   }));
 }

@@ -133,6 +133,11 @@ const TYPO_TARGETS = [
 const BASE64_BLOB = /[A-Za-z0-9+/]{16,}={0,2}/g;
 const HEX_BLOB = /(?:[0-9a-f]{2}[\s]?){8,}/gi;
 const SPACED_LETTERS = /\b(?:[A-Za-z] ){3,}[A-Za-z]\b/g;
+/** Three+ alphabetic tokens joined by `|` (no shell spaces around pipes). */
+const PIPE_SEPARATED = /\b(?:[A-Za-z]+\|){2,}[A-Za-z]+\b/g;
+/** Pipe evasion only when the first token is a known injection lead-in. */
+const PIPE_HEAD_VERBS =
+  /^(ignore|disregard|forget|bypass|reveal|show|repeat|output|disable|override|new|jailbreak|pretend|act|enter|activate|void|supersede|do)$/i;
 const WORD = /\b[A-Za-z]{4,}\b/g;
 const PRINTABLE_MIN = 0.85;
 const CODE_TAB = 9;
@@ -274,6 +279,21 @@ function spacedSpans(text: string): RedactSpan[] {
   return spans;
 }
 
+function pipeSeparatedSpans(text: string): RedactSpan[] {
+  const spans: RedactSpan[] = [];
+  for (const match of text.matchAll(PIPE_SEPARATED)) {
+    const found = blobAt(match);
+    if (!found) continue;
+    const head = found.blob.split('|')[0]?.toLowerCase();
+    if (!head || !PIPE_HEAD_VERBS.test(head)) continue;
+    const collapsed = found.blob.replaceAll('|', ' ');
+    if (injectionSpansOn(collapsed).length > 0) {
+      spans.push({ start: found.index, end: found.index + found.blob.length, kind: 'injection' });
+    }
+  }
+  return spans;
+}
+
 // ── Encoding evasion decoders ────────────────────────────────────────
 
 function tryRot13(text: string): string {
@@ -361,6 +381,7 @@ function injectionSpans(text: string): RedactSpan[] {
     ...unicodeHits,
     ...encodedSpans(text),
     ...spacedSpans(text),
+    ...pipeSeparatedSpans(text),
     ...decodedTextSpans(text),
   ];
 }

@@ -28,8 +28,10 @@ theorum <command> [options]
 
 | Command | Purpose |
 | --- | --- |
-| `bench` | Synthetic kernel performance benchmark (`--chunks`, `--iterations`, `--warmup`) |
-| `fuzz` | Adversarial guardrail fuzzer |
+| `verify:guardrails-live` | Live red-team of Theorum-owned guardrails (~95 adversarial cases); `--category`, `--limit`, `--inbound-only` |
+| `verify:canary-live` | Alias for `verify:guardrails-live` |
+| `fuzz` | Adversarial inbound sanitization fuzzer; exit `1` on expected miss |
+| `fuzz-canary` | Adversarial canary egress fuzzer (`runTurn` stream gate + Live batch gate); exit `1` on bypass |
 | `test` | Stress matrix or custom profile tests (`--profile`, `--all`, `--lite`, `--matrix`, `--mode`, `--search`, `--map`) |
 | `run` | Execute a turn with streaming output (`--profile`, `--prompt`, `--mode`, …) |
 | `profile list` / `profile show <id>` | Inspect registered profile blueprints |
@@ -41,6 +43,8 @@ events when a host-supplied provider yields them — hosts still must pass an
 explicit `ModelProvider` (the CLI never reads API keys).
 
 ```bash
+theorum fuzz
+theorum fuzz-canary
 theorum test --profile my.agent --matrix
 theorum run --profile my.agent --prompt "ping"
 ```
@@ -51,7 +55,10 @@ theorum run --profile my.agent --prompt "ping"
 | `matrix/synthesizer.ts` | Builds valid permutation cases (modes, optional tools) |
 | `matrix/fixtures.ts` | Shared harness fixtures (not product personas) |
 
-The matrix respects profile allowlists — e.g. `--search` only applies when
+Tool stress / matrix allowlists are `profile.tools.allow` plus each selected
+model's `builtInTools` (via `pickModel` / union across `model.allow`). Builtin
+conflict resolution uses registered tool `type === 'builtin'` metadata.
+The matrix respects those allowlists — e.g. `--search` only applies when
 `googleSearch` is allowlisted.
 
 ## Exported API

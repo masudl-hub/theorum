@@ -14,7 +14,7 @@
 
 > **"Profiles describe the contract. Providers move bytes. The runner enforces the turn."**
 
-THEORUM is a compact TypeScript agent kernel for apps that need deterministic agent execution without embedding product logic inside the runtime. It gives a host application one runner, typed profiles, multimodal input normalization, dynamic tool dispatch, provider adapters, trace sinks, and guardrail hooks.
+THEORUM is a compact TypeScript agent kernel for apps that need deterministic agent execution without embedding product logic inside the runtime. It gives a host application one runner, typed profiles, multimodal input normalization, a registered tool system with per-turn gating, provider adapters, trace sinks, and guardrail hooks.
 
 The package is intentionally **not** an agent product. It ships no app profiles, no prompts, no secrets, no database policy, no business rules, and no channel-specific UX. Those belong in the host application.
 
@@ -29,7 +29,7 @@ OpenRouter chat transport is powered by Vercel AI SDK Core under the adapter. TH
 profiles = "Host-owned declarations for model, inputs, outputs, tools, and guardrails"
 runner = "Single deterministic execution path for one agent turn"
 providers = "createProvider routes protocol/provider; adapters stay internal"
-tools = "Profile allowlist ceiling plus per-turn dynamic declarations"
+tools = "Profile allowlist ceiling plus per-turn opt-in gates"
 egress = "Typed host hook for outbound disclosure checks and repair loops"
 traces = "Host-injected sinks; no environment variables or bundled destinations"
 
@@ -61,7 +61,7 @@ flowchart TD
         Resolve["resolveTurn"]
         Guard["sanitize + canary + egress"]
         Runner["runTurn"]
-        ToolLoop["dynamic tool loop"]
+        ToolLoop["registered tool loop"]
         Repair["repair attempts"]
     end
 
@@ -86,24 +86,63 @@ flowchart TD
 
 Hosts bind transports with `createProvider(profile, { gemini, openAiGateway })`. One door; protocol/provider (and speech role) pick the adapter.
 
-### Turn Lifecycle
+### Turn execution and tools
+
+One turn is a single pipeline. Tools share `executeRegisteredTool` with `invokeTool`; compaction,
+guardrails, and streaming attach at different layers.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> ResolveProfile: host sends TurnRequest
-    ResolveProfile --> NormalizeInput: profile input rules
-    NormalizeInput --> BindBoundary: canary + user data fencing
-    BindBoundary --> ProviderStream: ModelProvider.complete
-    ProviderStream --> ToolDispatch: tool event
-    ToolDispatch --> ProviderStream: autonomous loop continues
-    ProviderStream --> EgressGate: final candidate
-    EgressGate --> RepairTurn: blocked + retry budget
-    RepairTurn --> ProviderStream
-    EgressGate --> ValidateOutput: clear
-    ValidateOutput --> EmitEvents: text/media/structured/tokens/done
-    EmitEvents --> Trace: host sink receives audit record
-    Trace --> [*]
+flowchart TD
+  subgraph Host["Host application"]
+    REG["registerTool at startup"]
+    REQ["TurnRequest<br/>(tools gate · continueFrom · …)"]
+    UI["Pause UI"]
+    INV["invokeTool(resume)"]
+  end
+
+  subgraph Ingress["runTurn ingress"]
+    SAN["sanitizeTurnRequest"]
+    RES["resolveTurn → TurnToolSnapshot"]
+    CB{"timing: before<br/>compact history?"}
+    SYS["system + canary<br/>(+ CONTINUE_INSTRUCTION if continueFrom)"]
+  end
+
+  subgraph Attempt["Attempt (egress / validation retries)"]
+    subgraph Steps["maxSteps loop"]
+      PL["provider.complete<br/>(wire schemas + history)"]
+      TE["executeRegisteredTool"]
+      HK["formatToolResult → history<br/>or Interactions continuation"]
+    end
+    EG["egress + validation<br/>(assistant text in attempt)"]
+  end
+
+  OUT["done<br/>(stop · tokens · compaction signal?)"]
+  TR["trace record"]
+
+  REG -.-> TE
+  REQ --> SAN --> RES --> CB --> SYS --> Steps
+  PL -->|model tool calls| TE
+  TE -->|complete| HK --> PL
+  TE -->|pause · exit step loop| EG
+  UI --> INV --> TE
+  Steps -->|loop ends| EG
+  EG -->|repair retry| SAN
+  EG --> OUT --> TR
+
+  INV -.->|separate entry · no provider| TE
 ```
+
+**How the verticals meet tools:**
+
+| Vertical | Where it runs | Tool interaction |
+| --- | --- | --- |
+| **Compaction** | Before turn (`timing: 'before'`) or signal on `done` (`timing: 'after'`) | Summarizes `TurnHistoryMessage` history — including `tool_calls` and `role: 'tool'` rows — not the live registry or mid-turn wire snapshot |
+| **Guardrails** | Ingress sanitize; egress/validation after the step loop | Sanitizes user text and history content; tool catalog descriptions and model-emitted arguments are host/registration concerns. Egress inspects assistant **text** in the attempt, not tool progress events |
+| **Streaming** | Provider stream + tool handler generators | Provider tool-call events buffer until execution; handler `progress` / `trace` / `artifact` / `warning` phases stream during `executeRegisteredTool`. `streamThoughts: false` filters thoughts only |
+| **Resumption** | Two paths — do not mix | **`stop.kind: 'tool'`** → host UI → `invokeTool` with `resume` (skips turn gate). **`length` / `stream_incomplete` / …** → new `runTurn` with `continueFrom` (+ `CONTINUE_INSTRUCTION` in system); host must re-gate tools |
+
+On tool pause the `maxSteps` loop exits (`stop.kind: 'tool'`), egress may still evaluate
+buffered assistant text from that attempt, then the turn emits terminal `done`.
 
 ---
 
@@ -162,7 +201,7 @@ const profile = defineProfile({
         summaries: { on: "auto", off: "none" },
         maxOutputTokens: 8192,
         temperature: 1,
-        keyBuiltins: [],
+        builtInTools: [],
       },
     },
     thinking: "minimal",
@@ -196,38 +235,53 @@ for await (const event of runTurn(
 
 ---
 
-## Dynamic Tools
+## Registered Tools
 
-THEORUM separates tool concerns into three layers.
+THEORUM separates tool concerns into four layers.
 
 | Layer | Owner | Purpose |
 | :--- | :--- | :--- |
-| **Access** | Profile | Hard ceiling: the agent cannot use a tool outside `profile.tools.allow`. |
-| **Visibility** | Turn request | Per-turn declarations: T0/T1/T2 schemas can be passed or loaded dynamically. |
-| **Permission** | Host app | `auto`, `session_consent`, and `always_confirm` determine whether execution pauses. |
+| **Catalog** | Host (startup) | `registerTool` — schema, handler, access, loadTier, permission |
+| **Access** | Profile | Hard ceiling: `profile.tools.allow` only |
+| **Gating** | Turn request | `tools: { [id]: true }` opts tools in; `toolLoader` wires T1 tools |
+| **Permission** | Host app | `auto`, `session_consent`, and `always_confirm` determine whether execution pauses |
 
 ```ts
-const dynamicTools = [
-  {
-    name: "lookup_order",
-    description: "Fetch order state from the host application.",
-    loadTier: "T1",
-    permissionTier: "session_consent",
-    parameters: {
-      type: "object",
-      properties: { orderId: { type: "string" } },
-      required: ["orderId"],
-    },
-    handler: async (args) => ({
-      status: "ok",
-      finding: "Order is in transit.",
-      data: { orderId: args.orderId, state: "in_transit" },
-    }),
-  },
-] as const;
+import { z } from 'zod';
+import { registerTool, invokeTool, runTurn } from 'theorum';
+
+registerTool({
+  type: 'function',
+  name: 'lookup_order',
+  description: 'Fetch order state from the host application.',
+  category: 'operations',
+  access: 'read-only',
+  paths: ['*'],
+  loadTier: 'T0',
+  permission: 'session_consent',
+  input: z.object({ orderId: z.string() }),
+  output: z.object({ finding: z.string() }),
+  handler: async (input) => ({
+    finding: `Order ${input.orderId} is in transit.`,
+  }),
+});
+
+// Profile ceiling
+tools: { allow: ['lookup_order', 'load_tools'] }
+
+// Turn opt-in
+runTurn({ profile, tools: { lookup_order: true }, input: { text: '…' } }, provider);
+
+// Host resume (interactive, confirmation, permission)
+invokeTool({ profile, name: 'ask_user', input: { kind: 'confirm', prompt: 'Proceed?' }, resume: { value: true } });
 ```
 
-The host owns the handler and authorization state. The kernel only enforces the declared contract.
+The host owns handlers and authorization state. The kernel enforces the declared contract
+via shared `executeRegisteredTool` for model tool calls and `invokeTool` for host resumes.
+
+Function and loader tools require **Zod** input/output schemas at registration time.
+
+**Migration:** [`docs/MIGRATION-tool-system.md`](docs/MIGRATION-tool-system.md) (breaking changes from `dynamicTools` / `ToolEnvelope`).
 
 ---
 
@@ -248,7 +302,7 @@ const guardedProfile = defineProfile({
         summaries: { on: "auto", off: "none" },
         maxOutputTokens: 8192,
         temperature: 1,
-        keyBuiltins: [],
+        builtInTools: [],
       },
     },
   },
@@ -327,7 +381,8 @@ stay internal to the providers package.
 | `jsr:@theorum/core/kernel` / `theorum/kernel` | Profile/turn types, tool catalog, `requireModelSpec`, thinking clamps over host model maps. |
 | `jsr:@theorum/core/providers` / `theorum/providers` | `createProvider` + Gemini vault types + host option bags. |
 | `jsr:@theorum/core/providers/local` / `theorum/providers/local` | Direct local OpenAI-compat adapter (`createLocalProvider`, `DEFAULT_LOCAL_BASE_URL`). |
-| `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, public error mapping, inbound injection/sensitive-data primitives. |
+| `jsr:@theorum/core/guardrails` / `theorum/guardrails` | Sanitization, canary/egress gates, public error mapping, inbound injection/sensitive-data primitives. |
+| `jsr:@theorum/core/guardrails/testing` / `theorum/guardrails/testing` | Adversarial corpus + fuzz helpers (test/harness only). |
 | `jsr:@theorum/core/observability` / `theorum/observability` | Trace sinks and trace record helpers. |
 | `jsr:@theorum/core/host` / `theorum/host` | Optional Deno HTTP helpers (`json`, status mapping, cutout mint flush). |
 | `jsr:@theorum/core/cli` / `theorum/cli` | Profile inspection and stress-test CLI (`theorum` binary on npm). |
@@ -343,15 +398,17 @@ Named exports from the root barrel (same symbols hosts get from `theorum` /
 
 | Group | Symbols |
 | --- | --- |
-| Guardrails errors | `describeError`, `isAbortError`, `publicError`, `TheorumError`, `throwIfAborted`, `toErrorEvent` |
+| Guardrails errors | `describeError`, `isAbortError`, `publicError`, `TheorumError`, `throwIfAborted`, `toErrorEvent`, `PUBLIC_CANARY` |
 | Quota | `QuotaSlotStatus`, `clientIp`, `quotaMessage`, `releaseSlot`, `resetSlots`, `skipQuota`, `takeSlot` |
-| Sanitize | `PROJECT_ID_MAX`, `sanitizeProjectId`, `sanitizeText`, `sanitizeTurnRequest` |
+| Sanitize | `PROJECT_ID_MAX`, `sanitizeProjectId`, `sanitizeText`, `sanitizeTurnRequest`, `redactSensitiveOnly` |
+| Canary / egress | `mintCanary`, `bindCanary`, `wrapUserData`, `scanTextForCanaryLeak`, `redactCanary`, `OMIT_CANARY`, `createCanaryStreamGate`, `eventHasCanary`, `createCanaryGateSession`, `filterCanaryGatedEvents`, `CanaryGateResult`, `CanaryGateSession`, `CanaryStreamGate`, `standardEgressEnforce`, `createLiveOutboundGateSession`, `processLiveOutboundBatch`, `finalizeLiveOutboundTurn`, `LiveOutboundBatchResult`, `LiveOutboundGateSession` |
 | Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
-| Runner | `runTurn` |
-| Catalog | `CATALOG`, `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
-| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_PERMISSION_TIERS` |
-| Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn` |
-| Structured | `getStructured`, `registerStructured`, `executeTool` |
+| Runner | `runTurn`, `prepareLiveInboundText` |
+| Catalog | `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `requireModelSpec` |
+| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_ACCESS`, `TOOL_PERMISSION`, `TOOL_ACCESS_LEVELS`, `TOOL_PERMISSION_TIERS`, `LIVE_ACTIVITY_HANDLINGS`, `LIVE_CONTEXT_COMPRESSIONS`, `LIVE_SPEECH_SENSITIVITIES` |
+| Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn`, `pickModel` |
+| Tools | `defineTool`, `registerTool`, `registerTools`, `invokeTool`, `executeRegisteredTool`, `registerHarnessTools`, `getTool`, `hasTool`, `requireTool`, `listTools`, `listBuiltinIds`, `listFunctionIds`, `resetTools`, `formatToolResult`, `TOOL_TYPES` |
+| Structured | `getStructured`, `registerStructured` |
 | Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenAiFinishReason` |
 | Observability | `jsonlSink`, `memorySink`, `noopSink`, `resolveTraceDir`, `sinkFromDir`, `writeTrace`, `TraceRecord` |
 | Providers | `CreateProviderOptions`, `GeminiTransport`, `GeminiVault`, `LocalProviderConfig`, `OpenAiGatewayConfig`, `createProvider` (local: `theorum/providers/local` → `createLocalProvider`, `DEFAULT_LOCAL_BASE_URL`) |
@@ -384,6 +441,9 @@ On GitHub, module contracts:
 | [`docs/contracts/cli.md`](docs/contracts/cli.md) | `theorum/cli` |
 | [`docs/contracts/presets.md`](docs/contracts/presets.md) | `theorum/presets` |
 | [`docs/contracts/presets-google.md`](docs/contracts/presets-google.md) | `theorum/presets/google` |
+
+Migrating from per-turn `dynamicTools`? See
+[`docs/MIGRATION-tool-system.md`](docs/MIGRATION-tool-system.md).
 
 Document health is enforced by `npm run lint:docs` — the **first** step of
 `npm run lint` / `deno task lint` (`docs/_map.mjs`):
@@ -455,10 +515,11 @@ trace_sinks_host_injected = true
 realtime_duplex_voice = "out of scope"
 ```
 
-Provider adapters (Google Interactions, OpenRouter/AI SDK, speech, local) load
-only on the first `complete` for that transport — `createProvider` import stays
-light. `trace-attach` lazy-loads Interactions wire helpers only for
-`geminiInteractions` traces.
+Provider adapters load **lazily** on the first `complete` for that transport —
+`createProvider` and `theorum/providers` stay a thin barrel (`src/providers/mod.ts`);
+implementation modules (e.g. `google/interactions/`, `openrouter/`, `local/`) are
+not pulled in at import time. `trace-attach` lazy-loads Interactions wire helpers
+only for `geminiInteractions` traces.
 
 If an app needs domain rules, platform delivery policy, product copy, database access, or session memory, that belongs outside THEORUM.
 
@@ -497,6 +558,7 @@ MIT License. Copyright (c) ORCHID AI LLC.
     },
     "Package Boundary": {
       "supports": [
+        { "kind": "source", "path": "src/providers/mod.ts" },
         { "kind": "source", "path": "src/providers/create-provider.ts" },
         { "kind": "contract_test", "path": "tests/providers/create-provider.test.ts" }
       ]

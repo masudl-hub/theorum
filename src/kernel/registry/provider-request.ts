@@ -6,6 +6,7 @@ function providerCompleteRequest(
   system: string,
 ): ProviderCompleteRequest {
   const isInteractions = generation.transport === 'interactions';
+  const isGoogle = isInteractions || generation.transport === 'geminiLive';
   return {
     model: generation.model,
     apiId: generation.apiId,
@@ -21,12 +22,13 @@ function providerCompleteRequest(
     input: generation.input,
     history: generation.history,
     interactionOnlyInput: isInteractions ? generation.interactionOnlyInput : undefined,
-    dynamicTools: generation.dynamicTools,
-    dynamicToolLoader: generation.dynamicToolLoader,
+    wireTools: generation.tools.wire,
     structured: generation.structured,
     image: generation.image,
     speech: generation.speech,
-    geminiBucket: isInteractions ? generation.geminiBucket : undefined,
+    live: generation.live,
+    sessionResumptionHandle: generation.sessionResumptionHandle,
+    geminiBucket: isGoogle ? generation.geminiBucket : undefined,
   };
 }
 

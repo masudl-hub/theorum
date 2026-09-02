@@ -1,4 +1,5 @@
 import { benchCommand } from './commands/bench.ts';
+import { fuzzCanaryCommand } from './commands/fuzz-canary.ts';
 import { fuzzGuardrailsCommand } from './commands/fuzz-guardrails.ts';
 import { listProfilesCommand, showProfileCommand } from './commands/profile.ts';
 import { runCommand } from './commands/run.ts';
@@ -17,7 +18,8 @@ COMMANDS:
     --iterations <n>   Measurement iterations (default: 50)
     --warmup <n>       Warmup iterations (default: 5)
 
-  fuzz                 Adversarial guardrail fuzzer
+  fuzz                 Adversarial inbound sanitization fuzzer
+  fuzz-canary          Adversarial canary egress fuzzer (stream + Live gates)
 
   test                 Run stress matrix or custom profile tests
     --profile, -p <id> Target profile ID registered by your host app
@@ -155,7 +157,15 @@ export async function main(cliArgs = Deno.args): Promise<void> {
   const command = flags._[0] || (flags.help ? 'help' : 'help');
 
   if (command === 'fuzz') {
-    fuzzGuardrailsCommand();
+    const ok = fuzzGuardrailsCommand();
+    if (!ok) {
+      Deno.exit(1);
+    }
+  } else if (command === 'fuzz-canary') {
+    const ok = await fuzzCanaryCommand();
+    if (!ok) {
+      Deno.exit(1);
+    }
   } else if (command === 'bench') {
     await benchCommand({
       chunks: typeof flags.chunks === 'string' ? Number(flags.chunks) : undefined,

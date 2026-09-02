@@ -115,7 +115,7 @@ const graph = {
         'Profiles',
         'Turn lifecycle',
         'Stream events',
-        'Dynamic tools',
+        'Registered tools',
         'Outputs and guardrails',
         'Compaction',
         'Stop and resume',
@@ -140,8 +140,8 @@ const graph = {
           sections: ['Profiles'],
         },
         {
-          paths: ['src/kernel/registry/tools.ts', 'src/kernel/registry/catalog.ts', 'src/kernel/schema.ts'],
-          sections: ['Dynamic tools'],
+          paths: ['src/kernel/tools/**', 'src/kernel/schema.ts'],
+          sections: ['Registered tools'],
         },
       ],
     },
@@ -162,9 +162,11 @@ const graph = {
         'tests/providers/create-provider.test.ts',
         'tests/providers/create-provider-import-isolation.test.ts',
         'tests/providers/google/keys.test.ts',
-        'tests/providers/google/interactions.test.ts',
-        'tests/providers/google/google-interactions.test.ts',
-        'tests/providers/google/speech-interactions.test.ts',
+        'tests/providers/google/interactions/framing.test.ts',
+        'tests/providers/google/interactions/stream.test.ts',
+        'tests/providers/google/interactions/speech.test.ts',
+        'tests/providers/google/live/framing.test.ts',
+        'tests/providers/google/live/stream.test.ts',
         'tests/providers/local/local.test.ts',
         'tests/providers/openrouter/chat.test.ts',
         'tests/providers/openrouter/speech.test.ts',
@@ -183,6 +185,7 @@ const graph = {
         'createProvider',
         'OpenRouter',
         'Google Interactions',
+        'Google Live',
         'Local provider',
         'Speech roles',
         'Gemini transport',
@@ -206,10 +209,19 @@ const graph = {
         },
         {
           paths: [
-            'src/providers/google/interactions.ts',
-            'src/providers/google/google-interactions.ts',
+            'src/providers/google/interactions/framing.ts',
+            'src/providers/google/interactions/stream.ts',
+            'src/providers/google/interactions/mod.ts',
           ],
           sections: ['Google Interactions'],
+        },
+        {
+          paths: [
+            'src/providers/google/live/framing.ts',
+            'src/providers/google/live/stream.ts',
+            'src/providers/google/live/mod.ts',
+          ],
+          sections: ['Google Live'],
         },
         {
           paths: ['src/providers/openrouter/speech.ts'],
@@ -234,6 +246,7 @@ const graph = {
       export: './guardrails',
       doc: 'docs/contracts/guardrails.md',
       owns: ['src/guardrails/'],
+      owns_except: ['src/guardrails/testing.ts'],
       validates: ['tests/guardrails/'],
       required_sections: [
         'Export',
@@ -251,6 +264,25 @@ const graph = {
         { paths: ['src/guardrails/injection.ts'], sections: ['Injection categories (non-exhaustive)'] },
         { paths: ['src/guardrails/sensitive.ts'], sections: ['Sensitive data'] },
         { paths: ['src/guardrails/quota.ts'], sections: ['Quota'] },
+      ],
+    },
+
+    'guardrails-testing': {
+      export: './guardrails/testing',
+      doc: 'docs/contracts/guardrails.md',
+      owns: ['src/guardrails/testing.ts'],
+      validates: [
+        'tests/guardrails/injection.test.ts',
+        'tests/cli/fuzz-guardrails.test.ts',
+        'tests/cli/fuzz-canary.test.ts',
+      ],
+      required_sections: [
+        'Export',
+        'Adversarial testing',
+        'Exported API',
+      ],
+      section_triggers: [
+        { paths: ['src/guardrails/testing.ts'], sections: ['Adversarial testing'] },
       ],
     },
 

@@ -26,8 +26,12 @@ Owns every module under `src/providers/`.
 | `openrouter/openai/sdk-messages.ts` | THEORUM → AI SDK `ModelMessage[]` (OpenRouter chat) |
 | `openrouter/openai/chat-payload.ts` | OpenAI chat payload + OpenRouter plugins (internal) |
 | `openrouter/speech.ts` | OpenAI `/audio/speech` transport (openrouter speech role) |
-| `google/google-interactions.ts` | Google Interactions streaming adapter |
-| `google/interactions.ts` | Interactions payload / step wiring |
+| `google/interactions/stream.ts` | Google Interactions streaming adapter |
+| `google/interactions/framing.ts` | Interactions payload / step wiring |
+| `google/interactions/mod.ts` | Interactions subpath barrel |
+| `google/live/stream.ts` | Google Live WebSocket streaming adapter |
+| `google/live/framing.ts` | Gemini Live WebSocket protocol framing |
+| `google/live/mod.ts` | Live subpath barrel |
 | `google/keys.ts` | Gemini vault transport types |
 | `google/urls.ts` | Interactions API endpoint constants |
 | `local/local.ts` | OpenAI-compat SSE for Ollama / llama.cpp / vLLM / LM Studio |
@@ -109,11 +113,26 @@ terminal `done.stop` via `turnStopFromOpenAiFinishReason`.
 | Multimodal | `image` / `audio` / `video` / `document` parts |
 | Structured | `responseFormat` JSON schema when enforced |
 | Output modes | Image / speech / structured are mutually exclusive |
-| Tools | Catalog `interactionsType` builtins + host `dynamicTools` (`type: function`) |
+| Tools | Registry builtins (`interactionsType`) + registered function tools wired via `projectTools` |
 | Code execution | Builtin `codeExecution` → `{ type: "code_execution" }`. Streamed `step.start` / `step.delta` / `step.stop`, `interaction.status_update` (`requires_action` for host tools), and batched `interaction.steps` become `evidence` (`kind`, `code`, `result`, `isError`, `raw`) plus `media` for sandbox images. Search/maps/`url_context` steps in `steps[]` are also `evidence`. Structured `responseFormat` is still attached when both are requested. |
 | Stream vs batch | Default `stream: true` (`?alt=sse`). `TurnRequest.stream: false` POSTs JSON and yields the same `TurnEvent` types from `steps[]`. |
 | Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / maps tool payloads (`search_suggestions` chips, annotations). Emits `grounding` (normalized) plus `evidence` with the raw tool payload so hosts can decide what to surface. |
 | Stop | `turnStopFromInteractionStatus` on terminal status |
+
+## Google Live
+
+`createGoogleLiveProvider(geminiTransport)` connects to the Gemini Live bidirectional
+WebSocket service (`BidiGenerateContent`) and streams normalized `TurnEvent`s.
+
+| Concern | Behavior |
+| --- | --- |
+| Transport | Direct WebSocket stream to `GEMINI_LIVE_WS_URL` with API key |
+| Handshake | Sends `BidiGenerateContentSetup` with system instruction, generation config, voice, VAD spec, and tools |
+| Input | Streams `realtimeInput` (audio/video/text) and seeds `clientContent` history |
+| Output | Folds `serverContent` parts into `thought`, `text`, and `media` (PCM 24kHz -> WAV) events |
+| Tools | Dispatches function calls, receives tool responses via `BidiGenerateContentToolResponse` |
+| Interruption | Emits `interrupted` event on barge-in / `serverContent.interrupted` signal |
+| Resumption | Captures `sessionResumptionUpdate.newHandle` for continuous session reconnects |
 
 ## Local provider
 
@@ -141,13 +160,13 @@ When `profile.outputs.speech` is defined and protocol/provider is
 `openAi`/`openrouter`, `createProvider` returns `createSpeechProvider`
 (`openrouter/speech.ts` — OpenAI `/audio/speech`). When protocol/provider is
 `geminiInteractions`/`google`, the same `createInteractionsProvider`
-(`google/google-interactions.ts` / `google/interactions.ts`) handles speech via `responseFormat: audio` +
+(`google/interactions/mod.ts`) handles speech via `responseFormat: audio` +
 `speechConfig`.
 
 | Transport | Module | Path / mechanism | Notes |
 | --- | --- | --- | --- |
 | OpenAI | `openrouter/speech.ts` | `/audio/speech` | `mp3` allowed via `response_format` |
-| Interactions | `google/google-interactions.ts` / `google/interactions.ts` | `responseFormat: { type: 'audio' }` | PCM → WAV; `mp3` rejected at resolve |
+| Interactions | `google/interactions/mod.ts` | `responseFormat: { type: 'audio' }` | PCM → WAV; `mp3` rejected at resolve |
 
 Fallback `openAiGateway.voice` when `outputs.speech.voice` omitted.
 
@@ -163,7 +182,7 @@ createProvider(profile, {
 | --- | --- |
 | `GeminiTransport` | Vault + optional `fetch` |
 | Buckets | `freeA`, `freeB`, `freeC`, `paid` |
-| Selection | `model.key` / `ModelSpec.key` / `keyBuiltins` |
+| Selection | `model.key` / `ModelSpec.key` / `builtInTools` |
 
 Overflow to `paid` is host policy, not inferred here.
 
@@ -224,10 +243,20 @@ From `src/providers/local/mod.ts` (`theorum/providers/local`):
     },
     "Google Interactions": {
       "supports": [
-        { "kind": "source", "path": "src/providers/google/google-interactions.ts" },
-        { "kind": "source", "path": "src/providers/google/interactions.ts" },
-        { "kind": "contract_test", "path": "tests/providers/google/interactions.test.ts" },
-        { "kind": "contract_test", "path": "tests/providers/google/google-interactions.test.ts" }
+        { "kind": "source", "path": "src/providers/google/interactions/stream.ts" },
+        { "kind": "source", "path": "src/providers/google/interactions/framing.ts" },
+        { "kind": "source", "path": "src/providers/google/interactions/mod.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/interactions/framing.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/interactions/stream.test.ts" }
+      ]
+    },
+    "Google Live": {
+      "supports": [
+        { "kind": "source", "path": "src/providers/google/live/stream.ts" },
+        { "kind": "source", "path": "src/providers/google/live/framing.ts" },
+        { "kind": "source", "path": "src/providers/google/live/mod.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/live/framing.test.ts" },
+        { "kind": "contract_test", "path": "tests/providers/google/live/stream.test.ts" }
       ]
     },
     "Local provider": {
@@ -240,10 +269,10 @@ From `src/providers/local/mod.ts` (`theorum/providers/local`):
     "Speech roles": {
       "supports": [
         { "kind": "source", "path": "src/providers/openrouter/speech.ts" },
-        { "kind": "source", "path": "src/providers/google/google-interactions.ts" },
-        { "kind": "source", "path": "src/providers/google/interactions.ts" },
+        { "kind": "source", "path": "src/providers/google/interactions/stream.ts" },
+        { "kind": "source", "path": "src/providers/google/interactions/framing.ts" },
         { "kind": "contract_test", "path": "tests/providers/openrouter/speech.test.ts" },
-        { "kind": "contract_test", "path": "tests/providers/google/speech-interactions.test.ts" }
+        { "kind": "contract_test", "path": "tests/providers/google/interactions/speech.test.ts" }
       ]
     },
     "Gemini transport": {

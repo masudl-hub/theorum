@@ -20,7 +20,7 @@ Deno.test('toOpenAiChatPayload passes apiId through unchanged', () => {
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -41,7 +41,7 @@ Deno.test('toOpenAiChatPayload builds correct system and user messages', () => {
     maxOutputTokens: 1024,
     temperature: 0.5,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -72,7 +72,7 @@ Deno.test('toOpenAiChatPayload wires multimodal user input with image, audio, an
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -133,7 +133,7 @@ Deno.test('toOpenAiChatPayload wires history messages with parts, tool_calls, to
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -179,9 +179,15 @@ Deno.test('toOpenAiChatPayload formats tools with name, description, and paramet
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [
-      { name: 'bareTool' },
+    wireTools: [
       {
+        type: 'function',
+        name: 'bareTool',
+        description: '',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        type: 'function',
         name: 'fullTool',
         description: 'A full tool',
         parameters: { type: 'object', properties: { x: { type: 'string' } } },
@@ -210,7 +216,7 @@ Deno.test('toOpenAiChatPayload formats tools with name, description, and paramet
   });
 });
 
-Deno.test('toOpenAiChatPayload omits tools when dynamicTools is empty', () => {
+Deno.test('toOpenAiChatPayload omits tools when wireTools is empty', () => {
   const req: ProviderCompleteRequest = {
     model: 'gemini35FlashLite',
     apiId: HOST_MODELS.gemini35FlashLite.apiId,
@@ -223,7 +229,7 @@ Deno.test('toOpenAiChatPayload omits tools when dynamicTools is empty', () => {
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -244,7 +250,7 @@ Deno.test('toOpenAiChatPayload sets reasoning effort from thinking level', () =>
     maxOutputTokens: 2048,
     temperature: 0.7,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -273,7 +279,7 @@ Deno.test('toOpenAiChatPayload formats structured json_schema response_format', 
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: 'testSchema',
   };
 
@@ -303,7 +309,7 @@ Deno.test('toOpenAiChatPayload omits response_format when structured has no json
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: [],
-    dynamicTools: [],
+    wireTools: [],
     structured: 'noSchemaStructured',
   };
 
@@ -324,7 +330,7 @@ Deno.test('toOpenAiChatPayload routes web builtin to web_search_options and non-
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: ['googleSearch'],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 
@@ -346,7 +352,7 @@ Deno.test('toOpenAiChatPayload omits plugins and web_search_options when builtin
     maxOutputTokens: 1024,
     temperature: 0,
     builtins: ['unknownBuiltin'],
-    dynamicTools: [],
+    wireTools: [],
     structured: null,
   };
 

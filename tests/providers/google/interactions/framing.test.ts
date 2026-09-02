@@ -1,14 +1,15 @@
-import '../../fixtures/test-host.ts';
-import '../../fixtures/enable-test-internals.ts';
+import '../../../fixtures/test-host.ts';
+import '../../../fixtures/enable-test-internals.ts';
 import { assertEquals, assertThrows } from '@std/assert';
-import { TheorumError } from '../../../src/guardrails/error.ts';
+import { TheorumError } from '../../../../src/guardrails/error.ts';
 import type {
   InteractionPart,
   ProviderCompleteRequest,
   TurnHistoryMessage,
-} from '../../../src/kernel/types.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
-import '../../../src/providers/google/interactions.ts';
+} from '../../../../src/kernel/types.ts';
+import { testInternals } from '../../../fixtures/testInternals.js';
+import { testWireTool } from '../../../fixtures/wire-tools.ts';
+import '../../../../src/providers/google/interactions/framing.ts';
 
 const {
   camelToSnake,
@@ -338,16 +339,15 @@ Deno.test('applyOptionalRequestFields maps builtins to their Interactions wire t
 Deno.test('applyOptionalRequestFields merges codeExecution builtin with dynamic function tools', () => {
   const req = baseReq({
     builtins: ['codeExecution', 'googleSearch'],
-    dynamicTools: [
-      {
-        name: 'lookup_order',
+    wireTools: [
+      testWireTool('lookup_order', {
         description: 'Fetch order state',
         parameters: {
           type: 'object',
           properties: { orderId: { type: 'string' } },
           required: ['orderId'],
         },
-      },
+      }),
     ],
   });
   const camel: Record<string, unknown> = {};

@@ -1,14 +1,17 @@
-import '../../fixtures/test-host.ts';
-import '../../fixtures/enable-test-internals.ts';
-import { PUBLIC_UNAVAILABLE } from '../../../src/guardrails/error.ts';
-import { assertEquals } from '../../../src/kernel/engine/assert.ts';
-import { resolveTurn } from '../../../src/kernel/registry/resolve.ts';
-import type { ProviderCompleteRequest, TurnEvent } from '../../../src/kernel/types.ts';
-import { createInteractionsProvider } from '../../../src/providers/google/google-interactions.ts';
-import { camelToSnake, toInteractionsBody } from '../../../src/providers/google/interactions.ts';
-import type { GeminiVault } from '../../../src/providers/google/keys.ts';
-import { INTERACTIONS_JSON_URL, INTERACTIONS_URL } from '../../../src/providers/google/urls.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
+import '../../../fixtures/test-host.ts';
+import '../../../fixtures/enable-test-internals.ts';
+import { PUBLIC_UNAVAILABLE } from '../../../../src/guardrails/error.ts';
+import { assertEquals } from '../../../../src/kernel/engine/assert.ts';
+import { resolveTurn } from '../../../../src/kernel/registry/resolve.ts';
+import type { ProviderCompleteRequest, TurnEvent } from '../../../../src/kernel/types.ts';
+import {
+  camelToSnake,
+  toInteractionsBody,
+} from '../../../../src/providers/google/interactions/framing.ts';
+import { createInteractionsProvider } from '../../../../src/providers/google/interactions/stream.ts';
+import type { GeminiVault } from '../../../../src/providers/google/keys.ts';
+import { INTERACTIONS_JSON_URL, INTERACTIONS_URL } from '../../../../src/providers/google/urls.ts';
+import { testInternals } from '../../../fixtures/testInternals.js';
 
 const _internals = testInternals('google-interactions');
 
@@ -663,6 +666,48 @@ Deno.test('_internals.normalizeSpeechMedia wraps raw PCM media as WAV when speec
   assertEquals(new TextDecoder().decode(bytes.slice(8, 12)), 'WAVE');
 });
 
+Deno.test('_internals.readData and readMime extract part media properties', () => {
+  assertEquals(_internals.readData({ data: 'abc' }), 'abc');
+  assertEquals(_internals.readData({ data: '' }), undefined);
+  assertEquals(_internals.readData({}), undefined);
+
+  assertEquals(_internals.readMime({ mime_type: 'image/png' }), 'image/png');
+  assertEquals(_internals.readMime({ mimeType: 'audio/wav' }), 'audio/wav');
+  assertEquals(_internals.readMime({}), undefined);
+});
+
+Deno.test('_internals.yieldMediaChunk yields media events for binary chunks', () => {
+  const chunks = Array.from(
+    _internals.yieldMediaChunk({ data: 'aGVsbG8=', mime_type: 'image/png' }),
+  );
+  assertEquals(chunks.length, 1);
+  assertEquals((chunks[0] as { type: string }).type, 'media');
+
+  const pcmBytes = _internals.bytesToBase64(new Uint8Array([0, 0, 0, 0]));
+  const pcmChunks = Array.from(
+    _internals.yieldMediaChunk({ data: pcmBytes, mime_type: 'audio/pcm' }),
+  );
+  assertEquals(pcmChunks.length, 1);
+  assertEquals((pcmChunks[0] as { media?: { mimeType?: string } })?.media?.mimeType, 'audio/wav');
+
+  const empty = Array.from(_internals.yieldMediaChunk({}));
+  assertEquals(empty.length, 0);
+});
+
+Deno.test('_internals.scanMediaParts scans nested content arrays', () => {
+  const parts = [
+    { type: 'image', data: 'aGVsbG8=', mime_type: 'image/png' },
+    { type: 'text', text: 'ignore text' },
+    null,
+  ];
+  const events = Array.from(_internals.scanMediaParts(parts));
+  assertEquals(events.length, 1);
+  assertEquals((events[0] as { type: string }).type, 'media');
+
+  const notArray = Array.from(_internals.scanMediaParts('invalid'));
+  assertEquals(notArray.length, 0);
+});
+
 Deno.test('_internals.eventType prefers event_type, falls back to type, then empty string', () => {
   assertEquals(
     _internals.eventType({ event_type: 'content.delta', type: 'ignored' }),
@@ -685,6 +730,33 @@ Deno.test('_internals.isCompleteEvent matches interaction completion kinds', () 
   assertEquals(_internals.isCompleteEvent('interaction.created'), false);
   assertEquals(_internals.isCompleteEvent('interaction.status_update'), false);
   assertEquals(_internals.isCompleteEvent('content.delta'), false);
+});
+
+Deno.test('_internals.foldArgumentsDelta appends streamed argument chunks', () => {
+  const fold = _internals.newStreamFold();
+  _internals.foldArgumentsDelta({ arguments: '{"q":' }, 0, fold);
+  _internals.foldArgumentsDelta({ arguments: '"query"}' }, 0, fold);
+  assertEquals(fold.functionCalls.get(0)?.arguments, '{"q":"query"}');
+});
+
+Deno.test('_internals.foldFunctionCallDelta parses function calls and deduplicates', () => {
+  const fold = _internals.newStreamFold();
+  const events1 = _internals.foldFunctionCallDelta(
+    { id: 'call_1', name: 'search', arguments: '{"q":"test"}' },
+    fold,
+  );
+  assertEquals(events1.length, 1);
+  assertEquals(events1[0]?.type, 'tool');
+  assertEquals(events1[0]?.tool?.id, 'call_1');
+  assertEquals(events1[0]?.tool?.name, 'search');
+  assertEquals(events1[0]?.tool?.arguments, { q: 'test' });
+
+  // Deduplication check
+  const events2 = _internals.foldFunctionCallDelta(
+    { id: 'call_1', name: 'search', arguments: { q: 'test' } },
+    fold,
+  );
+  assertEquals(events2.length, 0);
 });
 
 Deno.test('_internals.foldDeltaPayload accumulates text into the fold', () => {

@@ -1,70 +1,12 @@
 /**
- * Tool catalog and MIME helpers.
- *
- * Model wire metadata is host-owned on `profile.model.config`. This module only
- * keeps builtin/custom tool descriptors and shared MIME utilities.
+ * MIME helpers and model spec utilities.
  *
  * @module
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
 import { MEDIA_INPUT_KINDS } from '../schema.ts';
-import type {
-  BuiltinToolId,
-  Catalog,
-  MediaInputKind,
-  ModelId,
-  ModelSpec,
-  Profile,
-  ThinkingLevel,
-  ToolCatalogEntry,
-  ToolId,
-} from '../types.ts';
-
-const ASK_USER_SCHEMA = {
-  type: 'object',
-  properties: {
-    kind: { type: 'string', enum: ['confirm', 'choice', 'text'] },
-    prompt: { type: 'string' },
-    options: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['kind', 'prompt'],
-};
-
-/** Harness tools that always ship with THEORUM. */
-const HARNESS_TOOLS: Record<ToolId, ToolCatalogEntry> = {
-  askUser: { kind: 'custom', ui: true, schema: ASK_USER_SCHEMA },
-};
-
-/** Live tool catalog. Starts with harness tools; presets/hosts register more. */
-const CATALOG: Catalog = {
-  tools: { ...HARNESS_TOOLS },
-};
-
-/** Register or replace tool descriptors (idempotent per id). */
-function registerTools(entries: Record<string, ToolCatalogEntry>): void {
-  Object.assign(CATALOG.tools, entries);
-}
-
-/** Look up one registered tool descriptor. */
-function getTool(id: ToolId): ToolCatalogEntry | undefined {
-  return CATALOG.tools[id];
-}
-
-/** Ids of all registered provider builtins. */
-function listBuiltinIds(): BuiltinToolId[] {
-  return Object.entries(CATALOG.tools)
-    .filter(([, entry]) => entry.kind === 'builtin')
-    .map(([id]) => id);
-}
-
-/** Restore harness-only tools (tests / host reloads). */
-function resetTools(): void {
-  for (const id of Object.keys(CATALOG.tools)) {
-    delete CATALOG.tools[id];
-  }
-  Object.assign(CATALOG.tools, HARNESS_TOOLS);
-}
+import type { MediaInputKind, ModelId, ModelSpec, Profile, ThinkingLevel } from '../types.ts';
 
 function mimeEssence(mime: string): string {
   const [base] = mime.split(';');
@@ -130,16 +72,11 @@ function clampThinkingLevelForApiId(
 }
 
 export {
-  CATALOG,
   clampThinkingLevel,
   clampThinkingLevelForApiId,
-  getTool,
-  listBuiltinIds,
   mediaKindForMime,
   mimeAllowed,
   mimeEssence,
   modelEntryByApiId,
-  registerTools,
   requireModelSpec,
-  resetTools,
 };

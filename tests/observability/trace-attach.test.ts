@@ -10,8 +10,8 @@ Deno.test('trace-attach has no eager google/interactions import', async () => {
   const src = await Deno.readTextFile(
     new URL('../../src/observability/trace-attach.ts', import.meta.url),
   );
-  assertEquals(/from\s+['"].*google\/interactions\.ts['"]/.test(src), false);
-  assertEquals(src.includes("import('../providers/google/interactions.ts')"), true);
+  assertEquals(/from\s+['"].*google\/interactions\/.*['"]/.test(src), false);
+  assertEquals(src.includes("import('../providers/google/interactions/framing.ts')"), true);
 });
 
 Deno.test('trace-attach subprocess loads interactions wire only for geminiInteractions', async () => {

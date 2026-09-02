@@ -58,7 +58,13 @@ function lazyOpenRouterChat(config: OpenAiGatewayConfig): ModelProvider {
 
 function lazyGoogleInteractions(config: GeminiTransport): ModelProvider {
   return lazyAdapter(() =>
-    import('./google/google-interactions.ts').then((m) => m.createInteractionsProvider(config)),
+    import('./google/interactions/mod.ts').then((m) => m.createInteractionsProvider(config)),
+  );
+}
+
+function lazyGoogleLive(config: GeminiTransport): ModelProvider {
+  return lazyAdapter(() =>
+    import('./google/live/mod.ts').then((m) => m.createGoogleLiveProvider(config)),
   );
 }
 
@@ -95,6 +101,13 @@ export function createProvider(
     return lazyGoogleInteractions(options.gemini);
   }
 
+  if (protocol === 'geminiLive' && provider === 'google') {
+    if (!options.gemini) {
+      throw new TheorumError('createProvider requires gemini transport for google Gemini Live');
+    }
+    return lazyGoogleLive(options.gemini);
+  }
+
   if (protocol === 'openAi' && provider === 'openrouter') {
     if (!options.openAiGateway) {
       throw new TheorumError('createProvider requires openAiGateway config for openAi/openrouter');
@@ -122,6 +135,7 @@ exposeForTests('create-provider', {
   createProvider,
   lazyOpenRouterChat,
   lazyGoogleInteractions,
+  lazyGoogleLive,
   lazySpeech,
   lazyLocal,
 });

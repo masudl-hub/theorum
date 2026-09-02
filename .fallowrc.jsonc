@@ -2,6 +2,13 @@
   "$schema": "./node_modules/fallow/schema.json",
   "entry": [
     "mod.ts",
+    "src/kernel/mod.ts",
+    "src/providers/mod.ts",
+    "src/providers/local/mod.ts",
+    "src/guardrails/mod.ts",
+    "src/observability/mod.ts",
+    "src/presets/mod.ts",
+    "src/presets/google.ts",
     "src/host/mod.ts",
     "src/cli/index.ts",
     "tests/cli/**/*.ts",
@@ -13,6 +20,7 @@
     "tests/fixtures/**/*.ts",
     "tests/fixtures/**/*.js"
   ],
+  "ignoreDependencies": ["@ast-grep/cli"],
   // docs-truth loads the ownership graph via dynamic import (graph.mjs → _map.mjs).
   "dynamicallyLoaded": ["docs/_map.mjs"],
   "ignorePatterns": ["node_modules/**", "coverage/**", "scripts/**", "src/cli/**", "npm/**"],

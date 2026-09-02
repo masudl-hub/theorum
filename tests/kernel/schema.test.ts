@@ -35,8 +35,9 @@ Deno.test('PROTOCOL_PROVIDERS covers every protocol and only known providers', (
 
 Deno.test('providersFor / protocolsFor / coerce stay on PROTOCOL_PROVIDERS', () => {
   assertEquals([...providersFor('geminiInteractions')], ['google']);
+  assertEquals([...providersFor('geminiLive')], ['google']);
   assertEquals([...providersFor('openAi')].sort().join(), 'local,openrouter');
-  assertEquals([...protocolsFor('google')], ['geminiInteractions']);
+  assertEquals([...protocolsFor('google')], ['geminiInteractions', 'geminiLive']);
   assertEquals(coerceProvider('geminiInteractions', 'openrouter'), 'google');
   assertEquals(coerceProtocol('openAi', 'google'), 'geminiInteractions');
   assertEquals(coerceProvider('openAi', 'local'), 'local');
@@ -109,4 +110,25 @@ Deno.test('isValidPair matches createProvider routing table', () => {
 Deno.test('GeminiBucket union matches GEMINI_BUCKETS', () => {
   const sample: GeminiBucket = 'paid';
   assertEquals(GEMINI_BUCKETS.includes(sample), true);
+});
+
+Deno.test('EXTRA_FIELDS covers registerTool keys shown in profile docs', () => {
+  const registerToolKeys = [
+    'type',
+    'name',
+    'description',
+    'category',
+    'access',
+    'paths',
+    'loadTier',
+    'permission',
+    'input',
+    'output',
+    'handler',
+  ];
+  for (const key of registerToolKeys) {
+    assertEquals(fieldMeta(key) != null, true, `missing EXTRA_FIELDS.${key}`);
+  }
+  const toolType = fieldMeta('type');
+  assertEquals(toolType?.options, ['builtin', 'function', 'loader']);
 });

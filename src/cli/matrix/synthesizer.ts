@@ -8,7 +8,8 @@
  * @module
  */
 
-import { getTool } from '../../kernel/registry/catalog.ts';
+import { getTool } from '../../kernel/tools/registry.ts';
+import { pickModel } from '../../kernel/registry/resolve.ts';
 import type { Profile, ToolId, TurnBlob, TurnRequest } from '../../kernel/types.ts';
 import { FIXTURE_PNG_BASE64, FIXTURE_WAV_BASE64, getFixtureForMime } from './fixtures.ts';
 
@@ -59,7 +60,8 @@ function applyRegisteredConflicts(
     if (!isEnabled(active, id)) {
       continue;
     }
-    const conflicts = getTool(id)?.conflictsWith ?? [];
+    const entry = getTool(id);
+    const conflicts = entry?.type === 'builtin' ? (entry.conflictsWith ?? []) : [];
     if (conflicts.some((other) => isEnabled(active, other))) {
       active[id] = false;
     }
@@ -78,7 +80,9 @@ function resolveStressTools(allowed: ToolId[], prefer?: ToolId): Partial<Record<
 
   if (prefer && allowed.includes(prefer)) {
     active[prefer] = true;
-    for (const c of getTool(prefer)?.conflictsWith ?? []) {
+    const preferTool = getTool(prefer);
+    const preferConflicts = preferTool?.type === 'builtin' ? (preferTool.conflictsWith ?? []) : [];
+    for (const c of preferConflicts) {
       if (allowed.includes(c)) {
         active[c] = false;
       }
@@ -87,7 +91,8 @@ function resolveStressTools(allowed: ToolId[], prefer?: ToolId): Partial<Record<
       if (t === prefer) {
         continue;
       }
-      const otherConflicts: ToolId[] = getTool(t)?.conflictsWith ?? [];
+      const other = getTool(t);
+      const otherConflicts: ToolId[] = other?.type === 'builtin' ? (other.conflictsWith ?? []) : [];
       if (otherConflicts.includes(prefer)) {
         active[t] = false;
       }
@@ -102,7 +107,7 @@ function resolveStressTools(allowed: ToolId[], prefer?: ToolId): Partial<Record<
 function conflictingAllowlistedTools(allowed: ToolId[]): ToolId[] {
   return allowed.filter((id) => {
     const entry = getTool(id);
-    return entry?.kind === 'builtin' && (entry.conflictsWith?.length ?? 0) > 0;
+    return entry?.type === 'builtin' && (entry.conflictsWith?.length ?? 0) > 0;
   });
 }
 
@@ -130,12 +135,30 @@ function resolveStressVoice(profile: Profile): TurnBlob[] {
   return voice;
 }
 
+/** Custom + builtin tool ids for the model selected on this turn. */
+function toolAllowlistForSelect(profile: Profile, select?: string): ToolId[] {
+  const modelId = pickModel(profile, select);
+  return [...profile.tools.allow, ...profile.model.config[modelId].builtInTools];
+}
+
+/** Union of custom + builtin ids across all models (matrix variants). */
+function allProfileToolIds(profile: Profile): ToolId[] {
+  const builtins = new Set<ToolId>();
+  for (const modelId of profile.model.allow) {
+    for (const id of profile.model.config[modelId].builtInTools) {
+      builtins.add(id);
+    }
+  }
+  return [...profile.tools.allow, ...builtins];
+}
+
 export function synthesizeStressCombo(
   profile: Profile,
   options: { preferTool?: ToolId } = {},
 ): TurnRequest {
   const select = resolveStressReasoning(profile);
-  const activeTools = resolveStressTools(profile.tools.allow ?? [], options.preferTool);
+  const allowlist = toolAllowlistForSelect(profile, select);
+  const activeTools = resolveStressTools(allowlist, options.preferTool);
   const attachments = resolveStressAttachments(profile);
   const voice = resolveStressVoice(profile);
   const promptText = `Execute comprehensive test turn for profile ${profile.id}. Validate all instructions and produce required outputs.`;
@@ -156,7 +179,7 @@ export function synthesizeMatrixCombos(
   profile: Profile,
 ): Array<{ name: string; req: TurnRequest }> {
   const combos: Array<{ name: string; req: TurnRequest }> = [];
-  const allowed = profile.tools.allow ?? [];
+  const allowed = allProfileToolIds(profile);
 
   combos.push({
     name: 'Lite (connectivity)',
@@ -206,7 +229,7 @@ function applyExplicitToolOverrides(
   profile: Profile,
   options: MatrixOptions,
 ): void {
-  const allowed = profile.tools.allow ?? [];
+  const allowed = allProfileToolIds(profile);
   base.tools = base.tools ?? {};
   applyGoogleFlagAliases(base.tools, allowed, options);
 

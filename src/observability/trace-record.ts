@@ -9,7 +9,7 @@
 
 import { isAbortError, publicError } from '../guardrails/error.ts';
 import { redactSensitiveOnly, sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
-import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
+import { OMIT_CANARY } from '../guardrails/canary.ts';
 import { sha256 } from '../kernel/engine/hash.ts';
 import type { Protocol } from '../kernel/schema.ts';
 import type { ResolvedGeneration, TurnBlob, TurnEvent, TurnRequest } from '../kernel/types.ts';
@@ -67,7 +67,7 @@ interface TraceRecord {
     temperature: number;
     maxOutputTokens: number;
     builtins: string[];
-    custom: string[];
+    visibleTools: string[];
     structured: string | null;
     image: unknown;
   };
@@ -133,13 +133,22 @@ async function snapshotEvent(event: TurnEvent): Promise<TraceEvent> {
     row.structured = event.structured;
   }
   if (event.tool) {
-    const { name, arguments: args, result } = event.tool;
+    const { name, arguments: args, output, phase, failure } = event.tool;
     row.tool = { name, arguments: args };
-    if (result) {
+    if (output !== undefined && phase === 'complete') {
+      const data =
+        typeof output === 'object' && output !== null
+          ? (output as Record<string, unknown>)
+          : { value: output };
       row.tool.result = {
-        status: result.status,
-        ...(result.finding ? { finding: result.finding } : {}),
-        ...(result.data ? { data: result.data } : {}),
+        status: 'ok',
+        ...(typeof data.finding === 'string' ? { finding: data.finding } : {}),
+        data,
+      };
+    } else if (phase === 'error' && failure) {
+      row.tool.result = {
+        status: 'error',
+        finding: failure.message,
       };
     }
   }

@@ -46,7 +46,7 @@ function attachResolved(
       temperature: generation.temperature,
       maxOutputTokens: generation.maxOutputTokens,
       builtins: generation.builtins,
-      custom: generation.custom,
+      visibleTools: generation.tools.visible,
       structured: generation.structured,
       image: generation.image,
     };
@@ -68,7 +68,7 @@ async function attachTape(
     record.upstreamLog = await tapeUpstream(upstream, canary ?? '');
   }
   if (generation && system !== undefined && protocol === 'geminiInteractions') {
-    const { toInteractionsBody } = await import('../providers/google/interactions.ts');
+    const { toInteractionsBody } = await import('../providers/google/interactions/framing.ts');
     record.wire = await tapeUpstream(
       toInteractionsBody(providerCompleteRequest(generation, system)),
       canary ?? '',

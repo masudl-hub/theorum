@@ -45,7 +45,7 @@ This barrel re-exports the Google pack:
 
 | Export | Role |
 | --- | --- |
-| `registerGooglePreset` | Register Google builtins into `CATALOG` |
+| `registerGooglePreset` | Register Google builtins into the tool registry |
 | `GOOGLE_BUILTIN_TOOLS` | Catalog entries |
 | `GOOGLE_IMAGE_ASPECT_RATIOS`, `GOOGLE_IMAGE_INPUT_MIMES`, `GOOGLE_IMAGE_SIZES`, `GOOGLE_VOICE_INPUT_MIMES`, `GOOGLE_SPEECH_VOICES` | Profile authoring constants |
 | `GoogleImageAspectRatio`, `GoogleImageInputMime`, `GoogleImagePins`, `GoogleImageSize`, `GoogleVoiceInputMime`, `GoogleSpeechVoice` | Typed pins and vocabularies |

@@ -52,7 +52,7 @@ outside `isValidPair`. `providersFor` / `protocolsFor` / `coerceProvider` /
 `coerceProtocol` are the same table.
 Every id in `allow` must exist in `config`. Each `ModelSpec` carries wire ids
 (`apiId`), `thinking` / `summaries` maps,
-`thinkingLevels`, `maxOutputTokens`, `temperature`, `keyBuiltins`, optional
+`thinkingLevels`, `maxOutputTokens`, `temperature`, `builtInTools`, optional
 vault `key`, optional `compaction`.
 
 Defaults applied at registration (`profiles.ts`):
@@ -85,11 +85,10 @@ for one agent turn. Pipeline (see `engine/runner/mod.ts`):
    `guardrails.canary` is enabled.
 5. **Provider stream** — `provider.complete` yields partial events; runner may
    gate thoughts/media per `outputs.streaming`.
-6. **Tool loop** — while under `maxSteps`, tool calls execute via `executeTool`
-   / `invokeFromUi`; results feed the next step. `handlePendingDynamicTools` uses
-   `generation.transport`: Interactions continues with `previous_interaction_id` +
-   every `function_result` from that step; OpenAI-compat providers append tool-call
-   history. Server-side `codeExecution` does not consume a runner step.
+6. **Tool loop** — while under `maxSteps`, tool calls execute via `executeRegisteredTool`
+   (shared with `invokeTool`); results feed the next step. `generation.transport` selects
+   Interactions continuation (`previous_interaction_id` + `function_result` steps) vs
+   OpenAI-compat tool-call history. Server-side `codeExecution` does not consume a runner step.
 7. **Validation / repair** — structured output validators (`outputs.validation`)
    may trigger repair turns with `input.repair`.
 8. **Egress** — `guardrails.egress.enforce` may block, refuse, or retry with
@@ -139,29 +138,59 @@ is Google's, not a THEORUM setting.
 `false` POSTs without `alt=sse` and folds the JSON `interaction` into the same
 event types.
 
-## Dynamic tools
+## Registered tools
 
-Per-turn tools sit under profile `tools.allow`:
+Tools are registered once at host startup via `registerTool`. Profiles
+declare a ceiling with `tools.allow`; turns opt in with `tools: { [id]: true }`.
 
 ```ts
-TurnRequest: {
-  dynamicTools?: DynamicToolDeclaration[];
-  dynamicToolLoader?: DynamicToolLoader; // T2 expansion
-}
+// Startup
+registerTool({
+  type: 'function',
+  name: 'lookup_order',
+  description: 'Fetch order state',
+  category: 'operations',
+  access: 'read-only',
+  paths: ['*'],
+  loadTier: 'T0',
+  permission: 'session_consent',
+  input: z.object({ orderId: z.string() }),
+  output: z.object({ finding: z.string() }),
+  handler: async (input) => ({ finding: `Order ${input.orderId} is in transit.` }),
+});
+
+// Profile — allow ceiling only
+tools: { allow: ['lookup_order', 'load_tools'] }
+
+// Turn — gate + optional T1 resolver
+runTurn({
+  profile,
+  tools: { lookup_order: true },
+  toolLoader: (ctx) => (ctx.input?.text?.includes('order') ? ['lookup_order'] : []),
+  input: { text: '...' },
+}, provider);
+
+// Host resume (interactive, confirmation, permission)
+invokeTool({ profile, name: 'ask_user', input: {...}, resume: { value: 'yes' } });
+
+// Host direct invoke (command palette) — gate like a turn
+invokeTool({ profile, name: 'lookup_order', input: {...}, tools: { lookup_order: true } });
 ```
 
-| Field | Role |
-| --- | --- |
-| `loadTier` | `T0` / `T1` / `T2` visibility strategy (host-owned) |
-| `permissionTier` | `auto` / `session_consent` / `always_confirm` |
-| `parameters` | JSON Schema fragment sent to the provider |
+| Layer | Owner | Role |
+| --- | --- | --- |
+| Catalog | Registry | Schema, handler, `access`, `loadTier`, `permission`, wire metadata |
+| Profile | Host | `tools.allow` ceiling only |
+| Turn | Host | `tools[id]: true` gates; `toolLoader` for T1; `sessionPermissions` for consent |
+| Execution | Kernel | Shared `executeRegisteredTool` for model and `invokeTool` paths |
 
-`executeTool` runs catalogued builtins/custom tools. Conflicts (e.g. Google maps vs
-search) are enforced via catalog `conflictsWith`. MIME classification
-(`MEDIA_INPUT_KINDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`,
-`MEDIA_WILDCARDS`) lives in `schema.ts` so docs/UI can list the same allowlist
-the ingress sanitizer uses. Dynamic-tool `loadTier` / `permissionTier` values
-are `TOOL_LOAD_TIERS` / `TOOL_PERMISSION_TIERS`.
+Builtins (`type: 'builtin'`) are provider-native — kernel pins capabilities in
+`generation.builtins` but does not execute handlers. Function and loader tools require
+Zod input/output validated at registration.
+Catalog `conflictsWith` enforces builtin mutual exclusion (e.g. Google maps vs search).
+MIME classification (`MEDIA_INPUT_KINDS`, `ATTACHMENT_ACCEPT_MIMES`, …) lives in
+`schema.ts`. Tool catalog constants: `TOOL_LOAD_TIERS`, `TOOL_ACCESS_LEVELS`,
+`TOOL_PERMISSION_TIERS`.
 
 ## Outputs and guardrails
 
@@ -353,10 +382,11 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
 | --- | --- |
 | Compaction | `CompactionSplit`, `CompactionTokens`, `compactionMeter`, `compactionNeeded`, `estimateHistoryTokens`, `HISTORY_MEDIA_TOKENS`, `HISTORY_TEXT_ENCODING`, `resolveCompactionTokens`, `resolveHistoryTokens`, `shouldCompact`, `splitForCompaction` |
 | Runner | `runTurn` |
-| Catalog | `CATALOG`, `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
-| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_PERMISSION_TIERS` |
+| Catalog | `clampThinkingLevel`, `clampThinkingLevelForApiId`, `mediaKindForMime`, `getTool`, `listBuiltinIds`, `mimeAllowed`, `mimeEssence`, `modelEntryByApiId`, `registerTools`, `requireModelSpec`, `resetTools` |
+| Schema | `PROFILE_FIELDS`, `EXTRA_FIELDS`, `fieldMeta`, `catalogPathFor`, `DYNAMIC_FIELD_PARENTS`, `PROTOCOLS`, `PROVIDERS`, `PROTOCOL_PROVIDERS`, `providersFor`, `protocolsFor`, `isValidPair`, `coerceProvider`, `coerceProtocol`, `THINKING_LEVELS`, `CONTROL_IDS`, `GEMINI_BUCKETS`, `GEMINI_FREE_BUCKETS`, `MEDIA_INPUT_KINDS`, `MEDIA_INPUT_KIND_VALUES`, `MEDIA_WILDCARDS`, `ATTACHMENT_ACCEPT_MIMES`, `VOICE_ACCEPT_MIMES`, `SUMMARY_MODES`, `STREAM_MODES`, `SPEECH_AUDIO_FORMATS`, `SCHEMA_ENFORCEMENTS`, `COMPACTION_METERS`, `COMPACTION_TIMINGS`, `EGRESS_ON_BLOCK`, `TURN_STOP_KINDS`, `TOOL_LOAD_TIERS`, `TOOL_ACCESS`, `TOOL_PERMISSION` |
 | Profiles | `ProfileDefinition`, `clearProfiles`, `defineProfile`, `getProfile`, `hasProfile`, `listProfiles`, `registerProfile`, `registerProfiles`, `projectProfile`, `resolveTurn` |
-| Structured + tools | `getStructured`, `registerStructured`, `executeTool` |
+| Tools | `defineTool`, `registerTool`, `registerTools`, `invokeTool`, `executeRegisteredTool`, `registerHarnessTools`, `getTool`, `hasTool`, `requireTool`, `listTools`, `listBuiltinIds`, `listFunctionIds`, `resetTools`, `formatToolResult`, `TOOL_TYPES`, `TOOL_ACCESS`, `TOOL_LOAD_TIERS`, `TOOL_PERMISSION` |
+| Structured | `getStructured`, `registerStructured` |
 | Stop / resume | `ProfileResumeSpec`, `TurnContinueFrom`, `TurnStop`, `TurnStopKind`, `AUTO_CONTINUE_DELAY_MS`, `CONTINUE_INSTRUCTION`, `DEFAULT_AUTO_CONTINUE`, `GenerationStopError`, `isGenerationStopError`, `isResumeableStop`, `isUserCancelledStop`, `shouldAutoContinue`, `turnStopFromClientStreamEnd`, `turnStopFromInteractionStatus`, `turnStopFromOpenAiFinishReason` |
 
 ```theorum-evidence
@@ -402,11 +432,14 @@ Live barrel: `src/kernel/mod.ts`. Type surface: `export type *` from
         { "kind": "contract_test", "path": "tests/kernel/delta.test.ts" }
       ]
     },
-    "Dynamic tools": {
+    "Registered tools": {
       "supports": [
-        { "kind": "source", "path": "src/kernel/registry/tools.ts" },
-        { "kind": "source", "path": "src/kernel/engine/runner/tools.ts" },
+        { "kind": "source", "path": "src/kernel/tools/mod.ts" },
+        { "kind": "source", "path": "src/kernel/tools/execute.ts" },
+        { "kind": "source", "path": "src/kernel/tools/resolve.ts" },
+        { "kind": "source", "path": "src/kernel/engine/runner/steps.ts" },
         { "kind": "source", "path": "src/kernel/schema.ts" },
+        { "kind": "contract_test", "path": "tests/kernel/tools.test.ts" },
         { "kind": "contract_test", "path": "tests/kernel/theorum.test.ts" }
       ]
     },

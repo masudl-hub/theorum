@@ -16,18 +16,29 @@ import type {
   FieldMeta,
   GeminiBucket,
   GeminiFreeBucket,
+  LiveActivityHandling,
+  LiveContextCompression,
+  LiveSpeechSensitivity,
   MediaInputKind,
   Protocol,
+  ToolLoadTier,
   Provider,
   SchemaEnforcement,
   SpeechAudioFormat,
   StreamMode,
   SummaryMode,
   ThinkingLevel,
-  ToolLoadTier,
-  ToolPermissionTier,
   TurnStopKind,
 } from './schema.ts';
+import type {
+  ProfileToolsSpec,
+  RegisteredTool,
+  ToolCallEvent,
+  ToolLoadContext,
+  TurnToolLoader,
+  TurnToolSnapshot,
+  WireFunctionTool,
+} from './tools/types.ts';
 
 export type {
   CompactionMeter,
@@ -37,17 +48,26 @@ export type {
   FieldMeta,
   GeminiBucket,
   GeminiFreeBucket,
+  LiveActivityHandling,
+  LiveContextCompression,
+  LiveSpeechSensitivity,
   MediaInputKind,
+  ProfileToolsSpec,
   Protocol,
+  ToolLoadTier,
+  ToolLoadContext,
+  TurnToolLoader,
   Provider,
+  RegisteredTool,
   SchemaEnforcement,
   SpeechAudioFormat,
   StreamMode,
   SummaryMode,
   ThinkingLevel,
-  ToolLoadTier,
-  ToolPermissionTier,
+  ToolCallEvent,
   TurnStopKind,
+  TurnToolSnapshot,
+  WireFunctionTool,
 };
 
 /** Any host-declared model id. */
@@ -55,12 +75,8 @@ export type ModelId = string;
 
 /** Provider-projected builtin tool id (registered by presets/adapters). */
 export type BuiltinToolId = string;
-/** Harness custom tool that ships with THEORUM. */
-export type HarnessToolId = 'askUser';
-/** Host-owned or harness custom tool id. */
-export type CustomToolId = HarnessToolId | (string & Record<never, never>);
 /** Any tool id accepted by profile allowlists and per-turn gates. */
-export type ToolId = BuiltinToolId | CustomToolId;
+export type ToolId = string;
 
 /** Id of a host-registered structured output schema. */
 export type StructuredSchemaId = string;
@@ -125,14 +141,12 @@ export interface ModelSpec {
   maxOutputTokens: number;
   temperature: number;
   /**
-   * Builtins that may use `profile.model.key`.
-   * Any other enabled builtin selects the overflow vault slot (`paid`).
-   * Host-owned policy — THEORUM does not infer tool pricing.
+   * Provider-native builtins this model supports. Opt in per turn with `tools[id]: true`.
    */
-  keyBuiltins: BuiltinToolId[];
+  builtInTools: BuiltinToolId[];
   /**
-   * Optional vault slot for this model. When set, overrides `profile.model.key`
-   * (and builtin routing). Host-owned — e.g. pin image models to `paid`.
+   * Optional vault slot for this model. When set, overrides `profile.model.key`.
+   * Host-owned — e.g. pin image models to `paid`.
    */
   key?: GeminiBucket;
   /** Optional compaction policy for this model's context window. */
@@ -205,28 +219,10 @@ export interface CompactionSpec {
   trigger?: (ctx: CompactionTriggerContext) => boolean | Promise<boolean>;
 }
 
-/** Static metadata for harness, preset, and host-registered tools. */
-export interface ToolCatalogEntry {
-  kind: 'builtin' | 'custom';
-  ui: boolean;
-  schema?: Record<string, unknown>;
-  /** Interactions API `tools[].type` when this builtin is projected. */
-  interactionsType?: string;
-  /** OpenRouter plugin id enabled when this builtin is on. */
-  openRouterPlugin?: string;
-  /** Drop this builtin when any listed sibling builtin is also requested. */
-  conflictsWith?: ToolId[];
-}
-
 /** Host-registered structured output schema and enforcement mode. */
 export interface StructuredSpec {
   enforced: SchemaEnforcement;
   jsonSchema?: Record<string, unknown>;
-}
-
-/** In-memory tool catalog shape. */
-export interface Catalog {
-  tools: Record<ToolId, ToolCatalogEntry>;
 }
 
 /** Per-turn file, byte, and MIME-specific input limits. */
@@ -290,6 +286,40 @@ export interface ProfileSpeechSpec {
    * `mp3` requires `protocol: 'openAi'` speech; rejected on Interactions.
    */
   format?: SpeechAudioFormat;
+}
+
+/** Voice activity detection & barge-in configuration for live bidirectional streaming. */
+export interface LiveVadSpec {
+  activityHandling?: LiveActivityHandling;
+  startSensitivity?: LiveSpeechSensitivity;
+  endSensitivity?: LiveSpeechSensitivity;
+  prefixPaddingMs?: number;
+  silenceDurationMs?: number;
+}
+
+/** Audio transcription toggles for live sessions. */
+export interface LiveTranscriptionSpec {
+  input?: boolean;
+  output?: boolean;
+}
+
+/**
+ * Output pins for a live-role profile (bidirectional WebSocket audio/video session).
+ * The live model itself lives in `model.allow` / `model.config`.
+ */
+export interface ProfileLiveSpec {
+  /** Output TTS voice name (e.g. 'Puck', 'Aoede', 'Charon'). */
+  voice?: string;
+  /** Voice activity detection & barge-in configuration. */
+  vad?: LiveVadSpec;
+  /** Whether session resumption updates and reconnection handles are enabled. */
+  sessionResumption?: boolean;
+  /** Context window compression mechanism (e.g. 'slidingWindow' or 'none'). */
+  contextCompression?: LiveContextCompression;
+  /** Proactivity: allow model to stay silent or ignore irrelevant input. */
+  proactiveAudio?: boolean;
+  /** Real-time input/output audio transcriptions. */
+  transcription?: LiveTranscriptionSpec;
 }
 
 /** Stream delivery controls enforced by the kernel. */
@@ -377,6 +407,8 @@ export interface ProfileOutputsSpec {
   image?: ProfileImageSpec;
   /** Pins for a speech-role profile (`voice` / `format`). Model id is on `model`. */
   speech?: ProfileSpeechSpec;
+  /** Pins for a live-role profile (bidirectional streaming session). */
+  live?: ProfileLiveSpec;
   validation?: ProfileValidationSpec;
   streaming?: ProfileStreamingSpec;
   /** Resume / Continue policy for non-user stops. */
@@ -393,7 +425,7 @@ export interface Profile {
     systemByRole?: Record<string, string>;
   };
   model: ProfileModelSpec;
-  tools: { allow: ToolId[] };
+  tools: ProfileToolsSpec;
   inputs: ProfileInputsSpec;
   outputs: ProfileOutputsSpec;
   guardrails: ProfileGuardrailsSpec;
@@ -446,43 +478,6 @@ export interface TurnHistoryMessage {
   metadata?: Record<string, unknown>;
 }
 
-/** Context supplied to a dynamic tool authorization hook. */
-export interface DynamicToolExecutionContext {
-  args: Record<string, unknown>;
-  profile: Profile;
-  sessionPermissions?: string[];
-}
-
-/** Context supplied to a host dynamic tool schema loader. */
-export interface DynamicToolLoadContext {
-  name: string;
-  args: Record<string, unknown>;
-  profile: Profile;
-  currentTools: DynamicToolDeclaration[];
-  sessionPermissions?: string[];
-}
-
-/** Host function that loads more tool declarations during a turn. */
-export type DynamicToolLoader = (
-  context: DynamicToolLoadContext,
-) => DynamicToolDeclaration[] | Promise<DynamicToolDeclaration[]>;
-
-/** Runtime tool schema and execution policy supplied by the host app. */
-export interface DynamicToolDeclaration {
-  name: string;
-  description?: string;
-  parameters?: Record<string, unknown>;
-  loadTier?: ToolLoadTier;
-  permissionTier?: ToolPermissionTier;
-  category?: string;
-  /** Marks this declaration as a schema-loader tool for T2 expansion. */
-  loadsDynamicTools?: boolean;
-  handler?: (args: Record<string, unknown>) => ToolEnvelope | Promise<ToolEnvelope>;
-  canExecute?: (
-    context: DynamicToolExecutionContext,
-  ) => boolean | Promise<boolean> | ToolEnvelope | Promise<ToolEnvelope>;
-}
-
 /** Generic repair request used for validation and egress retry turns. */
 export interface TurnRepairRequest {
   previousOutput: string;
@@ -510,6 +505,8 @@ export interface TurnInput {
    * Ignored when `meter` is `'history'`.
    */
   inputTokens?: number;
+  /** Optional session resumption handle for continuing live WebSocket sessions. */
+  sessionResumptionHandle?: string;
 }
 
 /** Host request after kernel ingress normalization. */
@@ -538,10 +535,13 @@ export interface TurnRequest {
   sessionPermissions?: string[];
   /** Opt-in gates. Profile `allow` is the ceiling; a tool is off until `tools[id]` is true. */
   tools?: Partial<Record<ToolId, boolean>>;
-  /** Runtime tool declarations (e.g. load_when_needed strategy) */
-  dynamicTools?: DynamicToolDeclaration[];
-  /** Generic host-owned loader for T2 dynamic tool schema expansion. */
-  dynamicToolLoader?: DynamicToolLoader;
+  /** Host channel/path for catalog `paths` filtering. */
+  path?: string;
+  /**
+   * Host-owned T1 resolver — returns tool ids to wire at turn start.
+   * Only tools with `loadTier: 'T1'` in allow and gated on are promoted.
+   */
+  toolLoader?: TurnToolLoader;
   /** Host-owned metadata preserved for traces; the kernel does not interpret it. */
   metadata?: Record<string, unknown>;
   /**
@@ -555,9 +555,10 @@ export interface TurnRequest {
    */
   continueFrom?: TurnContinueFrom;
   input?: TurnInput;
-  toolInvoke?: { name: CustomToolId; arguments: Record<string, unknown> };
   /** Provider for the compaction profile when `timing: 'before'`. Falls back to the turn provider. */
   compactionProvider?: ModelProvider;
+  /** Optional session resumption handle for continuing live WebSocket sessions. */
+  sessionResumptionHandle?: string;
 }
 
 /** Safe profile projection suitable for UI or host inspection. */
@@ -569,7 +570,7 @@ export interface ProjectedProfile {
   models: ModelId[];
   select: Record<string, ModelId> | null;
   controls: ControlId[];
-  tools: Array<ToolCatalogEntry & { name: ToolId }>;
+  tools: Array<RegisteredTool | { name: ToolId; missing: true }>;
   inputs: Profile['inputs'];
   slots: Record<string, string[]>;
   outputs: Profile['outputs'];
@@ -593,15 +594,14 @@ export interface ProviderGenerationConfig {
 }
 
 /** Resolved provider transport derived once in `resolveTurn`. */
-export type ProviderTransport = 'interactions' | 'openAiCompat';
+export type ProviderTransport = 'interactions' | 'geminiLive' | 'openAiCompat';
 
 /** Fully-resolved provider request state created from a `TurnRequest`. */
 export interface ResolvedGeneration extends ProviderGenerationConfig {
-  /** Resolved transport — `'interactions'` for Google Gemini, `'openAiCompat'` otherwise. */
+  /** Resolved transport — `'interactions'` for Google Gemini Interactions, `'geminiLive'` for Gemini Live WebSocket, `'openAiCompat'` otherwise. */
   transport: ProviderTransport;
-  custom: CustomToolId[];
-  dynamicTools?: DynamicToolDeclaration[];
-  dynamicToolLoader?: DynamicToolLoader;
+  /** Mutable tool visibility and wire snapshot for this turn. */
+  tools: TurnToolSnapshot;
   sessionPermissions?: string[];
   history?: TurnHistoryMessage[];
   /**
@@ -613,23 +613,16 @@ export interface ResolvedGeneration extends ProviderGenerationConfig {
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
   speech?: ProfileSpeechSpec;
+  live?: ProfileLiveSpec;
   input: InteractionPart[];
   /**
-   * Gemini vault slot for Google Interactions transport only.
+   * Gemini vault slot for Google transports only.
    * Omitted for non-Google providers; never sent on the wire.
    */
   geminiBucket?: GeminiBucket;
   canary: string;
-}
-
-/** Tool execution status returned to the model and stream. */
-export type ToolStatus = 'ok' | 'error' | 'pause';
-
-/** Structured result envelope returned by deterministic tool handlers. */
-export interface ToolEnvelope {
-  status: ToolStatus;
-  finding?: string;
-  data?: Record<string, unknown>;
+  /** Optional session resumption handle for continuing live WebSocket sessions. */
+  sessionResumptionHandle?: string;
 }
 
 /** Token accounting emitted by providers or fallback estimation. */
@@ -700,11 +693,10 @@ export interface CompactionSignal {
 export interface TurnEvent {
   type: TurnEventType;
   text?: string;
-  tool?: {
-    name: string;
-    arguments?: Record<string, unknown>;
-    result?: ToolEnvelope;
+  tool?: ToolCallEvent & {
+    /** Provider-native tool call id when present. */
     id?: string;
+    arguments?: Record<string, unknown>;
   };
   structured?: unknown;
   media?: { mimeType: string; data: string };
@@ -712,6 +704,10 @@ export interface TurnEvent {
   evidence?: ProviderEvidenceEvent;
   tokens?: TurnTokens;
   interactionId?: string;
+  /** Session resumption handle updated during live sessions. */
+  sessionResumptionHandle?: string;
+  /** True when a user utterance interrupted an in-flight live model response (barge-in). */
+  interrupted?: boolean;
   /** Public-safe failure text for hosts to show users. */
   error?: string;
   /** Raw diagnostic detail for traces/logs; never surface to end users. */
@@ -745,11 +741,14 @@ export interface ProviderCompleteRequest extends Omit<ProviderGenerationConfig, 
    * Omitted for non-Google providers.
    */
   interactionOnlyInput?: Record<string, unknown>[];
-  dynamicTools?: DynamicToolDeclaration[];
-  dynamicToolLoader?: DynamicToolLoader;
+  /** Function tool wire declarations derived from the turn tool snapshot. */
+  wireTools?: WireFunctionTool[];
   structured: StructuredSchemaId | null;
   image: ImageResponseFormat | null;
   speech?: ProfileSpeechSpec;
+  live?: ProfileLiveSpec;
+  /** Optional session resumption handle for continuing live WebSocket sessions. */
+  sessionResumptionHandle?: string;
   /**
    * Gemini vault slot for Google Interactions transport only.
    * Required when completing via Google Interactions; omitted otherwise.

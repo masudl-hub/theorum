@@ -21,7 +21,7 @@
  *         summaries: { on: "auto", off: "none" },
  *         maxOutputTokens: 8192,
  *         temperature: 1,
- *         keyBuiltins: [],
+ *         builtInTools: [],
  *       },
  *     },
  *   },
@@ -41,6 +41,7 @@ export {
   describeError,
   isAbortError,
   publicError,
+  PUBLIC_CANARY,
   TheorumError,
   throwIfAborted,
   toErrorEvent,
@@ -56,10 +57,34 @@ export {
 } from './src/guardrails/quota.ts';
 export {
   PROJECT_ID_MAX,
+  redactSensitiveOnly,
   sanitizeProjectId,
   sanitizeText,
   sanitizeTurnRequest,
 } from './src/guardrails/sanitize.ts';
+export {
+  bindCanary,
+  createCanaryGateSession,
+  createCanaryStreamGate,
+  createLiveOutboundGateSession,
+  eventHasCanary,
+  filterCanaryGatedEvents,
+  finalizeLiveOutboundTurn,
+  mintCanary,
+  OMIT_CANARY,
+  processLiveOutboundBatch,
+  redactCanary,
+  scanTextForCanaryLeak,
+  standardEgressEnforce,
+  wrapUserData,
+} from './src/guardrails/mod.ts';
+export type {
+  CanaryGateResult,
+  CanaryGateSession,
+  CanaryStreamGate,
+  LiveOutboundBatchResult,
+  LiveOutboundGateSession,
+} from './src/guardrails/mod.ts';
 export type { CompactionSplit, CompactionTokens } from './src/kernel/engine/compaction.ts';
 export {
   compactionMeter,
@@ -72,20 +97,16 @@ export {
   shouldCompact,
   splitForCompaction,
 } from './src/kernel/engine/compaction.ts';
+export { prepareLiveInboundText } from './src/kernel/engine/live-inbound.ts';
 export { runTurn } from './src/kernel/engine/runner.ts';
 export {
-  CATALOG,
   clampThinkingLevel,
   clampThinkingLevelForApiId,
-  getTool,
-  listBuiltinIds,
   mediaKindForMime,
   mimeAllowed,
   mimeEssence,
   modelEntryByApiId,
-  registerTools,
   requireModelSpec,
-  resetTools,
 } from './src/kernel/registry/catalog.ts';
 export type { ProfileDefinition } from './src/kernel/registry/profiles.ts';
 export {
@@ -97,9 +118,8 @@ export {
   registerProfile,
   registerProfiles,
 } from './src/kernel/registry/profiles.ts';
-export { projectProfile, resolveTurn } from './src/kernel/registry/resolve.ts';
+export { pickModel, projectProfile, resolveTurn } from './src/kernel/registry/resolve.ts';
 export { getStructured, registerStructured } from './src/kernel/registry/schemas.ts';
-export { executeTool } from './src/kernel/registry/tools.ts';
 export {
   ATTACHMENT_ACCEPT_MIMES,
   COMPACTION_METERS,
@@ -115,10 +135,14 @@ export {
   GEMINI_BUCKETS,
   GEMINI_FREE_BUCKETS,
   isValidPair,
+  LIVE_ACTIVITY_HANDLINGS,
+  LIVE_CONTEXT_COMPRESSIONS,
+  LIVE_SPEECH_SENSITIVITIES,
   MEDIA_INPUT_KIND_VALUES,
   MEDIA_INPUT_KINDS,
   MEDIA_WILDCARDS,
   PROFILE_FIELDS,
+  TOOL_LOAD_TIERS,
   PROTOCOL_PROVIDERS,
   PROTOCOLS,
   PROVIDERS,
@@ -129,7 +153,7 @@ export {
   STREAM_MODES,
   SUMMARY_MODES,
   THINKING_LEVELS,
-  TOOL_LOAD_TIERS,
+  TOOL_ACCESS_LEVELS,
   TOOL_PERMISSION_TIERS,
   TURN_STOP_KINDS,
   VOICE_ACCEPT_MIMES,
@@ -153,6 +177,25 @@ export {
   turnStopFromInteractionStatus,
   turnStopFromOpenAiFinishReason,
 } from './src/kernel/stop.ts';
+export {
+  defineTool,
+  executeRegisteredTool,
+  formatToolResult,
+  getTool,
+  hasTool,
+  invokeTool,
+  listBuiltinIds,
+  listFunctionIds,
+  listTools,
+  registerHarnessTools,
+  registerTool,
+  registerTools,
+  requireTool,
+  resetTools,
+  TOOL_ACCESS,
+  TOOL_PERMISSION,
+  TOOL_TYPES,
+} from './src/kernel/tools/mod.ts';
 export type * from './src/kernel/types.ts';
 export {
   jsonlSink,

@@ -1,10 +1,6 @@
 /**
  * Profile, turn, tool, provider, egress, and event contracts for THEORUM.
  *
- * This entrypoint is type-first. Host applications import from here when they
- * want to declare profiles, tool schemas, provider adapters, turn requests, or
- * trace-safe event handlers without importing provider implementations.
- *
  * @module
  */
 
@@ -22,18 +18,13 @@ export {
 } from './engine/compaction.ts';
 export { runTurn } from './engine/runner.ts';
 export {
-  CATALOG,
   clampThinkingLevel,
   clampThinkingLevelForApiId,
-  getTool,
-  listBuiltinIds,
   mediaKindForMime,
   mimeAllowed,
   mimeEssence,
   modelEntryByApiId,
-  registerTools,
   requireModelSpec,
-  resetTools,
 } from './registry/catalog.ts';
 export type { ProfileDefinition } from './registry/profiles.ts';
 export {
@@ -47,7 +38,6 @@ export {
 } from './registry/profiles.ts';
 export { projectProfile, resolveTurn } from './registry/resolve.ts';
 export { getStructured, registerStructured } from './registry/schemas.ts';
-export { executeTool } from './registry/tools.ts';
 export {
   ATTACHMENT_ACCEPT_MIMES,
   COMPACTION_METERS,
@@ -56,7 +46,6 @@ export {
   catalogPathFor,
   coerceProtocol,
   coerceProvider,
-  DYNAMIC_FIELD_PARENTS,
   EGRESS_ON_BLOCK,
   EXTRA_FIELDS,
   fieldMeta,
@@ -67,6 +56,7 @@ export {
   MEDIA_INPUT_KINDS,
   MEDIA_WILDCARDS,
   PROFILE_FIELDS,
+  TOOL_LOAD_TIERS,
   PROTOCOL_PROVIDERS,
   PROTOCOLS,
   PROVIDERS,
@@ -77,8 +67,6 @@ export {
   STREAM_MODES,
   SUMMARY_MODES,
   THINKING_LEVELS,
-  TOOL_LOAD_TIERS,
-  TOOL_PERMISSION_TIERS,
   TURN_STOP_KINDS,
   VOICE_ACCEPT_MIMES,
 } from './schema.ts';
@@ -96,4 +84,23 @@ export {
   turnStopFromInteractionStatus,
   turnStopFromOpenAiFinishReason,
 } from './stop.ts';
+export {
+  defineTool,
+  executeRegisteredTool,
+  formatToolResult,
+  getTool,
+  hasTool,
+  invokeTool,
+  listBuiltinIds,
+  listFunctionIds,
+  listTools,
+  registerHarnessTools,
+  registerTool,
+  registerTools,
+  requireTool,
+  resetTools,
+  TOOL_ACCESS,
+  TOOL_PERMISSION,
+  TOOL_TYPES,
+} from './tools/mod.ts';
 export type * from './types.ts';

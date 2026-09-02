@@ -19,7 +19,7 @@ import {
 } from '../../src/cli/matrix/synthesizer.ts';
 import { getProfile } from '../../src/kernel/registry/profiles.ts';
 import type { ModelProvider, Profile, TurnEvent } from '../../src/kernel/types.ts';
-import { modelAllow } from '../fixtures/models.ts';
+import { HOST_MODELS, modelAllow } from '../fixtures/models.ts';
 
 const testProfile: Profile = {
   id: 'test-agent',
@@ -31,7 +31,7 @@ const testProfile: Profile = {
     select: { fast: 'gemini35FlashLite', smart: 'gemini31ProPreview' },
     key: 'freeA',
   },
-  tools: { allow: ['googleSearch', 'googleMaps', 'urlContext'] },
+  tools: { allow: [] },
   inputs: {
     text: true,
     attachments: { accept: ['image/png', 'application/pdf', 'text/csv', 'text/plain'] },
@@ -122,8 +122,15 @@ Deno.test('synthesizer handles all tool combinations, fallbacks, and reasoning c
     model: {
       ...testProfile.model,
       select: { quick: 'gemini35FlashLite', deep: 'gemini31ProPreview' },
+      config: {
+        ...testProfile.model.config,
+        gemini31ProPreview: {
+          ...HOST_MODELS.gemini31ProPreview,
+          builtInTools: ['googleMaps'],
+        },
+      },
     },
-    tools: { allow: ['googleMaps'] },
+    tools: { allow: [] },
     inputs: {
       text: true,
       attachments: { accept: ['unknown/custom-mime'] },
@@ -143,7 +150,7 @@ Deno.test('synthesizer handles all tool combinations, fallbacks, and reasoning c
       ...testProfile.model,
       select: undefined,
     },
-    tools: { allow: ['askUser'] },
+    tools: { allow: ['ask_user'] },
     inputs: {
       text: true,
       attachments: { accept: [] },
@@ -151,7 +158,7 @@ Deno.test('synthesizer handles all tool combinations, fallbacks, and reasoning c
   };
   const req2 = synthesizeStressCombo(noSelectProfile);
   assertEquals(req2.select, undefined);
-  assertEquals(req2.tools?.askUser, true);
+  assertEquals(req2.tools?.ask_user, true);
   assertEquals(req2.input?.attachments, undefined);
 
   // 3. buildCustomTurnRequest with options.lite

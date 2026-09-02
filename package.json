@@ -1,7 +1,7 @@
 {
   "name": "theorum",
   "version": "0.1.15",
-  "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, dynamic tools, provider adapters, guardrails, and host-injected traces.",
+  "description": "A flat TypeScript agent kernel for typed profiles, deterministic turn execution, registered tools, provider adapters, guardrails, and host-injected traces.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -25,6 +25,7 @@
     "./providers": "./src/providers/mod.ts",
     "./providers/local": "./src/providers/local/mod.ts",
     "./guardrails": "./src/guardrails/mod.ts",
+    "./guardrails/testing": "./src/guardrails/testing.ts",
     "./observability": "./src/observability/mod.ts",
     "./host": "./src/host/mod.ts",
     "./cli": "./src/cli/index.ts",
@@ -41,12 +42,16 @@
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "ai": "^7.0.0",
-    "gpt-tokenizer": "^4.0.0"
+    "gpt-tokenizer": "^4.0.0",
+    "zod-to-json-schema": "^3.24.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.24.0"
   },
   "scripts": {
     "build:npm": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run=npm scripts/build-npm.ts",
     "test": "deno test --allow-read --allow-write --allow-net --allow-env --allow-sys --allow-run --ignore=npm/ tests/",
-    "coverage": "rm -rf coverage && deno test --allow-read --allow-write --allow-net --allow-env --allow-sys --ignore=npm/ --coverage=coverage tests/ && deno coverage coverage --lcov --output=coverage/lcov.info && node scripts/lcov-to-istanbul.mjs",
+    "coverage": "rm -rf coverage && deno test --allow-read --allow-write --allow-net --allow-env --allow-sys --allow-run --ignore=npm/ --coverage=coverage tests/ && deno coverage coverage --lcov --output=coverage/lcov.info && node scripts/lcov-to-istanbul.mjs",
     "lint:biome": "biome check .",
     "lint:ast-grep": "ast-grep scan",
     "lint:fallow": "npm run coverage && fallow audit && fallow health && fallow dupes && fallow dead-code",
@@ -58,8 +63,9 @@
     "lint": "npm run lint:docs && npm run lint:biome && npm run lint:ast-grep && npm run lint:fallow"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.8",
     "@ast-grep/cli": "^0.41.0",
+    "@biomejs/biome": "^2.5.8",
+    "@stryker-mutator/core": "^10.0.0",
     "fallow": "3.17.0"
   }
 }

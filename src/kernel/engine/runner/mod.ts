@@ -13,6 +13,7 @@ import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { noopSink, type TraceSink, writeTrace } from '../../../observability/trace.ts';
 import { buildRecord } from '../../../observability/trace-record.ts';
 import { pickSystemRole, resolveTurn } from '../../registry/resolve.ts';
+import { expandTurnToolLoader } from '../../tools/resolve.ts';
 import type { Protocol } from '../../schema.ts';
 import { CONTINUE_INSTRUCTION } from '../../stop.ts';
 import type {
@@ -31,7 +32,6 @@ import { runAttemptsWithValidation } from './gates.ts';
 import type { StepExecutionState } from './state.ts';
 import { shouldSkipStreamEvent, systemFromProfile } from './stream.ts';
 import { calculateFallbackTokens } from './tokens.ts';
-import { invokeFromUi } from './tools.ts';
 
 function getCompactionSpec(profile: Profile, modelId: string): CompactionSpec | undefined {
   return profile.model.config[modelId]?.compaction;
@@ -146,10 +146,6 @@ async function* emitTurn(args: {
   upstream: Record<string, unknown>[];
 }): AsyncGenerator<TurnEvent> {
   const { safe, profile, generation, system, provider, upstream } = args;
-  if (safe.toolInvoke) {
-    yield* invokeFromUi(profile, safe);
-    return;
-  }
 
   const state: StepExecutionState = {
     currentHistory: [...(generation.history ?? [])],
@@ -232,6 +228,8 @@ async function* runTurnBody(ctx: TraceCtx, provider: ModelProvider): AsyncGenera
   ctx.safe = sanitizeTurnRequest(ctx.req);
   throwIfAborted(ctx.safe.signal);
   const { profile, generation: gen } = resolveTurn(ctx.safe);
+  await expandTurnToolLoader(gen.tools, profile, ctx.safe);
+  gen.builtins = gen.tools.builtins;
   ctx.generation = gen;
   ctx.model = gen.model;
   ctx.bucket = gen.geminiBucket;

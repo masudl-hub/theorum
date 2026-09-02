@@ -192,7 +192,7 @@ async function fetchGemini(
 }
 
 export type { GeminiTransport, GeminiVault };
-export { fetchGemini, withGeminiKey };
+export { fetchGemini, requireKey, withGeminiKey };
 
 exposeForTests('keys', {
   waitDefault,

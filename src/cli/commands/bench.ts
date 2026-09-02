@@ -58,7 +58,7 @@ function registerBenchProfile(): void {
           summaries: { on: 'none', off: 'none' },
           maxOutputTokens: 4096,
           temperature: 0,
-          keyBuiltins: [],
+          builtInTools: [],
         },
       },
       thinking: 'none',

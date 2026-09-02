@@ -1,13 +1,13 @@
-import { TheorumError } from '../../guardrails/error.ts';
-import { getTool } from '../../kernel/registry/catalog.ts';
-import { getStructured } from '../../kernel/registry/schemas.ts';
+import { TheorumError } from '../../../guardrails/error.ts';
+import { getStructured } from '../../../kernel/registry/schemas.ts';
+import { getTool } from '../../../kernel/tools/registry.ts';
 import type {
-  DynamicToolDeclaration,
   InteractionPart,
   ProviderCompleteRequest,
   TurnHistoryMessage,
-} from '../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
+  WireFunctionTool,
+} from '../../../kernel/types.ts';
+import { exposeForTests, markModuleLoad } from '../../expose-for-tests.ts';
 
 function camelToSnake(key: string): string {
   return key.replaceAll(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
@@ -118,30 +118,33 @@ function attachSpeechConfig(
   if (!req.speech) {
     return;
   }
-  if (req.speech.voice) {
-    generationConfig.speechConfig = [{ voice: req.speech.voice }];
+  const voice = req.speech.voice;
+  if (!voice) {
+    return;
   }
+  generationConfig.speechConfig = [{ voice }];
 }
 
-function wireInteractionsFunctionTool(decl: DynamicToolDeclaration): Record<string, unknown> {
+function wireInteractionsFunctionTool(decl: WireFunctionTool): Record<string, unknown> {
   return {
     type: 'function',
     name: decl.name,
-    description: decl.description ?? '',
-    parameters: decl.parameters ?? { type: 'object', properties: {} },
+    description: decl.description,
+    parameters: decl.parameters,
   };
 }
 
 function wireInteractionsTools(req: ProviderCompleteRequest): Record<string, unknown>[] {
   const tools: Record<string, unknown>[] = [];
   for (const id of req.builtins) {
-    const type = getTool(id)?.interactionsType;
+    const entry = getTool(id);
+    const type = entry?.type === 'builtin' ? entry.wire.interactions : undefined;
     if (!type) {
       throw new TheorumError(`Builtin '${id}' has no Interactions wire type`);
     }
     tools.push({ type });
   }
-  for (const decl of req.dynamicTools ?? []) {
+  for (const decl of req.wireTools ?? []) {
     tools.push(wireInteractionsFunctionTool(decl));
   }
   return tools;

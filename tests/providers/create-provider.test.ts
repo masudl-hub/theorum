@@ -113,9 +113,11 @@ Deno.test('create-provider has no eager adapter imports', async () => {
   );
   assertEquals(/from\s+['"]\.\/openrouter\//.test(src), false);
   assertEquals(/from\s+['"]\.\/local\/local\.ts['"]/.test(src), false);
-  assertEquals(/from\s+['"]\.\/google\/google-interactions\.ts['"]/.test(src), false);
+  assertEquals(/from\s+['"]\.\/google\/interactions\//.test(src), false);
+  assertEquals(/from\s+['"]\.\/google\/live\//.test(src), false);
   assertEquals(src.includes("import('./openrouter/chat.ts')"), true);
-  assertEquals(src.includes("import('./google/google-interactions.ts')"), true);
+  assertEquals(src.includes("import('./google/interactions/mod.ts')"), true);
+  assertEquals(src.includes("import('./google/live/mod.ts')"), true);
   assertEquals(src.includes("import('./openrouter/speech.ts')"), true);
   assertEquals(src.includes("import('./local/local.ts')"), true);
 });

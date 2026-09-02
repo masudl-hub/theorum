@@ -49,7 +49,7 @@ registerStructured('liveCodeAnswer', {
 const PROFILE = 'live.code_execution';
 const PROFILE_STRUCTURED = 'live.code_execution.structured';
 
-function flashSpec(keyBuiltins: string[]) {
+function flashSpec(builtInTools: string[]) {
   return {
     apiId: modelId,
     thinking: { on: thinkingLevel, off: 'minimal' },
@@ -57,7 +57,7 @@ function flashSpec(keyBuiltins: string[]) {
     summaries: { on: 'auto', off: 'none' },
     maxOutputTokens: 4096,
     temperature: 0.2,
-    keyBuiltins,
+    builtInTools,
   };
 }
 
@@ -80,7 +80,7 @@ registerProfile(
       key: 'freeA',
       select: { fast: 'flash', smart: 'flash' },
     },
-    tools: { allow: ['codeExecution', 'googleSearch'] },
+    tools: { allow: [] },
     inputs: { text: true },
     outputs: {},
     guardrails: { quota: { perDay: 1000 } },

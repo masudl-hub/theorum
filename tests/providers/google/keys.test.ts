@@ -102,7 +102,7 @@ Deno.test('search forces the paid key on every free profile', () => {
   );
 });
 
-Deno.test('maps on flash lite stays free; maps on pro preview is paid', () => {
+Deno.test('maps uses profile free key unless model pins paid or builtin forces paid', () => {
   assertEquals(
     resolveTurn({ profile: 'chat', tools: { googleMaps: true }, input: { text: 'x' } }).generation
       .geminiBucket,
@@ -124,7 +124,7 @@ Deno.test('maps on flash lite stays free; maps on pro preview is paid', () => {
       tools: { googleMaps: true },
       input: { text: 'x' },
     }).generation.geminiBucket,
-    'paid',
+    'freeB',
   );
 });
 

@@ -8,7 +8,10 @@ import {
   registerProfile,
   registerProfiles,
 } from '../../src/kernel/registry/profiles.ts';
+import { registerGooglePreset } from '../../src/presets/google.ts';
 import { modelAllow } from '../fixtures/models.ts';
+
+registerGooglePreset();
 
 Deno.test('defineProfile creates valid defaults', () => {
   const profile = defineProfile({

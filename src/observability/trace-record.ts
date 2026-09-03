@@ -7,13 +7,14 @@
  * @module
  */
 
+import { OMIT_CANARY } from '../guardrails/canary.ts';
 import { isAbortError, publicError } from '../guardrails/error.ts';
 import { redactSensitiveOnly, sanitizeText, sanitizeTurnRequest } from '../guardrails/sanitize.ts';
-import { OMIT_CANARY } from '../kernel/engine/boundary.ts';
 import { sha256 } from '../kernel/engine/hash.ts';
+import type { Protocol } from '../kernel/schema.ts';
 import type { ResolvedGeneration, TurnBlob, TurnEvent, TurnRequest } from '../kernel/types.ts';
 import { attachResolved, attachTape, attachUsage } from './trace-attach.ts';
-import { completedInteraction } from './trace-usage.ts';
+import { completedInteraction, stopKindFromEvents } from './trace-usage.ts';
 
 const TRACE_VERSION = 2;
 const TITLE_MAX = 80;
@@ -56,7 +57,6 @@ interface TraceRecord {
   projectId?: string;
   select?: string;
   thinking?: boolean;
-  tools?: TurnRequest['tools'];
   metadata?: Record<string, unknown>;
   model?: { id: string; apiId: string };
   bucket?: string;
@@ -66,7 +66,7 @@ interface TraceRecord {
     temperature: number;
     maxOutputTokens: number;
     builtins: string[];
-    custom: string[];
+    visibleTools: string[];
     structured: string | null;
     image: unknown;
   };
@@ -81,7 +81,8 @@ interface TraceRecord {
   };
   wire?: unknown;
   events: TraceEvent[];
-  gemini?: unknown;
+  /** Raw upstream tap rows (HTTP, SSE, provider events). */
+  upstreamLog?: unknown;
   usage?: unknown;
   upstream?: {
     status?: unknown;
@@ -131,13 +132,22 @@ async function snapshotEvent(event: TurnEvent): Promise<TraceEvent> {
     row.structured = event.structured;
   }
   if (event.tool) {
-    const { name, arguments: args, result } = event.tool;
+    const { name, arguments: args, output, phase, failure } = event.tool;
     row.tool = { name, arguments: args };
-    if (result) {
+    if (output !== undefined && phase === 'complete') {
+      const data =
+        typeof output === 'object' && output !== null
+          ? (output as Record<string, unknown>)
+          : { value: output };
       row.tool.result = {
-        status: result.status,
-        ...(result.finding ? { finding: result.finding } : {}),
-        ...(result.data ? { data: result.data } : {}),
+        status: 'ok',
+        ...(typeof data.finding === 'string' ? { finding: data.finding } : {}),
+        data,
+      };
+    } else if (phase === 'error' && failure) {
+      row.tool.result = {
+        status: 'error',
+        finding: failure.message,
       };
     }
   }
@@ -210,28 +220,40 @@ async function buildRecord(args: {
   model?: string;
   bucket?: string;
   thrown?: unknown;
-  gemini?: unknown;
+  upstreamLog?: unknown;
   canary?: string;
   system?: string;
   generation?: ResolvedGeneration;
+  protocol?: Protocol;
   sanitizedReq?: TurnRequest;
 }): Promise<TraceRecord> {
-  const { req, events, started, model, bucket, thrown, gemini, canary, system, generation } = args;
+  const { req, events, started, model, bucket, thrown, upstreamLog, canary, system, generation } =
+    args;
+  const protocol = args.protocol;
   const safe = args.sanitizedReq ?? requestForTrace(req);
   const input = safe.input ?? {};
   const snapped = await Promise.all(events.map((event) => snapshotEvent(event)));
   const lastErr = [...snapped].reverse().find((row) => row.type === 'error');
-  const done = completedInteraction(gemini);
-  const status = done?.status;
   const aborted = isAbortError(thrown);
-  const ok = !(thrown || lastErr) && status !== 'cancelled' && !aborted;
+
+  const stopKind = stopKindFromEvents(events);
+  const done = completedInteraction(upstreamLog);
+  const interactionStatus = done?.status;
+
+  const cancelled =
+    aborted ||
+    stopKind === 'cancelled' ||
+    (protocol === 'geminiInteractions' && interactionStatus === 'cancelled');
+
+  const ok = !(thrown || lastErr) && !cancelled;
+
   const record: TraceRecord = {
     v: TRACE_VERSION,
     id: crypto.randomUUID(),
     ts: started,
     ms: Date.now() - started,
     streamed: true,
-    cancelled: status === 'cancelled' || aborted,
+    cancelled,
     previousInteractionId: safe.previousInteractionId ?? null,
     store: safe.store ?? null,
     profile: safe.profile,
@@ -249,8 +271,8 @@ async function buildRecord(args: {
   if (title) {
     record.title = title;
   }
-  await attachTape(record, { gemini, canary, system, generation });
-  attachUsage(record, gemini, done);
+  await attachTape(record, { upstream: upstreamLog, canary, system, generation, protocol });
+  attachUsage(record, upstreamLog, done, events);
   attachResolved(record, { safe, model, bucket, generation });
   attachFailure(record, thrown, lastErr, canary);
   return record;

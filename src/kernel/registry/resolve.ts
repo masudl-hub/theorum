@@ -1,50 +1,34 @@
 /**
  * Profile resolution for THEORUM turns.
  *
- * This module validates caller overrides, selects models and tools, normalizes
- * input parts, and produces the provider request state consumed by `runTurn`.
- *
  * @module
  */
 
+import { mintCanary } from '../../guardrails/canary.ts';
 import { TheorumError } from '../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
-import { mintCanary } from '../engine/boundary.ts';
+import { projectTools } from '../tools/project.ts';
+import { resolveTurnTools } from '../tools/resolve.ts';
 import type {
-  BuiltinToolId,
-  CustomToolId,
   ModelId,
   ModelSpec,
   Profile,
   ProjectedProfile,
+  ProviderTransport,
   ResolvedGeneration,
   StructuredSchemaId,
   ThinkingLevel,
-  ToolId,
   TurnRequest,
 } from '../types.ts';
+import { clampThinkingLevel, requireModelSpec } from './catalog.ts';
 import {
-  CATALOG,
-  clampThinkingLevel,
-  getTool,
-  listBuiltinIds,
-  requireModelSpec,
-} from './catalog.ts';
-import {
-  assertImageGrounding,
+  assertOutputMode,
   assertSpeechRole,
   resolveImageFormat,
   resolveInputParts,
 } from './ingress.ts';
 import { getProfile } from './profiles.ts';
 import { resolveGeminiBucket } from './vault.ts';
-
-function applyBuiltinMutualExclusions(requested: BuiltinToolId[]): BuiltinToolId[] {
-  return requested.filter((id) => {
-    const conflicts = getTool(id)?.conflictsWith ?? [];
-    return !conflicts.some((other) => requested.includes(other));
-  });
-}
 
 function firstSelectKey(selectMap: Record<string, ModelId>): string | undefined {
   const [key] = Object.keys(selectMap);
@@ -147,39 +131,6 @@ function resolveSummaries(
   return spec.summaries.on;
 }
 
-function isGatedOn(requested: Partial<Record<ToolId, boolean>> | undefined, id: ToolId): boolean {
-  if (!requested) {
-    return false;
-  }
-  return requested[id] === true;
-}
-
-function resolveBuiltins(
-  profile: Profile,
-  requested?: Partial<Record<ToolId, boolean>>,
-): BuiltinToolId[] {
-  const allowed = profile.tools.allow.filter(
-    (id): id is BuiltinToolId => CATALOG.tools[id]?.kind === 'builtin',
-  );
-  const picked = listBuiltinIds().filter((id) => allowed.includes(id) && isGatedOn(requested, id));
-  return applyBuiltinMutualExclusions(picked);
-}
-
-function resolveCustom(
-  profile: Profile,
-  requested?: Partial<Record<ToolId, boolean>>,
-): CustomToolId[] {
-  return profile.tools.allow.filter(
-    (id): id is CustomToolId => CATALOG.tools[id]?.kind === 'custom' && isGatedOn(requested, id),
-  );
-}
-
-function assertToolAllowed(profile: Profile, name: ToolId): void {
-  if (!profile.tools.allow.includes(name)) {
-    throw new TheorumError(`Tool '${name}' is not allowed on ${profile.id}`);
-  }
-}
-
 function resolveStructured(
   profile: Profile,
   slots?: Record<string, string>,
@@ -212,38 +163,47 @@ function resolveTurn(req: TurnRequest): {
   const model = pickModel(profile, safe.select);
   const spec = requireModelSpec(profile, model);
   const thinkingOn = safe.thinking === true;
-  const builtins = resolveBuiltins(profile, safe.tools);
-  assertImageGrounding(profile, model, builtins);
+  const toolSnapshot = resolveTurnTools(profile, safe, model);
+  const builtins = toolSnapshot.builtins;
+  const structured = resolveStructured(profile, input.slots);
+  assertOutputMode(profile, structured);
   assertSpeechRole(profile);
   const geminiBucket =
     profile.model.provider === 'google'
       ? resolveGeminiBucket(profile.model.key ?? 'freeA', spec, builtins)
       : undefined;
+  const transport: ProviderTransport =
+    profile.model.protocol === 'geminiLive' && profile.model.provider === 'google'
+      ? 'geminiLive'
+      : profile.model.protocol === 'geminiInteractions' && profile.model.provider === 'google'
+        ? 'interactions'
+        : 'openAiCompat';
   return {
     profile,
     generation: {
       model,
       apiId: spec.apiId,
-      openRouterId: spec.openRouterId,
+      transport,
       previousInteractionId: safe.previousInteractionId,
       store: safe.store,
+      stream: safe.stream,
       thinking: resolveThinking(profile, spec, thinkingOn, safe.select),
       summaries: resolveSummaries(profile, spec, thinkingOn),
       maxOutputTokens: spec.maxOutputTokens,
       temperature: spec.temperature,
       builtins,
-      custom: resolveCustom(profile, safe.tools),
-      dynamicTools: safe.dynamicTools,
-      dynamicToolLoader: safe.dynamicToolLoader,
+      tools: toolSnapshot,
       sessionPermissions: safe.sessionPermissions,
       history: input.history,
       maxSteps: profile.model.maxSteps ?? 1,
-      structured: resolveStructured(profile, input.slots),
-      image: resolveImageFormat(profile, model, input.slots),
+      structured,
+      image: resolveImageFormat(profile),
       speech: profile.outputs.speech,
+      live: profile.outputs.live,
       input: resolveInputParts(profile, model, safe),
       geminiBucket,
       canary: profile.guardrails.canary !== false ? mintCanary() : '',
+      sessionResumptionHandle: safe.sessionResumptionHandle ?? input.sessionResumptionHandle,
     },
   };
 }
@@ -255,7 +215,7 @@ function primaryImageSpec(profile: Profile) {
 /** Project a registered profile into a safe host/UI inspection object. */
 function projectProfile(id: Profile['id']): ProjectedProfile {
   const profile = getProfile(id);
-  const { model, identity, tools, inputs, outputs } = profile;
+  const { model, identity, inputs, outputs } = profile;
   const { select, allow, maxSteps, controls } = model;
   const { handle, chat } = identity;
   const { slots } = inputs;
@@ -267,10 +227,7 @@ function projectProfile(id: Profile['id']): ProjectedProfile {
     models: allow,
     select: select ?? null,
     controls: controls ?? [],
-    tools: tools.allow.map((name) => ({
-      name,
-      ...(CATALOG.tools[name] ?? { kind: 'custom' as const, ui: true }),
-    })),
+    tools: projectTools(profile),
     inputs,
     slots: slots ?? {},
     outputs,
@@ -287,4 +244,4 @@ function pickSystemRole(profile: Profile, requested?: string): string {
   return handle;
 }
 
-export { assertToolAllowed, pickSystemRole, projectProfile, resolveTurn };
+export { pickModel, pickSystemRole, projectProfile, resolveTurn };

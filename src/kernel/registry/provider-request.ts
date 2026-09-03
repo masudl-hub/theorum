@@ -5,26 +5,30 @@ function providerCompleteRequest(
   generation: ResolvedGeneration,
   system: string,
 ): ProviderCompleteRequest {
+  const isInteractions = generation.transport === 'interactions';
+  const isGoogle = isInteractions || generation.transport === 'geminiLive';
   return {
     model: generation.model,
     apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
-    previousInteractionId: generation.previousInteractionId,
-    store: generation.store,
+    previousInteractionId: isInteractions ? generation.previousInteractionId : undefined,
+    store: isInteractions ? generation.store : undefined,
+    stream: isInteractions ? generation.stream : undefined,
     thinking: generation.thinking,
-    summaries: generation.summaries,
+    summaries: isInteractions ? generation.summaries : undefined,
     maxOutputTokens: generation.maxOutputTokens,
     temperature: generation.temperature,
     builtins: generation.builtins,
     system,
     input: generation.input,
     history: generation.history,
-    dynamicTools: generation.dynamicTools,
-    dynamicToolLoader: generation.dynamicToolLoader,
+    interactionOnlyInput: isInteractions ? generation.interactionOnlyInput : undefined,
+    wireTools: generation.tools.wire,
     structured: generation.structured,
     image: generation.image,
     speech: generation.speech,
-    geminiBucket: generation.geminiBucket,
+    live: generation.live,
+    sessionResumptionHandle: generation.sessionResumptionHandle,
+    geminiBucket: isGoogle ? generation.geminiBucket : undefined,
   };
 }
 

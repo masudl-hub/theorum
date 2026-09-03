@@ -69,8 +69,7 @@ const EXACT: Record<string, string> = {
   'attachment data must be base64': PUBLIC_FILE_TYPE,
   'attachment is too large': PUBLIC_FILE_SIZE,
   'attachments exceed the per-turn budget': PUBLIC_FILE_SIZE,
-  'askUser.kind must be confirm, choice, or text': "That question isn't valid.",
-  'askUser.prompt is required': 'That question needs a prompt.',
+  'Tool input validation failed': "That question isn't valid.",
   'This profile does not accept text input': PUBLIC_ACTION,
 };
 
@@ -89,9 +88,9 @@ const RULES: ErrorRule[] = [
   },
   {
     match: (t) =>
-      t.includes('not gated') ||
+      t.includes('not enabled on this turn') ||
       t.includes('not allowed') ||
-      t.includes('has no kernel executor') ||
+      t.includes('not registered') ||
       t.includes('Unknown model select') ||
       t.includes('Grounding tools'),
     resolve: () => PUBLIC_ACTION,

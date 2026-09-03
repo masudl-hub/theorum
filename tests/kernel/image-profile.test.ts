@@ -1,12 +1,13 @@
 import '../fixtures/test-host.ts';
+import { wrapUserData } from '../../src/guardrails/canary.ts';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals, assertThrows } from '../../src/kernel/engine/assert.ts';
-import { wrapUserData } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
+import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
-import { camelToSnake, toInteractionsBody } from '../../src/providers/interactions.ts';
-import { CHAT_MEDIA_LIMITS, modelAllow } from '../fixtures/models.ts';
+import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
+import { CHAT_MEDIA_LIMITS, HOST_MODELS, modelAllow } from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -35,7 +36,6 @@ Deno.test('image oneshot uses image model and image response format', () => {
     input: {
       text: 'sleepy fox',
       attachments: [{ mimeType: 'image/png', data: 'ex' }],
-      slots: { aspectRatio: '1:1' },
     },
   });
   assertEquals(generation.model, 'gemini31FlashLiteImage');
@@ -47,6 +47,7 @@ Deno.test('image oneshot uses image model and image response format', () => {
     mimeType: 'image/jpeg',
     aspectRatio: '1:1',
     size: '1K',
+    includeText: false,
   });
   assertEquals(generation.input, [
     { type: 'text', text: wrapUserData('sleepy fox') },
@@ -77,13 +78,6 @@ Deno.test('image rejects mime the image model does not take', () => {
   );
 });
 
-Deno.test('image rejects unknown aspect ratio', () => {
-  assertThrows(
-    () => resolveTurn({ profile: 'image', input: { text: 'x', slots: { aspectRatio: '1:8' } } }),
-    TheorumError,
-  );
-});
-
 function googleImageBody() {
   const { generation } = resolveTurn({
     profile: 'image',
@@ -92,7 +86,6 @@ function googleImageBody() {
   return toInteractionsBody({
     model: generation.model,
     apiId: generation.apiId,
-    openRouterId: generation.openRouterId,
     thinking: generation.thinking,
     summaries: generation.summaries,
     maxOutputTokens: generation.maxOutputTokens,
@@ -123,10 +116,67 @@ function assertImageWireBody(body: Record<string, unknown>): void {
   assertEquals(format[mimeKey], 'image/jpeg');
   assertEquals(format[camelToSnake('aspectRatio')], '1:1');
   assertEquals(format[camelToSnake('imageSize')], '1K');
+  assertEquals(Object.hasOwn(body, camelToSnake('responseModalities')), false);
+}
+
+function assertImageWithTextWireBody(body: Record<string, unknown>): void {
+  const format = body[camelToSnake('responseFormat')] as Record<string, unknown>[];
+  assertEquals(Array.isArray(format), true);
+  assertEquals(format[0], { type: 'text' });
+  assertEquals(format[1]?.type, 'image');
+  assertEquals(format[1]?.[camelToSnake('mimeType')], 'image/jpeg');
+  assertEquals(format[1]?.[camelToSnake('aspectRatio')], '1:1');
+  assertEquals(format[1]?.[camelToSnake('imageSize')], '1K');
+  assertEquals(Object.hasOwn(body, camelToSnake('responseModalities')), false);
 }
 
 Deno.test('interactions body places refs in input and image in response format', () => {
   assertImageWireBody(googleImageBody());
+});
+
+Deno.test('interactions body requests text and image when includeText is set', () => {
+  registerProfile({
+    id: 'image_with_text',
+    model: {
+      protocol: 'geminiInteractions',
+      provider: 'google',
+      ...modelAllow('gemini31FlashLiteImage'),
+    },
+    tools: { allow: [] },
+    inputs: {
+      text: true,
+    },
+    outputs: {
+      structured: null,
+      image: {
+        aspectRatio: '1:1',
+        size: '1K',
+        mimeType: 'image/jpeg',
+        includeText: true,
+      },
+    },
+    guardrails: { quota: { perDay: 10 } },
+  });
+  const { generation } = resolveTurn({
+    profile: 'image_with_text',
+    input: { text: 'fox' },
+  });
+  assertEquals(generation.image?.includeText, true);
+  const body = toInteractionsBody({
+    model: generation.model,
+    apiId: generation.apiId,
+    thinking: generation.thinking,
+    summaries: generation.summaries,
+    maxOutputTokens: generation.maxOutputTokens,
+    temperature: generation.temperature,
+    builtins: generation.builtins,
+    system: 'sys',
+    input: generation.input,
+    structured: generation.structured,
+    image: generation.image,
+    geminiBucket: generation.geminiBucket,
+  });
+  assertImageWithTextWireBody(body);
 });
 
 Deno.test('image runTurn yields media then done', async () => {
@@ -154,32 +204,39 @@ Deno.test('image projection exposes image pins not tools', () => {
   assertEquals(ui.controls, []);
 });
 
-Deno.test('media validations reject missing image pins, structured mixing, grounding on image, and invalid mime', async () => {
+Deno.test('media validations allow omitted aspect/size; reject structured mixing and invalid mime', async () => {
   const { registerProfile, defineProfile } = await import('../../src/kernel/registry/profiles.ts');
 
-  // Image pins without aspect/size
+  // Image pins without aspect/size — provider defaults apply
   registerProfile(
     defineProfile({
-      id: 'bad_media_profile',
-      model: { ...modelAllow('gemini35FlashLite') },
+      id: 'image_defaults_profile',
+      model: { ...modelAllow('gemini31FlashLiteImage') },
       inputs: { text: true },
       outputs: { structured: null, image: { mimeType: 'image/jpeg' } },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
-  assertThrows(
-    () => resolveTurn({ profile: 'bad_media_profile', input: { text: 'test' } }),
-    TheorumError,
-  );
+  const defaults = resolveTurn({
+    profile: 'image_defaults_profile',
+    input: { text: 'test' },
+  }).generation;
+  assertEquals(defaults.image, {
+    type: 'image',
+    mimeType: 'image/jpeg',
+    aspectRatio: undefined,
+    size: undefined,
+    includeText: false,
+  });
 
-  // Image pins with structured output
+  // Image pins with responseFormat-enforced structured output
   registerProfile(
     defineProfile({
       id: 'mixed_media_profile',
       model: { ...modelAllow('gemini31FlashLiteImage') },
       inputs: { text: true },
       outputs: {
-        structured: 'custom',
+        structured: 'chatTurn',
         image: { aspectRatio: '1:1', size: '1K', mimeType: 'image/jpeg' },
       },
       guardrails: { quota: { perDay: 10 } },
@@ -190,12 +247,40 @@ Deno.test('media validations reject missing image pins, structured mixing, groun
     TheorumError,
   );
 
-  // Grounding tool on image profile that disallows grounding
+  // Prompt-enforced structured + image is allowed (no competing responseFormat)
   registerProfile(
     defineProfile({
-      id: 'image_with_search',
+      id: 'image_with_prompt_schema',
       model: { ...modelAllow('gemini31FlashLiteImage') },
-      tools: { allow: ['googleSearch'] },
+      inputs: { text: true },
+      outputs: {
+        structured: 'promptTurn',
+        image: { aspectRatio: '1:1', size: '1K', mimeType: 'image/jpeg' },
+      },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  const promptImage = resolveTurn({
+    profile: 'image_with_prompt_schema',
+    input: { text: 'fox' },
+  }).generation;
+  assertEquals(promptImage.structured, 'promptTurn');
+  assertEquals(promptImage.image?.type, 'image');
+
+  // codeExecution on image profiles is a host/model choice — kernel does not block it
+  registerProfile(
+    defineProfile({
+      id: 'image_with_code_exec',
+      model: {
+        allow: ['gemini31FlashLiteImage'],
+        config: {
+          gemini31FlashLiteImage: {
+            ...HOST_MODELS.gemini31FlashLiteImage,
+            builtInTools: ['codeExecution'],
+          },
+        },
+      },
+      tools: { allow: [] },
       inputs: { text: true },
       outputs: {
         structured: null,
@@ -203,19 +288,63 @@ Deno.test('media validations reject missing image pins, structured mixing, groun
           aspectRatio: '1:1',
           size: '1K',
           mimeType: 'image/jpeg',
-          allowsGrounding: false,
         },
       },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
+  assertEquals(
+    resolveTurn({ profile: 'image_with_code_exec', input: { text: 'plot' } }).generation.builtins,
+    ['codeExecution'],
+  );
+
+  // googleSearch on image profiles is a host/model choice — kernel does not block it
+  registerProfile(
+    defineProfile({
+      id: 'image_with_search',
+      model: {
+        allow: ['gemini31FlashLiteImage'],
+        config: {
+          gemini31FlashLiteImage: {
+            ...HOST_MODELS.gemini31FlashLiteImage,
+            builtInTools: ['googleSearch'],
+          },
+        },
+      },
+      tools: { allow: [] },
+      inputs: { text: true },
+      outputs: {
+        structured: null,
+        image: {
+          aspectRatio: '1:1',
+          size: '1K',
+          mimeType: 'image/jpeg',
+        },
+      },
+      guardrails: { quota: { perDay: 10 } },
+    }),
+  );
+  assertEquals(
+    resolveTurn({ profile: 'image_with_search', input: { text: 'search image' } }).generation
+      .builtins,
+    ['googleSearch'],
+  );
+});
+
+Deno.test('resolveTurn rejects multiple responseFormat wire formats', () => {
+  registerProfile({
+    id: 'mixed_output_modes_test',
+    model: { ...modelAllow('gemini35FlashLite') },
+    tools: { allow: [] },
+    inputs: { text: true },
+    outputs: {
+      structured: 'chatTurn',
+      speech: { voice: 'Kore', format: 'pcm' },
+    },
+    guardrails: { canary: false, sanitizeInput: false, redactSensitive: false },
+  });
   assertThrows(
-    () =>
-      resolveTurn({
-        profile: 'image_with_search',
-        tools: { googleSearch: true },
-        input: { text: 'search image' },
-      }),
+    () => resolveTurn({ profile: 'mixed_output_modes_test', input: { text: 'hi' } }),
     TheorumError,
   );
 });

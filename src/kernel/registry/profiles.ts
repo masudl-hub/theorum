@@ -8,6 +8,7 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
+import { getTool } from '../tools/registry.ts';
 import type { CompactionSpec, ModelId, Profile } from '../types.ts';
 
 const profiles = new Map<string, Profile>();
@@ -80,6 +81,7 @@ function buildDefaultOutputs(outputs?: Partial<Profile['outputs']>): Profile['ou
     structured: outputs?.structured ?? null,
     image: outputs?.image,
     speech: outputs?.speech,
+    live: outputs?.live,
     validation: outputs?.validation,
     streaming: outputs?.streaming,
   };
@@ -103,7 +105,11 @@ function defineProfile(input: ProfileDefinition): Profile {
     id: input.id,
     identity: buildDefaultIdentity(input.id, input.identity),
     model: buildDefaultModel(input.id, input.model),
-    tools: { allow: input.tools?.allow ?? [] },
+    tools: {
+      allow: input.tools?.allow ?? [],
+      t1Policy: input.tools?.t1Policy,
+      t2Loader: input.tools?.t2Loader,
+    },
     inputs: buildDefaultInputs(input.inputs),
     outputs: buildDefaultOutputs(input.outputs),
     guardrails: buildDefaultGuardrails(input.guardrails),
@@ -149,10 +155,55 @@ function assertCompactionRetain(tag: string, spec: CompactionSpec): void {
   }
 }
 
+function assertCustomToolsOnly(profile: Profile): void {
+  for (const id of profile.tools.allow) {
+    const tool = getTool(id);
+    if (tool?.type === 'builtin') {
+      throw new TheorumError(
+        `Profile ${profile.id} lists builtin '${id}' in tools.allow — declare it on model.config.*.builtInTools instead`,
+      );
+    }
+  }
+}
+
+function assertProfileToolLoader(profile: Profile): void {
+  const loaderId = profile.tools.t2Loader;
+  if (!loaderId) {
+    return;
+  }
+  if (!profile.tools.allow.includes(loaderId)) {
+    throw new TheorumError(
+      `Profile ${profile.id} tools.t2Loader '${loaderId}' must also be listed in tools.allow`,
+    );
+  }
+  const tool = getTool(loaderId);
+  if (tool?.type !== 'function') {
+    throw new TheorumError(
+      `Profile ${profile.id} tools.t2Loader '${loaderId}' must be a registered type: 'function' tool`,
+    );
+  }
+}
+
+function assertModelBuiltInTools(profile: Profile): void {
+  for (const [modelId, spec] of Object.entries(profile.model.config)) {
+    for (const id of spec.builtInTools) {
+      const tool = getTool(id);
+      if (tool?.type !== 'builtin') {
+        throw new TheorumError(
+          `Profile ${profile.id} model '${modelId}' lists '${id}' in builtInTools — not a registered builtin`,
+        );
+      }
+    }
+  }
+}
+
 /** Register one host-owned profile in the process-local registry. */
 function registerProfile(profileInput: Profile | ProfileDefinition): void {
   const profile = defineProfile(profileInput);
   assertModelSpecs(profile.id, profile.model.allow, profile.model.config);
+  assertCustomToolsOnly(profile);
+  assertProfileToolLoader(profile);
+  assertModelBuiltInTools(profile);
   const { attachments, voice, maxFiles, maxBytes, maxTurnBytes } = profile.inputs;
   if (attachments || voice) {
     if (!(maxFiles && maxBytes && maxTurnBytes)) {

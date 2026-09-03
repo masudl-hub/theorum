@@ -1,19 +1,21 @@
 import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { registerStructured } from '../../src/kernel/registry/schemas.ts';
+import { registerHarnessTools } from '../../src/kernel/tools/mod.ts';
 import type { Profile } from '../../src/kernel/types.ts';
 import type { GoogleImagePins } from '../../src/presets/google.ts';
 import { registerGooglePreset } from '../../src/presets/google.ts';
 import {
   CHAT_MEDIA_LIMITS,
   HOST_MODELS,
-  IMAGE_ASPECT_RATIOS,
   IMAGE_INPUT_MIMES,
-  IMAGE_SIZES,
   modelAllow,
   VOICE_INPUT_MIMES,
 } from './models.ts';
+import { registerTestTools } from './test-tools.ts';
 
 registerGooglePreset();
+registerHarnessTools();
+registerTestTools();
 
 const CHAT_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/csv', 'text/plain'];
 const FORMATTER_ATTACH = [...IMAGE_INPUT_MIMES, 'application/pdf', 'text/plain'];
@@ -87,7 +89,7 @@ const chat: Profile = {
     maxSteps: 1,
     key: 'freeA',
   },
-  tools: { allow: ['googleSearch', 'googleMaps', 'urlContext'] },
+  tools: { allow: [] },
   inputs: {
     text: true,
     attachments: { accept: CHAT_ATTACH },
@@ -139,7 +141,7 @@ const selector: Profile = {
     maxSteps: 1,
     key: 'freeB',
   },
-  tools: { allow: ['googleSearch', 'googleMaps', 'urlContext'] },
+  tools: { allow: [] },
   inputs: {
     text: true,
     attachments: { accept: CHAT_ATTACH },
@@ -157,11 +159,17 @@ const formatter: Profile = {
     protocol: 'geminiInteractions',
     provider: 'google',
     ...modelAllow('gemini35FlashLite'),
+    config: {
+      gemini35FlashLite: {
+        ...HOST_MODELS.gemini35FlashLite,
+        builtInTools: [],
+      },
+    },
     controls: ['thinking'],
     maxSteps: 1,
     key: 'freeC',
   },
-  tools: { allow: ['googleSearch', 'googleMaps'] },
+  tools: { allow: [] },
   inputs: {
     text: true,
     attachments: { accept: FORMATTER_ATTACH },
@@ -190,10 +198,6 @@ const image: Profile = {
   inputs: {
     text: true,
     attachments: { accept: IMAGE_INPUT_MIMES },
-    slots: {
-      aspectRatio: [...IMAGE_ASPECT_RATIOS],
-      size: [...IMAGE_SIZES],
-    },
     ...CHAT_MEDIA_LIMITS,
   },
   outputs: {
@@ -202,7 +206,6 @@ const image: Profile = {
       aspectRatio: '1:1',
       size: '1K',
       mimeType: 'image/jpeg',
-      allowsGrounding: false,
       maxInputImages: 14,
     } satisfies GoogleImagePins,
   },

@@ -52,11 +52,17 @@ const DISABLE_SAFETY =
   /(disable|delete|remove|turn\s+off|eliminate)\s+(all\s+)?(your\s+)?(safety|security|content)\s+(filters?|measures?|rules?|guidelines?|restrictions?)/gi;
 const IGNORE_SAFETY =
   /(ignore|disregard)\s+(all\s+)?(your\s+)?(safety|security|ethical|content)\s+(guidelines?|rules?|restrictions?|measures?|filters?|polic(?:y|ies)|protocols?)/gi;
-const SYSTEM_TAG = /<\s*\/?\s*system\s*\/?>/gi;
-const ROLE_TAG = /<\s*\/?\s*(assistant|developer|tool|function)\s*\/?>/gi;
-const ROLE_DELIMITER = /\]\s*\n\s*\[?(system|assistant|user)\]?:/gi;
-const BRACKETED_ROLE = /\[\s*(System\s*Message|System|Assistant|Internal)\s*\]/gi;
-const SYSTEM_YOU_ARE = /^\s*System:\s+(you\s+are|ignore|override)/gim;
+/** Bound whitespace so tag scanners cannot polynomial-backtrack on long runs. */
+const TAG_WS = String.raw`[^\S\r\n]{0,32}`;
+const SYSTEM_TAG = new RegExp(`<${TAG_WS}\\/?${TAG_WS}system${TAG_WS}\\/?>`, 'gi');
+const ROLE_TAG = new RegExp(
+  `<${TAG_WS}\\/?${TAG_WS}(assistant|developer|tool|function)${TAG_WS}\\/?>`,
+  'gi',
+);
+const ROLE_DELIMITER = /\][^\S\r\n]{0,32}\n[^\S\r\n]{0,32}\[?(system|assistant|user)\]?:/gi;
+const BRACKETED_ROLE =
+  /\[[^\S\r\n]{0,32}(System[^\S\r\n]{0,8}Message|System|Assistant|Internal)[^\S\r\n]{0,32}\]/gi;
+const SYSTEM_YOU_ARE = /^[^\S\r\n]{0,32}System:[^\S\r\n]{1,32}(you\s+are|ignore|override)/gim;
 const CONTROL_TOKEN = /<\|(?:im_start|im_end|eot_id|start_header_id|end_header_id|endoftext)\|>/g;
 const DEEPSEEK_CONTROL = /<｜(?:end▁of▁sentence|begin▁of▁sentence)｜>/g;
 const LLAMA_INST = /\[\/?INST\]/gi;

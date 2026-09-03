@@ -400,16 +400,53 @@ function eventsFromInteractionSteps(steps: unknown[], alreadyText: boolean): Tur
   return events;
 }
 
+function cleanMapsTitle(title: string): string {
+  return title.replace(/\s*-\s*Google Maps\s*$/i, '').trim();
+}
+
+function isPrimaryMapsPlace(name: string, uri: string): boolean {
+  if (/^Review of\b/i.test(name)) {
+    return false;
+  }
+  if (/\/maps\/reviews\//i.test(uri)) {
+    return false;
+  }
+  return true;
+}
+
+function placeIdFromRecord(record: Record<string, unknown>): string | undefined {
+  return nonEmptyString(record.placeId ?? record.place_id);
+}
+
 function sourceFromMaps(maps: Record<string, unknown>): GroundingSource | undefined {
-  const uri = maps.uri ?? maps.googleMapsUri ?? maps.google_maps_uri;
+  const uri = maps.uri ?? maps.googleMapsUri ?? maps.google_maps_uri ?? maps.url;
   if (typeof uri !== 'string' || !uri) {
     return undefined;
   }
-  const title = maps.title ?? maps.name;
+  const rawTitle = maps.title ?? maps.name;
+  const title =
+    typeof rawTitle === 'string' && rawTitle ? cleanMapsTitle(rawTitle) : uri;
+  const placeId = placeIdFromRecord(maps);
   return {
     type: 'maps',
     uri,
-    title: typeof title === 'string' && title ? title : uri,
+    title,
+    ...(placeId ? { placeId } : {}),
+  };
+}
+
+/** Classic grounding chunk shape hosts already parse (`chunks[].maps`). */
+function chunkFromMapsPlace(place: Record<string, unknown>): unknown | undefined {
+  const source = sourceFromMaps(place);
+  if (!source || !isPrimaryMapsPlace(source.title, source.uri)) {
+    return undefined;
+  }
+  return {
+    maps: {
+      title: source.title,
+      uri: source.uri,
+      ...(source.placeId ? { placeId: source.placeId } : {}),
+    },
   };
 }
 
@@ -430,9 +467,20 @@ function pushUniqueSource(sources: GroundingSource[], source: GroundingSource | 
   if (!source) {
     return;
   }
-  if (!sources.some((item) => item.uri === source.uri && item.type === source.type)) {
-    sources.push(source);
+  if (
+    sources.some((item) => {
+      if (item.type !== source.type) {
+        return false;
+      }
+      if (source.placeId && item.placeId && source.placeId === item.placeId) {
+        return true;
+      }
+      return item.uri === source.uri;
+    })
+  ) {
+    return;
   }
+  sources.push(source);
 }
 
 function groundingChunks(metadata: Record<string, unknown>): unknown[] {
@@ -492,14 +540,85 @@ function sourceFromAnnotation(ann: unknown): GroundingSource | undefined {
     return undefined;
   }
   const kind = String(record.type ?? '');
-  const title = nonEmptyString(record.title ?? record.name) ?? uri;
+  const rawTitle = nonEmptyString(record.title ?? record.name) ?? uri;
   if (kind === 'place_citation') {
-    return { type: 'maps', uri, title };
+    const title = cleanMapsTitle(rawTitle);
+    if (!isPrimaryMapsPlace(title, uri)) {
+      return undefined;
+    }
+    const placeId = placeIdFromRecord(record);
+    return {
+      type: 'maps',
+      uri,
+      title,
+      ...(placeId ? { placeId } : {}),
+    };
   }
   if (kind === 'url_citation' || kind === 'citation' || !kind) {
-    return { type: 'web', uri, title };
+    return { type: 'web', uri, title: rawTitle };
   }
   return undefined;
+}
+
+function pushUniqueChunk(chunks: unknown[], chunk: unknown): void {
+  const maps = asRecord(asRecord(chunk)?.maps);
+  if (!maps) {
+    chunks.push(chunk);
+    return;
+  }
+  const placeId = placeIdFromRecord(maps);
+  const uri = nonEmptyString(maps.uri ?? maps.url);
+  if (
+    chunks.some((existing) => {
+      const existingMaps = asRecord(asRecord(existing)?.maps);
+      if (!existingMaps) {
+        return false;
+      }
+      const existingId = placeIdFromRecord(existingMaps);
+      if (placeId && existingId && placeId === existingId) {
+        return true;
+      }
+      return Boolean(uri && nonEmptyString(existingMaps.uri ?? existingMaps.url) === uri);
+    })
+  ) {
+    return;
+  }
+  chunks.push(chunk);
+}
+
+/** Interactions `google_maps_result.result[].places[]` — not classic groundingChunks. */
+function chunksAndSourcesFromMapsResult(result: unknown): {
+  chunks: unknown[];
+  sources: GroundingSource[];
+} {
+  const chunks: unknown[] = [];
+  const sources: GroundingSource[] = [];
+  if (!Array.isArray(result)) {
+    return { chunks, sources };
+  }
+  for (const entry of result) {
+    const record = asRecord(entry);
+    if (!record) {
+      continue;
+    }
+    const places = record.places;
+    if (!Array.isArray(places)) {
+      continue;
+    }
+    for (const placeValue of places) {
+      const place = asRecord(placeValue);
+      if (!place) {
+        continue;
+      }
+      const chunk = chunkFromMapsPlace(place);
+      if (!chunk) {
+        continue;
+      }
+      pushUniqueChunk(chunks, chunk);
+      pushUniqueSource(sources, sourceFromMaps(place));
+    }
+  }
+  return { chunks, sources };
 }
 
 function appendAnnotationSources(into: GroundingSource[], annotations: unknown): void {
@@ -522,9 +641,16 @@ function sourcesFromAnnotations(annotations: unknown): GroundingSource[] {
 /**
  * Wrap Interactions tool-result steps (google_search_result, maps, etc.) into grounding.
  * Preserves the raw step on `metadata` so hosts can inspect everything Gemini returned.
+ *
+ * Maps places arrive as `google_maps_result.result[].places[]` and as
+ * `place_citation` annotations on model_output content — not classic
+ * `grounding_metadata.groundingChunks`. Emit both `sources` and `chunks`
+ * (`chunks[].maps`) so hosts share one parse shape.
  */
 function groundingFromInteractionsTool(step: Record<string, unknown>): GroundingEvent | undefined {
   const sources: GroundingSource[] = [];
+  const chunks: unknown[] = [];
+
   appendAnnotationSources(sources, step.annotations);
   if (Array.isArray(step.content)) {
     for (const block of step.content) {
@@ -534,12 +660,34 @@ function groundingFromInteractionsTool(step: Record<string, unknown>): Grounding
       }
     }
   }
+  for (const source of sources) {
+    if (source.type !== 'maps') {
+      continue;
+    }
+    pushUniqueChunk(chunks, {
+      maps: {
+        title: source.title,
+        uri: source.uri,
+        ...(source.placeId ? { placeId: source.placeId } : {}),
+      },
+    });
+  }
+
+  const fromMapsResult = chunksAndSourcesFromMapsResult(step.result);
+  for (const chunk of fromMapsResult.chunks) {
+    pushUniqueChunk(chunks, chunk);
+  }
+  for (const source of fromMapsResult.sources) {
+    pushUniqueSource(sources, source);
+  }
+
   const html = searchSuggestionsHtml(step);
-  if (!html && sources.length === 0) {
+  if (!html && sources.length === 0 && chunks.length === 0) {
     return undefined;
   }
   return {
     metadata: step,
+    ...(chunks.length > 0 ? { chunks } : {}),
     ...(html ? { searchHtml: html } : {}),
     sources,
   };
@@ -574,7 +722,10 @@ function mergeGrounding(
   if (!b) {
     return a;
   }
-  const chunks = [...(a.chunks ?? []), ...(b.chunks ?? [])];
+  const chunks: unknown[] = [];
+  for (const chunk of [...(a.chunks ?? []), ...(b.chunks ?? [])]) {
+    pushUniqueChunk(chunks, chunk);
+  }
   const sources = [...a.sources];
   for (const source of b.sources) {
     pushUniqueSource(sources, source);

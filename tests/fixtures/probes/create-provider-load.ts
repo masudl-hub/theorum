@@ -1,21 +1,17 @@
-import type { Profile, ProviderCompleteRequest } from '../../../src/kernel/types.ts';
+import type { ProviderCompleteRequest } from '../../../src/kernel/types.ts';
 import { createProvider } from '../../../src/providers/create-provider.ts';
+import { stubProfile } from '../profiles.ts';
 
 function baseProfile(
-  model: { protocol: 'geminiInteractions' | 'openAi'; provider: string },
+  model: { protocol: 'geminiInteractions' | 'openAi'; provider: 'google' | 'openrouter' | 'local' },
   speech: boolean,
-): Profile {
-  return {
+) {
+  return stubProfile({
+    protocol: model.protocol,
+    provider: model.provider,
+    role: speech ? 'speech' : 'chat',
     id: 'probe-profile',
-    identity: { handle: 'probe' },
-    model: { ...model, allow: [], config: {} },
-    tools: { allow: [] },
-    inputs: {},
-    outputs: speech
-      ? { structured: null, speech: { voice: 'Kore', format: 'pcm' } }
-      : { structured: null },
-    guardrails: { quota: { perDay: 1 } },
-  } as unknown as Profile;
+  });
 }
 
 function localCompleteRequest(): ProviderCompleteRequest {

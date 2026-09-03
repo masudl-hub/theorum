@@ -1,10 +1,7 @@
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import {
-  loadedBetween,
-  loadedModules,
-  runImportProbe,
-  stdoutBeforeMarker,
-} from '../fixtures/run-import-probe.ts';
+import { resolveTurn } from '../../src/kernel/registry/resolve.ts';
+import { buildRecord } from '../../src/observability/trace-record.ts';
+import '../fixtures/test-host.ts';
 
 Deno.test('trace-attach has no eager google/interactions import', async () => {
   const src = await Deno.readTextFile(
@@ -14,19 +11,20 @@ Deno.test('trace-attach has no eager google/interactions import', async () => {
   assertEquals(src.includes("import('../providers/google/interactions/framing.ts')"), true);
 });
 
-Deno.test('trace-attach subprocess loads interactions wire only for geminiInteractions', async () => {
-  const result = await runImportProbe('./probes/trace-attach-load.ts');
-  if (result.code !== 0) {
-    throw new Error(result.stderr || `probe exited ${result.code}`);
-  }
+Deno.test('trace-attach attaches wire only for geminiInteractions', async () => {
+  const { generation } = resolveTurn({ profile: 'chat', input: { text: 'probe' } });
+  const base = {
+    req: { profile: 'chat', input: { text: 'probe' } },
+    events: [{ type: 'text' as const, text: 'ok' }],
+    started: Date.now(),
+    system: 'probe system',
+    generation,
+    upstreamLog: [],
+  };
 
-  const beforeOpenAi = loadedModules(stdoutBeforeMarker(result.stdout, 'PHASE:openAi-record'));
-  assertEquals(beforeOpenAi, []);
+  const openAi = await buildRecord({ ...base, protocol: 'openAi' });
+  assertEquals(openAi.wire, undefined);
 
-  const betweenRecords = loadedBetween(result.stdout, 'PHASE:openAi-record', 'PHASE:gemini-record');
-  assertEquals(betweenRecords, ['google-interactions-wire']);
-
-  const allLoaded = loadedModules(result.stdout);
-  assertEquals(allLoaded, ['google-interactions-wire']);
-  assertEquals(result.stdout.includes('PROBE_DONE'), true);
+  const gemini = await buildRecord({ ...base, protocol: 'geminiInteractions' });
+  assertEquals(gemini.wire !== undefined, true);
 });

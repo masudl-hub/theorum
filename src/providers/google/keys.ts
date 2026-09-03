@@ -9,7 +9,6 @@
 
 import { isAbortError, TheorumError, UPSTREAM_FAILED } from '../../guardrails/error.ts';
 import type { GeminiBucket } from '../../kernel/types.ts';
-import { exposeForTests } from '../expose-for-tests.ts';
 
 type GeminiVault = Record<GeminiBucket, string | undefined>;
 
@@ -37,18 +36,18 @@ const QUOTA_RE = /quota/i;
 const TRANSIENT_THROWN_RE =
   /name resolution|dns|econnreset|econnrefused|etimedout|network|fetch failed|temporarily unavailable|socket|503|502|504/i;
 
-function waitDefault(ms: number): Promise<void> {
+export function waitDefault(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
-function isQuota(err: unknown): boolean {
+export function isQuota(err: unknown): boolean {
   const s = String(err);
   return s.includes(String(HTTP_QUOTA)) || s.includes('RESOURCE_EXHAUSTED') || QUOTA_RE.test(s);
 }
 
-function isTransientHttp(status: number): boolean {
+export function isTransientHttp(status: number): boolean {
   return (
     status === HTTP_TIMEOUT ||
     status === HTTP_QUOTA ||
@@ -59,14 +58,14 @@ function isTransientHttp(status: number): boolean {
   );
 }
 
-function isTransientThrown(err: unknown): boolean {
+export function isTransientThrown(err: unknown): boolean {
   if (isAbortError(err)) {
     return false;
   }
   return TRANSIENT_THROWN_RE.test(String(err));
 }
 
-function requireKey(vault: GeminiVault, bucket: GeminiBucket): string {
+export function requireKey(vault: GeminiVault, bucket: GeminiBucket): string {
   const key = vault[bucket];
   if (!key) {
     throw new TheorumError(UPSTREAM_FAILED);
@@ -74,7 +73,7 @@ function requireKey(vault: GeminiVault, bucket: GeminiBucket): string {
   return key;
 }
 
-function backoffMs(attempt: number): number {
+export function backoffMs(attempt: number): number {
   return BACKOFF_MS[attempt] ?? BACKOFF_SECOND_MS;
 }
 
@@ -99,7 +98,7 @@ async function runWithBackoff<T>(
   }
 }
 
-function canOverflow(
+export function canOverflow(
   bucket: GeminiBucket,
   vault: GeminiVault,
   primary: string,
@@ -114,7 +113,7 @@ function canOverflow(
   return paid;
 }
 
-async function withGeminiKey<T>(
+export async function withGeminiKey<T>(
   bucket: GeminiBucket,
   run: (apiKey: string) => Promise<T>,
   transport: GeminiTransport,
@@ -132,7 +131,7 @@ async function withGeminiKey<T>(
   }
 }
 
-function withApiKey(init: RequestInit, apiKey: string): RequestInit {
+export function withApiKey(init: RequestInit, apiKey: string): RequestInit {
   const headers = new Headers(init.headers);
   headers.set('x-goog-api-key', apiKey);
   if (!headers.has('Content-Type') && (init.method || 'GET').toUpperCase() !== 'GET') {
@@ -149,7 +148,7 @@ interface FetchAttempt {
   attempt: number;
 }
 
-async function fetchWithBackoff(args: FetchAttempt): Promise<Response> {
+export async function fetchWithBackoff(args: FetchAttempt): Promise<Response> {
   const wait = args.transport.wait ?? waitDefault;
   const send = args.transport.fetch ?? fetch;
   try {
@@ -173,7 +172,7 @@ async function fetchWithBackoff(args: FetchAttempt): Promise<Response> {
   }
 }
 
-async function fetchGemini(
+export async function fetchGemini(
   url: string,
   init: RequestInit,
   bucket: GeminiBucket,
@@ -192,15 +191,3 @@ async function fetchGemini(
 }
 
 export type { GeminiTransport, GeminiVault };
-export { fetchGemini, requireKey, withGeminiKey };
-
-exposeForTests('keys', {
-  waitDefault,
-  isQuota,
-  isTransientHttp,
-  isTransientThrown,
-  requireKey,
-  backoffMs,
-  canOverflow,
-  withApiKey,
-});

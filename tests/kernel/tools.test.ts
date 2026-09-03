@@ -903,6 +903,11 @@ Deno.test('T2 tools are not visible until loader promotes them', () => {
 });
 
 Deno.test('invalid handler output and throws surface failure codes', async () => {
+  /** Intentional invalid output for validation coverage. */
+  function invalidOutput(): { finding: string } {
+    const bad: Record<string, unknown> = { wrong: true };
+    return bad as { finding: string };
+  }
   registerTool({
     type: 'function',
     name: 'bad_output_probe',
@@ -914,7 +919,7 @@ Deno.test('invalid handler output and throws surface failure codes', async () =>
     permission: 'auto',
     input: z.object({}),
     output: z.object({ finding: z.string() }),
-    handler: () => ({ wrong: true }) as unknown as { finding: string },
+    handler: () => invalidOutput(),
   });
   registerTool({
     type: 'function',

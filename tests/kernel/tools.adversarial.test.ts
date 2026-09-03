@@ -4,8 +4,6 @@
  * @module
  */
 
-import '../fixtures/enable-test-internals.ts';
-import '../../src/providers/google/interactions/stream.ts';
 import '../fixtures/test-host.ts';
 import { z } from 'zod';
 import { TheorumError } from '../../src/guardrails/error.ts';
@@ -20,14 +18,14 @@ import {
   resolveTurnTools,
 } from '../../src/kernel/tools/resolve.ts';
 import type { ModelProvider, TurnEvent } from '../../src/kernel/types.ts';
+import {
+  foldArgumentsDelta,
+  foldPayload,
+  foldStepStart,
+  newStreamFold,
+} from '../../src/providers/google/interactions/stream.ts';
 import { HOST_MODELS, modelAllow } from '../fixtures/models.ts';
 import { invokeRegisteredTool } from '../fixtures/test-tools.ts';
-import { testInternals } from '../fixtures/testInternals.js';
-
-const _internals = testInternals('google-interactions') as Record<
-  string,
-  (...args: unknown[]) => unknown
->;
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -58,9 +56,9 @@ function flashProfile(
 // ---------------------------------------------------------------------------
 
 Deno.test('adversarial/stream: string args via delta + step.stop', () => {
-  const fold = _internals.newStreamFold();
+  const fold = newStreamFold();
   const events = [
-    ...(_internals.foldPayload(
+    ...(foldPayload(
       {
         event_type: 'step.start',
         index: 0,
@@ -68,7 +66,7 @@ Deno.test('adversarial/stream: string args via delta + step.stop', () => {
       },
       fold,
     ) as TurnEvent[]),
-    ...(_internals.foldPayload(
+    ...(foldPayload(
       {
         event_type: 'step.delta',
         index: 0,
@@ -76,11 +74,11 @@ Deno.test('adversarial/stream: string args via delta + step.stop', () => {
       },
       fold,
     ) as TurnEvent[]),
-    ...(_internals.foldPayload(
+    ...(foldPayload(
       { event_type: 'step.delta', index: 0, delta: { type: 'arguments', arguments: '1}' } },
       fold,
     ) as TurnEvent[]),
-    ...(_internals.foldPayload({ event_type: 'step.stop', index: 0 }, fold) as TurnEvent[]),
+    ...(foldPayload({ event_type: 'step.stop', index: 0 }, fold) as TurnEvent[]),
   ];
   const tool = events.find((e) => e.type === 'tool');
   assertEquals(tool?.tool?.name, 'ping_tool');
@@ -88,8 +86,8 @@ Deno.test('adversarial/stream: string args via delta + step.stop', () => {
 });
 
 Deno.test('adversarial/stream: step.start id-only flushes empty args on step.stop', () => {
-  const fold = _internals.newStreamFold();
-  _internals.foldPayload(
+  const fold = newStreamFold();
+  foldPayload(
     {
       event_type: 'step.start',
       index: 2,
@@ -97,17 +95,14 @@ Deno.test('adversarial/stream: step.start id-only flushes empty args on step.sto
     },
     fold,
   );
-  const stopped = _internals.foldPayload(
-    { event_type: 'step.stop', index: 2 },
-    fold,
-  ) as TurnEvent[];
+  const stopped = foldPayload({ event_type: 'step.stop', index: 2 }, fold) as TurnEvent[];
   assertEquals(stopped.length, 1);
   assertEquals(stopped[0]?.tool?.arguments, {});
 });
 
-Deno.test('adversarial/stream: malformed JSON args become empty object', () => {
-  const fold = _internals.newStreamFold();
-  _internals.foldStepStart(
+Deno.test('adversarial/stream: malformed JSON args become tool failure events', () => {
+  const fold = newStreamFold();
+  foldStepStart(
     {
       event_type: 'step.start',
       index: 0,
@@ -115,25 +110,75 @@ Deno.test('adversarial/stream: malformed JSON args become empty object', () => {
     },
     fold,
   );
-  _internals.foldArgumentsDelta({ type: 'arguments_delta', arguments: '{not json' }, 0, fold);
-  const stopped = _internals.foldPayload(
-    { event_type: 'step.stop', index: 0 },
-    fold,
-  ) as TurnEvent[];
+  foldArgumentsDelta({ type: 'arguments_delta', arguments: '{not json' }, 0, fold);
+  const stopped = foldPayload({ event_type: 'step.stop', index: 0 }, fold) as TurnEvent[];
+  assertEquals(stopped[0]?.type, 'tool');
+  assertEquals(stopped[0]?.tool?.phase, 'error');
+  assertEquals(stopped[0]?.tool?.failure?.code, 'malformed_arguments');
   assertEquals(stopped[0]?.tool?.arguments, {});
 });
 
 Deno.test('adversarial/stream: duplicate function_call deduped', () => {
-  const fold = _internals.newStreamFold();
+  const fold = newStreamFold();
   const payload = {
     event_type: 'step.start',
     index: 0,
     step: { type: 'function_call', id: 'c_dup', name: 'stub_tool', arguments: {} },
   };
-  const first = _internals.foldPayload(payload, fold) as TurnEvent[];
-  const second = _internals.foldPayload(payload, fold) as TurnEvent[];
+  const first = foldPayload(payload, fold) as TurnEvent[];
+  const second = foldPayload(payload, fold) as TurnEvent[];
   assertEquals(first.filter((e) => e.type === 'tool').length, 1);
   assertEquals(second.filter((e) => e.type === 'tool').length, 0);
+});
+
+Deno.test('adversarial/runTurn: provider malformed_arguments skips handler execution', async () => {
+  let handlerCalls = 0;
+  registerTool({
+    type: 'function',
+    name: 'malformed_args_probe',
+    description: 'Must not run when provider already failed args parse',
+    category: 'test',
+    access: 'read-only',
+    paths: ['*'],
+    loadTier: 'T0',
+    permission: 'auto',
+    input: z.object({}),
+    output: z.object({ finding: z.string() }),
+    handler: () => {
+      handlerCalls += 1;
+      return { finding: 'ran' };
+    },
+  });
+  flashProfile('malformed_args_profile', 2, { allow: ['malformed_args_probe'] });
+  const provider: ModelProvider = {
+    async *complete() {
+      yield {
+        type: 'tool',
+        tool: {
+          name: 'malformed_args_probe',
+          id: 'c_bad',
+          arguments: {},
+          phase: 'error',
+          failure: {
+            code: 'malformed_arguments',
+            message: 'malformed tool arguments JSON',
+            details: { raw: '{bad' },
+          },
+        },
+      };
+      yield {
+        type: 'tokens',
+        tokens: { input: 1, output: 0, total: 1 },
+        interactionId: 'ix_malformed',
+      };
+    },
+  };
+  const events = await collect(
+    runTurn({ profile: 'malformed_args_profile', input: { text: 'x' } }, provider),
+  );
+  assertEquals(handlerCalls, 0);
+  assertEquals(lastTool(events, 'malformed_args_probe')?.phase, 'error');
+  assertEquals(lastTool(events, 'malformed_args_probe')?.failure?.code, 'malformed_arguments');
 });
 
 // ---------------------------------------------------------------------------

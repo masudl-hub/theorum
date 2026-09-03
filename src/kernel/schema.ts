@@ -541,7 +541,7 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   'inputs.limitsByMime.*': field('number', 'Maximum byte limit for files of this MIME type.'),
   'inputs.slots': field(
     'Record<string, string[]>',
-    'Optional turn-time selectors (e.g. aspectRatio: ["1:1", "16:9"]).',
+    'Optional turn-time selectors (e.g. language: ["html", "tsx"]).',
   ),
   'inputs.slots.*': field('string[]', 'Allowed choices for this turn selector.'),
   outputs: field(
@@ -558,11 +558,11 @@ export const PROFILE_FIELDS: Record<string, FieldMeta> = {
   ),
   'outputs.image.aspectRatio': field(
     'string',
-    'Default aspect ratio when the turn does not set slots.aspectRatio.',
+    'Optional output aspect ratio. Omitted → provider default.',
   ),
   'outputs.image.size': field(
     'string',
-    'Default size / resolution when the turn does not set slots.size.',
+    'Optional output size / resolution. Omitted → provider default.',
   ),
   'outputs.image.mimeType': field('string', 'Output MIME for generated images.'),
   'outputs.image.maxInputImages': field('number', 'Cap on reference images in one turn.'),

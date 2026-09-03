@@ -130,19 +130,16 @@ Deno.test('clientIp ignores x-forwarded-for when peer is not loopback', () => {
 });
 
 Deno.test('skipQuota is true for localhost string in LOOPBACK set', () => {
-  // Kills: LOOPBACK = new Set(['127.0.0.1', '::1', '']) mutation removing 'localhost'
   const req = new Request('http://localhost/', { method: 'POST' });
   assertEquals(skipQuota('localhost', req), true);
 });
 
 Deno.test('clientIp for loopback without CF header returns the loopback peer not empty string', () => {
-  // Kills: if (true) mutation at line 38 — without CF, loopback should fall through to peer
   const req = new Request('http://127.0.0.1/');
   assertEquals(clientIp('127.0.0.1', req), '127.0.0.1');
 });
 
 Deno.test('clientIp trims whitespace from cf-connecting-ip header', () => {
-  // Kills: ?.trim() removal mutation at line 24
   const req = new Request('http://127.0.0.1/', {
     headers: { 'cf-connecting-ip': '  203.0.113.20  ' },
   });
@@ -150,7 +147,6 @@ Deno.test('clientIp trims whitespace from cf-connecting-ip header', () => {
 });
 
 Deno.test('takeSlot uses a per-profile-and-ip key so different IPs on same profile are independent', () => {
-  // Kills: slotKey returning '' which would merge all IPs into one slot
   resetSlots();
   const profile = getProfile('image');
   const ipA = '10.0.0.1';
@@ -164,7 +160,6 @@ Deno.test('takeSlot uses a per-profile-and-ip key so different IPs on same profi
 });
 
 Deno.test('takeSlot day key is a 10-character YYYY-MM-DD string not the full ISO timestamp', () => {
-  // Kills: toISOString() without .slice(0, 10) — full ISO string would break day bucketing
   resetSlots();
   const profile = getProfile('image');
   const ip2 = '10.1.1.1';

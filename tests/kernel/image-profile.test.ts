@@ -1,19 +1,13 @@
 import '../fixtures/test-host.ts';
+import { wrapUserData } from '../../src/guardrails/canary.ts';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals, assertThrows } from '../../src/kernel/engine/assert.ts';
-import { wrapUserData } from '../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../src/kernel/engine/runner.ts';
 import { registerProfile } from '../../src/kernel/registry/profiles.ts';
 import { projectProfile, resolveTurn } from '../../src/kernel/registry/resolve.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../src/kernel/types.ts';
 import { camelToSnake, toInteractionsBody } from '../../src/providers/google/interactions/mod.ts';
-import {
-  CHAT_MEDIA_LIMITS,
-  HOST_MODELS,
-  IMAGE_ASPECT_RATIOS,
-  IMAGE_SIZES,
-  modelAllow,
-} from '../fixtures/models.ts';
+import { CHAT_MEDIA_LIMITS, HOST_MODELS, modelAllow } from '../fixtures/models.ts';
 
 async function collect(gen: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -42,7 +36,6 @@ Deno.test('image oneshot uses image model and image response format', () => {
     input: {
       text: 'sleepy fox',
       attachments: [{ mimeType: 'image/png', data: 'ex' }],
-      slots: { aspectRatio: '1:1' },
     },
   });
   assertEquals(generation.model, 'gemini31FlashLiteImage');
@@ -81,13 +74,6 @@ Deno.test('image rejects mime the image model does not take', () => {
         profile: 'image',
         input: { text: 'x', attachments: [{ mimeType: 'image/gif', data: 'x' }] },
       }),
-    TheorumError,
-  );
-});
-
-Deno.test('image rejects unknown aspect ratio', () => {
-  assertThrows(
-    () => resolveTurn({ profile: 'image', input: { text: 'x', slots: { aspectRatio: '1:8' } } }),
     TheorumError,
   );
 });
@@ -159,7 +145,6 @@ Deno.test('interactions body requests text and image when includeText is set', (
     tools: { allow: [] },
     inputs: {
       text: true,
-      slots: { aspectRatio: [...IMAGE_ASPECT_RATIOS], size: [...IMAGE_SIZES] },
     },
     outputs: {
       structured: null,
@@ -219,23 +204,30 @@ Deno.test('image projection exposes image pins not tools', () => {
   assertEquals(ui.controls, []);
 });
 
-Deno.test('media validations reject missing image pins, structured mixing, and invalid mime', async () => {
+Deno.test('media validations allow omitted aspect/size; reject structured mixing and invalid mime', async () => {
   const { registerProfile, defineProfile } = await import('../../src/kernel/registry/profiles.ts');
 
-  // Image pins without aspect/size
+  // Image pins without aspect/size — provider defaults apply
   registerProfile(
     defineProfile({
-      id: 'bad_media_profile',
-      model: { ...modelAllow('gemini35FlashLite') },
+      id: 'image_defaults_profile',
+      model: { ...modelAllow('gemini31FlashLiteImage') },
       inputs: { text: true },
       outputs: { structured: null, image: { mimeType: 'image/jpeg' } },
       guardrails: { quota: { perDay: 10 } },
     }),
   );
-  assertThrows(
-    () => resolveTurn({ profile: 'bad_media_profile', input: { text: 'test' } }),
-    TheorumError,
-  );
+  const defaults = resolveTurn({
+    profile: 'image_defaults_profile',
+    input: { text: 'test' },
+  }).generation;
+  assertEquals(defaults.image, {
+    type: 'image',
+    mimeType: 'image/jpeg',
+    aspectRatio: undefined,
+    size: undefined,
+    includeText: false,
+  });
 
   // Image pins with responseFormat-enforced structured output
   registerProfile(

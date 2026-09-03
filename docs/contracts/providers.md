@@ -40,8 +40,9 @@ Owns every module under `src/providers/`.
 | `local/mod.ts` | Subpath export for direct local adapter access |
 | `shared/sse.ts` | SSE line parser |
 | `shared/pcm.ts` | PCM → WAV for Interactions speech output |
+| `shared/tool-args.ts` | Shared tool-argument JSON parse (Result; never invents `{}` / `{ _raw }`) |
 | `shared/upstream-tape.ts` / `shared/upstream-tap.ts` | Test / tap hooks (not public exports) |
-| `expose-for-tests.ts` | `THEORUM_TEST_INTERNALS=1` gated test surface |
+| `probe.ts` | Env-gated `LOADED:<label>` writer used only by `createProvider`'s lazy loader (`THEORUM_IMPORT_PROBE=1`). Not a test backdoor; adapters must not import it. |
 
 ## Package boundary
 
@@ -118,7 +119,7 @@ terminal `done.stop` via `turnStopFromOpenAiFinishReason`.
 | Tools | Registry builtins (`wire.interactions`) + function schemas from `generation.tools.wire` |
 | Code execution | Builtin `codeExecution` → `{ type: "code_execution" }`. Streamed `step.start` / `step.delta` / `step.stop`, `interaction.status_update` (`requires_action` for host tools), and batched `interaction.steps` become `evidence` (`kind`, `code`, `result`, `isError`, `raw`) plus `media` for sandbox images. Search/maps/`url_context` steps in `steps[]` are also `evidence`. Structured `responseFormat` is still attached when both are requested. |
 | Stream vs batch | Default `stream: true` (`?alt=sse`). `TurnRequest.stream: false` POSTs JSON and yields the same `TurnEvent` types from `steps[]`. |
-| Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / maps tool payloads (`search_suggestions` chips, annotations). Emits `grounding` (normalized) plus `evidence` with the raw tool payload so hosts can decide what to surface. |
+| Grounding | Classic `grounding_metadata` **and** Interactions `google_search_result` / `google_maps_result` tool payloads (`search_suggestions` chips, `result[].places[]`, `place_citation` annotations). Emits `grounding` with normalized `sources` **and** classic `chunks[].maps` (`title` / `uri` / `placeId`) plus `evidence` with the raw tool payload so hosts can decide what to surface. |
 | Stop | `turnStopFromInteractionStatus` on terminal status |
 
 ## Google Live
@@ -184,9 +185,18 @@ When `profile.outputs.speech` is defined and protocol/provider is
 | Transport | Module | Path / mechanism | Notes |
 | --- | --- | --- | --- |
 | OpenAI | `openrouter/speech.ts` | `/audio/speech` | `mp3` allowed via `response_format` |
-| Interactions | `google/interactions/mod.ts` | `responseFormat: { type: 'audio' }` | PCM → WAV; `mp3` rejected at resolve |
+| Interactions | `google/interactions/mod.ts` | `responseFormat: { type: 'audio' }` | Real PCM → WAV only. Missing audio on a speech-role turn (text-only or empty) yields an `error` event — never invents PCM from text bytes. `mp3` rejected at resolve. |
 
-Fallback `openAiGateway.voice` when `outputs.speech.voice` omitted.
+Speech-role turns (`req.speech`) must receive real audio media from the model.
+Missing audio — whether the model returned text only or nothing at all — yields
+an `error` event. The adapter never casts text bytes into a fake WAV/PCM
+container.
+
+Tool-call argument strings that are not valid JSON objects fail the same way on
+every transport (Interactions, Live, local, OpenRouter history→SDK): a `tool`
+event with `phase: 'error'` / `failure.code: 'malformed_arguments'`, or a thrown
+`TheorumError` when rebuilding history for the AI SDK. Nothing invents `{}` or
+`{ _raw }` to paper over bad JSON.
 
 ## Gemini transport
 

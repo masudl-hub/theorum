@@ -117,7 +117,7 @@ different transport than the primary turn.
 | `tool` | Tool call (`phase`: `running` / `progress` / `complete` / `pause` / `error`, …) |
 | `structured` | Parsed JSON object when schema enforced |
 | `media` | Generated image/audio bytes + mime |
-| `grounding` | Search/maps grounding metadata (classic `grounding_metadata` and Interactions tool results such as `google_search_result.search_suggestions`) |
+| `grounding` | Search/maps grounding metadata (classic `grounding_metadata` and Interactions tool results such as `google_search_result.search_suggestions`, `google_maps_result.result[].places`, and `place_citation` annotations). Normalized to `sources` plus classic `chunks[].maps` (`title` / `uri` / `placeId`) |
 | `evidence` | Provider-native attachments. Google code execution sets `kind` (`code_execution_call` / `code_execution_result`) plus parsed `code` / `result` / `isError` / `id` / `callId`, and always keeps `raw`. |
 | `tokens` | `input` / `output` / `total` usage (billing; may gate `meter: 'input'`) |
 | `done` | Terminal: `stop`, `tokens`, `compaction`, final text pointer |
@@ -222,7 +222,7 @@ Profile `outputs` pins behavior the kernel enforces before adapters run:
 | Pin | Effect |
 | --- | --- |
 | `structured` | Schema id or slot-mapped ids; `responseFormat` vs prompt enforcement |
-| `image` | Aspect ratio, size, mime, max input images |
+| `image` | Optional aspect/size, mime, max input images (aspect/size omit → provider defaults) |
 | `speech` | TTS voice + `format` (`pcm` → WAV; `mp3` OpenAI-only) |
 | `streaming` | `mode`, `streamThoughts`, `gateMedia` |
 | `validation` | Field validators + `maxRetries` + `repairGuidance` |

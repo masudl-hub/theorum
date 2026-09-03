@@ -13,14 +13,13 @@ import type {
   ProviderCompleteRequest,
   TurnHistoryMessage,
 } from '../../../kernel/types.ts';
-import { exposeForTests } from '../../expose-for-tests.ts';
 import { fallbackToolCallId, parseToolInput } from './compat.ts';
 
-function stringDefault(value: string | undefined, fallback: string): string {
+export function stringDefault(value: string | undefined, fallback: string): string {
   return value === undefined ? fallback : value;
 }
 
-function sdkPart(part: InteractionPart): Record<string, unknown> {
+export function sdkPart(part: InteractionPart): Record<string, unknown> {
   if (part.type === 'text') {
     return { type: 'text', text: part.text };
   }
@@ -33,7 +32,9 @@ function sdkPart(part: InteractionPart): Record<string, unknown> {
   return { type: 'file', mediaType: part.mimeType, data: part.data };
 }
 
-function sdkContentFromParts(parts: InteractionPart[]): string | Array<Record<string, unknown>> {
+export function sdkContentFromParts(
+  parts: InteractionPart[],
+): string | Array<Record<string, unknown>> {
   if (parts.every((part) => part.type === 'text')) {
     return parts
       .map((part) => (part.type === 'text' ? part.text : ''))
@@ -43,7 +44,7 @@ function sdkContentFromParts(parts: InteractionPart[]): string | Array<Record<st
   return parts.map(sdkPart);
 }
 
-function sdkContentFromOptionalParts(
+export function sdkContentFromOptionalParts(
   parts: InteractionPart[] | undefined,
   text: string | undefined,
 ): string | Array<Record<string, unknown>> {
@@ -53,8 +54,9 @@ function sdkContentFromOptionalParts(
   return sdkContentFromParts(parts);
 }
 
-function toolResultMessage(msg: TurnHistoryMessage): ModelMessage {
+export function toolResultMessage(msg: TurnHistoryMessage): ModelMessage {
   const toolName = stringDefault(msg.name, 'tool');
+  // AI SDK ToolModelMessage is a branded union; structural tool-result is correct at runtime.
   return {
     role: 'tool',
     content: [
@@ -65,10 +67,10 @@ function toolResultMessage(msg: TurnHistoryMessage): ModelMessage {
         output: { type: 'text', value: stringDefault(msg.content, '') },
       },
     ],
-  } as unknown as ModelMessage;
+  } as ModelMessage;
 }
 
-function assistantToolCallMessage(msg: TurnHistoryMessage): ModelMessage | null {
+export function assistantToolCallMessage(msg: TurnHistoryMessage): ModelMessage | null {
   if (!msg.tool_calls || msg.tool_calls.length === 0) {
     return null;
   }
@@ -83,12 +85,12 @@ function assistantToolCallMessage(msg: TurnHistoryMessage): ModelMessage | null 
   } as ModelMessage;
 }
 
-function contentHistoryMessage(msg: TurnHistoryMessage): ModelMessage {
+export function contentHistoryMessage(msg: TurnHistoryMessage): ModelMessage {
   const content = sdkContentFromOptionalParts(msg.parts, msg.content);
   return { role: msg.role, content } as ModelMessage;
 }
 
-function historyToSdk(msg: TurnHistoryMessage): ModelMessage | null {
+export function historyToSdk(msg: TurnHistoryMessage): ModelMessage | null {
   if (msg.role === 'tool') {
     return toolResultMessage(msg);
   }
@@ -99,7 +101,7 @@ function historyToSdk(msg: TurnHistoryMessage): ModelMessage | null {
  * Build AI SDK messages for history + user input.
  * Caller supplies `req.system` via `streamText({ instructions })`.
  */
-function buildAiSdkMessages(req: ProviderCompleteRequest): ModelMessage[] {
+export function buildAiSdkMessages(req: ProviderCompleteRequest): ModelMessage[] {
   const messages: ModelMessage[] = [];
   for (const msg of req.history ?? []) {
     const wired = historyToSdk(msg);
@@ -112,17 +114,3 @@ function buildAiSdkMessages(req: ProviderCompleteRequest): ModelMessage[] {
   }
   return messages;
 }
-
-export { buildAiSdkMessages };
-
-exposeForTests('openai/sdk-messages', {
-  sdkPart,
-  sdkContentFromParts,
-  sdkContentFromOptionalParts,
-  toolResultMessage,
-  assistantToolCallMessage,
-  contentHistoryMessage,
-  historyToSdk,
-  buildAiSdkMessages,
-  stringDefault,
-});

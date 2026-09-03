@@ -4,9 +4,9 @@
  * @module
  */
 
+import { mintCanary } from '../../guardrails/canary.ts';
 import { TheorumError } from '../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
-import { mintCanary } from '../engine/boundary.ts';
 import { projectTools } from '../tools/project.ts';
 import { resolveTurnTools } from '../tools/resolve.ts';
 import type {
@@ -197,7 +197,7 @@ function resolveTurn(req: TurnRequest): {
       history: input.history,
       maxSteps: profile.model.maxSteps ?? 1,
       structured,
-      image: resolveImageFormat(profile, model, input.slots),
+      image: resolveImageFormat(profile),
       speech: profile.outputs.speech,
       live: profile.outputs.live,
       input: resolveInputParts(profile, model, safe),

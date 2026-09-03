@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
  * Cursor afterFileEdit / afterTabFileEdit / postToolUse hook.
- * Audits completed edits and injects additional_context when suppressions slip through.
+ * Tracks edited files for conversation-scoped lint, and audits suppressions.
  */
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import console from 'node:console';
 import { auditEdits, auditToolInput } from './_suppression.mjs';
+import { recordEditedFile } from './_edited-files.mjs';
 
 function readStdinJson() {
 	const text = readFileSync(0, 'utf8').trim();
@@ -34,6 +35,17 @@ function respondEmpty() {
 	process.stdout.write('{}');
 }
 
+function filePathFromToolInput(toolInput) {
+	if (!toolInput || typeof toolInput !== 'object') return '';
+	return (
+		toolInput.path ??
+		toolInput.file_path ??
+		toolInput.target_notebook ??
+		toolInput.filePath ??
+		''
+	);
+}
+
 function main() {
 	let payload;
 	try {
@@ -45,13 +57,23 @@ function main() {
 	}
 
 	const hookEvent = payload.hook_event_name ?? '';
+	const conversationId = payload.conversation_id ?? payload.session_id;
 
 	if (hookEvent === 'postToolUse') {
-		const writeTools = new Set(['Write', 'StrReplace', 'EditNotebook', 'ApplyPatch', 'search_replace', 'TabWrite']);
+		const writeTools = new Set([
+			'Write',
+			'StrReplace',
+			'EditNotebook',
+			'ApplyPatch',
+			'search_replace',
+			'TabWrite',
+		]);
 		if (!writeTools.has(payload.tool_name ?? '')) {
 			respondEmpty();
 			return;
 		}
+		const editedPath = filePathFromToolInput(payload.tool_input);
+		recordEditedFile(conversationId, editedPath);
 		const hit = auditToolInput(payload.tool_name, payload.tool_input);
 		if (hit) {
 			respondWithContext(buildContext(hit));
@@ -62,10 +84,9 @@ function main() {
 	}
 
 	if (hookEvent === 'afterFileEdit' || hookEvent === 'afterTabFileEdit') {
+		recordEditedFile(conversationId, payload.file_path ?? '');
 		const hit = auditEdits(payload.file_path ?? '', payload.edits);
 		if (hit) {
-			// Documented output is empty for these events; additional_context works in practice
-			// and postToolUse above covers the same edits when this path is ignored.
 			respondWithContext(buildContext(hit));
 			return;
 		}

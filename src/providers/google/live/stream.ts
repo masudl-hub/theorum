@@ -10,7 +10,6 @@
 
 import { isAbortError, TheorumError, toErrorEvent } from '../../../guardrails/error.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../../expose-for-tests.ts';
 import { type GeminiTransport, requireKey } from '../keys.ts';
 import {
   buildGeminiLiveClientContent,
@@ -21,11 +20,9 @@ import {
   parseGeminiLiveMessage,
 } from './framing.ts';
 
-markModuleLoad('google-live-stream');
-
 const SETUP_TIMEOUT_MS = 20_000;
 
-async function readMessageData(data: string | ArrayBuffer | Blob): Promise<string> {
+export async function readMessageData(data: unknown): Promise<string> {
   if (typeof data === 'string') return data;
   if (data instanceof ArrayBuffer) {
     return new TextDecoder().decode(data);
@@ -36,7 +33,7 @@ async function readMessageData(data: string | ArrayBuffer | Blob): Promise<strin
   return String(data);
 }
 
-function readGeminiLiveErrorMessage(message: Record<string, unknown>): string | null {
+export function readGeminiLiveErrorMessage(message: Record<string, unknown>): string | null {
   const error = message.error;
   if (!error || typeof error !== 'object') return null;
   const record = error as { message?: unknown; status?: unknown; code?: unknown };
@@ -47,7 +44,7 @@ function readGeminiLiveErrorMessage(message: Record<string, unknown>): string | 
   return 'Gemini returned an error during live session.';
 }
 
-function performLiveSetup(ws: WebSocket, req: ProviderCompleteRequest): Promise<void> {
+export function performLiveSetup(ws: WebSocket, req: ProviderCompleteRequest): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let setupResolved = false;
     const timeout = setTimeout(() => {
@@ -112,7 +109,9 @@ function performLiveSetup(ws: WebSocket, req: ProviderCompleteRequest): Promise<
   });
 }
 
-function sendInitialPayloads(ws: WebSocket, req: ProviderCompleteRequest): void {
+export type LiveSocketSender = { send(data: string): void };
+
+export function sendInitialPayloads(ws: LiveSocketSender, req: ProviderCompleteRequest): void {
   if (req.history && req.history.length > 0) {
     const historyMsg = buildGeminiLiveClientContent(req.history);
     if (historyMsg) {
@@ -127,19 +126,19 @@ function sendInitialPayloads(ws: WebSocket, req: ProviderCompleteRequest): void 
   }
 }
 
-type QueueItem =
+export type QueueItem =
   | { type: 'event'; events: TurnEvent[] }
   | { type: 'error'; error: Error }
   | { type: 'done' };
 
-interface LiveQueue {
+export interface LiveQueue {
   push: (item: QueueItem) => void;
   next: () => Promise<QueueItem | undefined>;
   close: () => void;
   isClosed: () => boolean;
 }
 
-function createLiveQueue(): LiveQueue {
+export function createLiveQueue(): LiveQueue {
   const queue: QueueItem[] = [];
   let notify: (() => void) | null = null;
   let closed = false;
@@ -219,7 +218,7 @@ function attachLiveStreamHandlers(ws: WebSocket, liveQueue: LiveQueue): void {
 /**
  * Connect to Gemini Live API over WebSocket and stream TurnEvents.
  */
-async function* streamGeminiLive(
+export async function* streamGeminiLive(
   req: ProviderCompleteRequest,
   transport: GeminiTransport,
 ): AsyncGenerator<TurnEvent> {
@@ -326,12 +325,4 @@ export function createGoogleLiveProvider(transport: GeminiTransport): ModelProvi
   };
 }
 
-exposeForTests('google-live-stream', {
-  readMessageData,
-  readGeminiLiveErrorMessage,
-  performLiveSetup,
-  sendInitialPayloads,
-  createLiveQueue,
-  streamGeminiLive,
-  createGoogleLiveProvider,
-});
+export { attachLiveStreamHandlers };

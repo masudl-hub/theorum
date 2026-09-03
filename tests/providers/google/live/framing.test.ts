@@ -1,4 +1,3 @@
-import '../../../fixtures/enable-test-internals.ts';
 import { assertEquals, assertExists } from '@std/assert';
 import { registerTool } from '../../../../src/kernel/tools/mod.ts';
 import type { ProviderCompleteRequest } from '../../../../src/kernel/types.ts';
@@ -10,12 +9,11 @@ import {
   buildGeminiLiveToolResponse,
   buildGeminiLiveToolResponses,
   buildGeminiLiveWebSocketUrl,
+  extractUsageTokens,
   foldGeminiLiveServerMessage,
+  parseFunctionArguments,
   parseGeminiLiveMessage,
 } from '../../../../src/providers/google/live/framing.ts';
-import { testInternals } from '../../../fixtures/testInternals.js';
-
-const _internals = testInternals('google-live-framing');
 
 Deno.test('buildGeminiLiveWebSocketUrl encodes api key parameter', () => {
   const url = buildGeminiLiveWebSocketUrl('test-key-123');
@@ -316,11 +314,11 @@ Deno.test('parseGeminiLiveMessage parses valid JSON and ignores invalid', () => 
   assertEquals(parseGeminiLiveMessage('invalid json'), null);
 });
 
-Deno.test('_internals.extractUsageTokens parses token counts', () => {
-  const empty = _internals.extractUsageTokens({});
+Deno.test('extractUsageTokens parses token counts', () => {
+  const empty = extractUsageTokens({});
   assertEquals(empty, undefined);
 
-  const tokens = _internals.extractUsageTokens({
+  const tokens = extractUsageTokens({
     promptTokenCount: 15,
     responseTokenCount: 25,
     thoughtsTokenCount: 5,
@@ -331,7 +329,7 @@ Deno.test('_internals.extractUsageTokens parses token counts', () => {
   assertEquals(tokens?.thinking, 5);
   assertEquals(tokens?.total, 40);
 
-  const snakeTokens = _internals.extractUsageTokens({
+  const snakeTokens = extractUsageTokens({
     prompt_token_count: 10,
     response_token_count: 20,
     total_token_count: 30,
@@ -342,12 +340,30 @@ Deno.test('_internals.extractUsageTokens parses token counts', () => {
   assertEquals(snakeTokens?.thinking, undefined);
 });
 
-Deno.test('_internals.parseFunctionArguments handles strings, objects, and malformed inputs', () => {
-  assertEquals(_internals.parseFunctionArguments('{"loc": "Paris"}'), { loc: 'Paris' });
-  assertEquals(_internals.parseFunctionArguments({ loc: 'Tokyo' }), { loc: 'Tokyo' });
-  assertEquals(_internals.parseFunctionArguments('invalid json'), {});
-  assertEquals(_internals.parseFunctionArguments(123), {});
-  assertEquals(_internals.parseFunctionArguments(null), {});
+Deno.test('parseFunctionArguments handles strings, objects, and malformed inputs', () => {
+  assertEquals(parseFunctionArguments('{"loc": "Paris"}'), {
+    ok: true,
+    value: { loc: 'Paris' },
+  });
+  assertEquals(parseFunctionArguments({ loc: 'Tokyo' }), {
+    ok: true,
+    value: { loc: 'Tokyo' },
+  });
+  assertEquals(parseFunctionArguments('invalid json').ok, false);
+  assertEquals(parseFunctionArguments(123).ok, false);
+  assertEquals(parseFunctionArguments(null), { ok: true, value: {} });
+});
+
+Deno.test('foldGeminiLiveServerMessage emits malformed_arguments on bad tool JSON', () => {
+  const events = foldGeminiLiveServerMessage({
+    toolCall: {
+      functionCalls: [{ id: 'call_bad', name: 'search', args: '{not-json' }],
+    },
+  });
+  assertEquals(events.length, 1);
+  assertEquals(events[0]?.type, 'tool');
+  assertEquals(events[0]?.tool?.phase, 'error');
+  assertEquals(events[0]?.tool?.failure?.code, 'malformed_arguments');
 });
 
 Deno.test('foldGeminiLiveServerMessage handles tool calls and usage tokens', () => {

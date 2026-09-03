@@ -95,9 +95,9 @@ export type ChatRole = 'system' | 'user' | 'assistant';
  * Aspect/size/mime values are host strings (presets/apps own the vocabularies).
  */
 export interface ProfileImageSpec {
-  /** Default aspect ratio when the turn does not set `slots.aspectRatio`. */
+  /** Optional output aspect ratio pin (provider default when omitted). */
   aspectRatio?: string;
-  /** Default size / resolution when the turn does not set `slots.size`. */
+  /** Optional output size / resolution pin (provider default when omitted). */
   size?: string;
   /** Output MIME for generated images. */
   mimeType?: string;
@@ -456,9 +456,13 @@ export type InteractionPart = InteractionTextPart | InteractionMediaPart;
 export interface ImageResponseFormat {
   type: 'image';
   mimeType: string;
-  aspectRatio: string;
-  /** Authoring / kernel name; adapters map to provider wire keys (e.g. Google `imageSize`). */
-  size: string;
+  /** Omitted when the profile does not pin aspect; providers use their default. */
+  aspectRatio?: string;
+  /**
+   * Authoring / kernel name; adapters map to provider wire keys (e.g. Google `imageSize`).
+   * Omitted when the profile does not pin size; providers use their default.
+   */
+  size?: string;
   /** Request assistant text alongside generated images when the provider supports it. */
   includeText: boolean;
 }
@@ -641,6 +645,8 @@ export interface GroundingSource {
   title: string;
   uri: string;
   type: 'maps' | 'web';
+  /** Google Place id when the source is a Maps place / place_citation. */
+  placeId?: string;
 }
 
 /** Google grounding metadata normalized into a stream event. */

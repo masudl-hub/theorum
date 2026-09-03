@@ -7,9 +7,7 @@ import { registerGooglePreset } from '../../src/presets/google.ts';
 import {
   CHAT_MEDIA_LIMITS,
   HOST_MODELS,
-  IMAGE_ASPECT_RATIOS,
   IMAGE_INPUT_MIMES,
-  IMAGE_SIZES,
   modelAllow,
   VOICE_INPUT_MIMES,
 } from './models.ts';
@@ -200,10 +198,6 @@ const image: Profile = {
   inputs: {
     text: true,
     attachments: { accept: IMAGE_INPUT_MIMES },
-    slots: {
-      aspectRatio: [...IMAGE_ASPECT_RATIOS],
-      size: [...IMAGE_SIZES],
-    },
     ...CHAT_MEDIA_LIMITS,
   },
   outputs: {

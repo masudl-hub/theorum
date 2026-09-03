@@ -1,7 +1,6 @@
 import '../../fixtures/test-host.ts';
-import '../../fixtures/enable-test-internals.ts';
+import { OMIT_CANARY } from '../../../src/guardrails/canary.ts';
 import { assertEquals } from '../../../src/kernel/engine/assert.ts';
-import { OMIT_CANARY } from '../../../src/kernel/engine/boundary.ts';
 import { runTurn } from '../../../src/kernel/engine/runner.ts';
 import type { TurnEvent } from '../../../src/kernel/types.ts';
 import { memorySink } from '../../../src/observability/trace.ts';
@@ -9,8 +8,14 @@ import type { TraceRecord } from '../../../src/observability/trace-record.ts';
 import { camelToSnake } from '../../../src/providers/google/interactions/framing.ts';
 import { createInteractionsProvider } from '../../../src/providers/google/interactions/stream.ts';
 import type { GeminiVault } from '../../../src/providers/google/keys.ts';
-import { tapeUpstream } from '../../../src/providers/shared/upstream-tape.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
+import {
+  isImageBlob,
+  redactCanaryInTree,
+  scrubEntry,
+  scrubRecord,
+  scrubUpstream,
+  tapeUpstream,
+} from '../../../src/providers/shared/upstream-tape.ts';
 
 const INPUT_TOKENS = 11;
 const OUTPUT_TOKENS = 2;
@@ -189,9 +194,6 @@ Deno.test('runTurn traces upstream error response bodies', async () => {
     true,
   );
 });
-
-const { isImageBlob, scrubEntry, scrubRecord, scrubUpstream, redactCanaryInTree } =
-  testInternals('upstream-tape');
 
 Deno.test('isImageBlob detects type image or media', () => {
   assertEquals(isImageBlob({ type: 'image' }), true);

@@ -199,6 +199,36 @@ async function* handlePendingTools(
 
     executed = true;
     const callId = tool.id ?? tool.callId ?? newCallId(tool.name);
+
+    // Provider already failed this call (e.g. malformed arguments JSON).
+    if (tool.phase === 'error' && tool.failure) {
+      const enriched: TurnEvent = {
+        type: 'tool',
+        tool: {
+          ...tool,
+          callId,
+          id: tool.id ?? callId,
+        },
+      };
+      state.allEmittedEvents.push(enriched);
+      yield enriched;
+      const modelResult = formatToolFailureForModel(tool.failure);
+      if (useInteractionsContinuation) {
+        queueInteractionsToolContinuation(
+          state,
+          toolEv,
+          modelResult,
+          generation.previousInteractionId,
+        );
+        if (!state.interactionsContinuation) {
+          appendInteractionsToolResultToHistory(state.currentHistory, toolEv, modelResult);
+        }
+      } else {
+        appendToolTurnToHistory(state.currentHistory, toolEv, modelResult);
+      }
+      continue;
+    }
+
     let modelResult: ModelToolResult | undefined;
     let paused = false;
     const exec = executeRegisteredTool({

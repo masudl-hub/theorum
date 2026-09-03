@@ -13,7 +13,6 @@
 
 import { toErrorEvent } from '../../guardrails/error.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
 import { bytesToBase64 } from '../shared/pcm.ts';
 import type { OpenAiGatewayConfig } from '../types.ts';
 import { buildChatMessages, openAiGatewayHeaders } from './openai/compat.ts';
@@ -25,17 +24,17 @@ import {
 
 const HTTP_OK = 200;
 /** OpenRouter chat server tool for inline image generation. */
-const OPENROUTER_IMAGE_TOOL = 'openrouter:image_generation';
+export const OPENROUTER_IMAGE_TOOL = 'openrouter:image_generation';
 
 export type ImageProviderConfig = OpenAiGatewayConfig;
 
-interface TokenUsage {
+export interface TokenUsage {
   input: number;
   output: number;
   total: number;
 }
 
-function buildHeaders(apiKey: string, config: ImageProviderConfig): Record<string, string> {
+export function buildHeaders(apiKey: string, config: ImageProviderConfig): Record<string, string> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
@@ -47,11 +46,11 @@ function buildHeaders(apiKey: string, config: ImageProviderConfig): Record<strin
   return headers;
 }
 
-function baseUrl(config: ImageProviderConfig): string {
+export function baseUrl(config: ImageProviderConfig): string {
   return config.baseUrl?.replace(/\/+$/, '') ?? 'https://openrouter.ai/api/v1';
 }
 
-function usageFromRecord(raw: unknown): TokenUsage | null {
+export function usageFromRecord(raw: unknown): TokenUsage | null {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
@@ -65,14 +64,14 @@ function usageFromRecord(raw: unknown): TokenUsage | null {
   return { input, output, total };
 }
 
-function* yieldUsage(usage: TokenUsage | null): Generator<TurnEvent> {
+export function* yieldUsage(usage: TokenUsage | null): Generator<TurnEvent> {
   if (!usage) {
     return;
   }
   yield { type: 'tokens', tokens: usage };
 }
 
-function mediaFromImagesResponse(
+export function mediaFromImagesResponse(
   body: Record<string, unknown>,
   fallbackMime: string,
 ): { mimeType: string; data: string } | null {
@@ -96,7 +95,7 @@ function mediaFromImagesResponse(
   return { mimeType, data: b64 };
 }
 
-async function fetchImageAsBase64(
+export async function fetchImageAsBase64(
   url: string,
   fetchFn: typeof fetch,
   signal?: AbortSignal,
@@ -113,7 +112,7 @@ async function fetchImageAsBase64(
   return { mimeType, data: bytesToBase64(bytes) };
 }
 
-function markdownImageUrls(content: string): string[] {
+export function markdownImageUrls(content: string): string[] {
   const urls: string[] = [];
   const pattern = /!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/g;
   for (const match of content.matchAll(pattern)) {
@@ -125,7 +124,7 @@ function markdownImageUrls(content: string): string[] {
   return urls;
 }
 
-function plainTextFromContent(content: unknown): string {
+export function plainTextFromContent(content: unknown): string {
   if (typeof content === 'string') {
     return content.replace(/!\[[^\]]*]\([^)]+\)/g, '').trim();
   }
@@ -163,7 +162,7 @@ function httpImageUrlFromPart(entry: Record<string, unknown>): string | undefine
   return undefined;
 }
 
-function inlineImageUrls(content: unknown): string[] {
+export function inlineImageUrls(content: unknown): string[] {
   if (!Array.isArray(content)) {
     return [];
   }
@@ -203,14 +202,14 @@ function imageHttpError(res: Response, label: string): TurnEvent | undefined {
   return undefined;
 }
 
-async function requestImages(
+export async function requestImages(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig,
 ): Promise<Response> {
   return await postJson(config, '/images', buildImagesPayload(req), req.signal);
 }
 
-function buildInterleavedChatPayload(req: ProviderCompleteRequest): Record<string, unknown> {
+export function buildInterleavedChatPayload(req: ProviderCompleteRequest): Record<string, unknown> {
   if (!req.image) {
     throw new Error('buildInterleavedChatPayload requires req.image');
   }
@@ -230,14 +229,14 @@ function buildInterleavedChatPayload(req: ProviderCompleteRequest): Record<strin
   };
 }
 
-async function requestInterleavedChat(
+export async function requestInterleavedChat(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig,
 ): Promise<Response> {
   return await postJson(config, '/chat/completions', buildInterleavedChatPayload(req), req.signal);
 }
 
-async function* yieldInterleavedChat(
+export async function* yieldInterleavedChat(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig,
 ): AsyncGenerator<TurnEvent> {
@@ -294,7 +293,7 @@ async function* yieldInterleavedChat(
   yield { type: 'done' };
 }
 
-async function* yieldImagesEndpoint(
+export async function* yieldImagesEndpoint(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig,
 ): AsyncGenerator<TurnEvent> {
@@ -317,7 +316,7 @@ async function* yieldImagesEndpoint(
   yield { type: 'done' };
 }
 
-async function* streamImage(
+export async function* streamImage(
   req: ProviderCompleteRequest,
   config: ImageProviderConfig = {},
 ): AsyncGenerator<TurnEvent> {
@@ -347,29 +346,9 @@ async function* streamImage(
 }
 
 /** Internal ModelProvider for openAi image roles on OpenRouter. */
-function createImageProvider(config: ImageProviderConfig = {}): ModelProvider {
+export function createImageProvider(config: ImageProviderConfig = {}): ModelProvider {
   return {
     complete: (req: ProviderCompleteRequest) => streamImage(req, config),
   };
 }
 
-export { createImageProvider, streamImage };
-
-markModuleLoad('openrouter-image');
-
-exposeForTests('image', {
-  OPENROUTER_IMAGE_TOOL,
-  buildHeaders,
-  baseUrl,
-  usageFromRecord,
-  mediaFromImagesResponse,
-  markdownImageUrls,
-  plainTextFromContent,
-  inlineImageUrls,
-  buildInterleavedChatPayload,
-  requestImages,
-  requestInterleavedChat,
-  yieldImagesEndpoint,
-  yieldInterleavedChat,
-  fetchImageAsBase64,
-});

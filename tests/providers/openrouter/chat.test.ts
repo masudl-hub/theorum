@@ -1,15 +1,46 @@
 import '../../fixtures/test-host.ts';
-import '../../fixtures/enable-test-internals.ts';
-import type { LanguageModelUsage } from 'ai';
+import type { TextStreamPart, ToolSet } from 'ai';
 import { PUBLIC_UNAVAILABLE } from '../../../src/guardrails/error.ts';
 import { assertEquals } from '../../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../../src/kernel/registry/resolve.ts';
 import type { ProviderCompleteRequest, TurnEvent } from '../../../src/kernel/types.ts';
-import { createOpenRouterProvider } from '../../../src/providers/openrouter/chat.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
+import {
+  buildTools,
+  citationCandidates,
+  createAccumulator,
+  createOpenRouterProvider,
+  evidenceFromMetadata,
+  eventFromPart,
+  finalEvents,
+  finishEvent,
+  metadataAnnotations,
+  metadataRecord,
+  missingOpenRouterKey,
+  nestedCitations,
+  primaryEventFromPart,
+  providerMetadataEvent,
+  providerOptionsFor,
+  rawChoiceMessageEvidence,
+  rawEvents,
+  rawRecord,
+  rawThoughtEvent,
+  schemaForTool,
+  sourceEvent,
+  stringArray,
+  tokenEvent,
+  tokensFromUsage,
+  toolArguments,
+  toolCallEvent,
+  toolResultData,
+  toolResultEvent,
+  trimApiKey,
+} from '../../../src/providers/openrouter/chat.ts';
 import { testWireTool } from '../../fixtures/wire-tools.ts';
 
-const _internals = testInternals('openrouter');
+/** Adversarial stream part for default-branch coverage only. */
+function adversarialPart(type: string, extra: Record<string, unknown> = {}): TextStreamPart<ToolSet> {
+  return { type, ...extra } as TextStreamPart<ToolSet>;
+}
 
 type R = Record<string, unknown>;
 function field(ev: unknown, ...keys: string[]): unknown {
@@ -1126,46 +1157,55 @@ Deno.test('createOpenRouterProvider does not duplicate token events on multiple 
 
 // ─── Direct unit tests for internal functions ───
 
-Deno.test('_internals.trimApiKey returns trimmed key', () => {
-  assertEquals(_internals.trimApiKey('  key  '), 'key');
-  assertEquals(_internals.trimApiKey('key'), 'key');
-  assertEquals(_internals.trimApiKey(undefined), undefined);
-  assertEquals(_internals.trimApiKey(''), undefined);
-  assertEquals(_internals.trimApiKey('   '), undefined);
+Deno.test('trimApiKey returns trimmed key', () => {
+  assertEquals(trimApiKey('  key  '), 'key');
+  assertEquals(trimApiKey('key'), 'key');
+  assertEquals(trimApiKey(undefined), undefined);
+  assertEquals(trimApiKey(''), undefined);
+  assertEquals(trimApiKey('   '), undefined);
 });
 
-Deno.test('_internals.createAccumulator returns fresh state', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('createAccumulator returns fresh state', () => {
+  const acc = createAccumulator();
   assertEquals(acc.text, '');
   assertEquals(acc.evidenceSeen, false);
   assertEquals(acc.emittedTokens, false);
   assertEquals(acc.errored, false);
 });
 
-Deno.test('_internals.schemaForTool returns parameters when present', () => {
+Deno.test('schemaForTool returns parameters when present', () => {
   const decl = {
+    type: 'function' as const,
     name: 'fn',
+    description: 'fn',
     parameters: { type: 'object', properties: { x: { type: 'string' } } },
   };
-  assertEquals(_internals.schemaForTool(decl), decl.parameters);
+  assertEquals(schemaForTool(decl), decl.parameters);
 });
 
-Deno.test('_internals.schemaForTool returns default schema when no parameters', () => {
-  const decl = { name: 'fn' };
-  assertEquals(_internals.schemaForTool(decl), {
+Deno.test('schemaForTool returns default schema when no parameters', () => {
+  const decl = { name: 'fn' } as Parameters<typeof schemaForTool>[0];
+  assertEquals(schemaForTool(decl), {
     type: 'object',
     properties: {},
     additionalProperties: true,
   });
 });
 
-Deno.test('_internals.buildTools returns undefined for empty tools', () => {
-  assertEquals(_internals.buildTools(undefined), undefined);
-  assertEquals(_internals.buildTools([]), undefined);
+Deno.test('buildTools returns undefined for empty tools', () => {
+  assertEquals(buildTools(undefined), undefined);
+  assertEquals(buildTools([]), undefined);
 });
 
-Deno.test('_internals.buildTools creates tool set', () => {
-  const tools = _internals.buildTools([{ name: 'search', description: 'Find things' }]);
+Deno.test('buildTools creates tool set', () => {
+  const tools = buildTools([
+    {
+      type: 'function',
+      name: 'search',
+      description: 'Find things',
+      parameters: { type: 'object', properties: {} },
+    },
+  ]);
   assertEquals(tools !== undefined, true);
   assertEquals('search' in (tools as R), true);
 });
@@ -1174,252 +1214,252 @@ function mockUsage(
   input: number | null,
   output: number | null,
   total: number | null,
-): LanguageModelUsage {
+): {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+} {
   return {
     inputTokens: input,
     outputTokens: output,
     totalTokens: total,
-    inputTokenDetails: {},
-    outputTokenDetails: {},
-  } as unknown as LanguageModelUsage;
+  };
 }
 
-Deno.test('_internals.tokensFromUsage returns undefined for all zeros', () => {
-  assertEquals(_internals.tokensFromUsage(mockUsage(0, 0, 0)), undefined);
+Deno.test('tokensFromUsage returns undefined for all zeros', () => {
+  assertEquals(tokensFromUsage(mockUsage(0, 0, 0)), undefined);
 });
 
-Deno.test('_internals.tokensFromUsage maps non-zero usage', () => {
-  assertEquals(_internals.tokensFromUsage(mockUsage(10, 5, 15)), {
+Deno.test('tokensFromUsage maps non-zero usage', () => {
+  assertEquals(tokensFromUsage(mockUsage(10, 5, 15)), {
     input: 10,
     output: 5,
     total: 15,
   });
 });
 
-Deno.test('_internals.tokensFromUsage computes total from input+output when null', () => {
-  assertEquals(_internals.tokensFromUsage(mockUsage(10, 5, null)), {
+Deno.test('tokensFromUsage computes total from input+output when null', () => {
+  assertEquals(tokensFromUsage(mockUsage(10, 5, null)), {
     input: 10,
     output: 5,
     total: 15,
   });
 });
 
-Deno.test('_internals.tokensFromUsage handles null input/output', () => {
-  assertEquals(_internals.tokensFromUsage(mockUsage(null, null, 5)), {
+Deno.test('tokensFromUsage handles null input/output', () => {
+  assertEquals(tokensFromUsage(mockUsage(null, null, 5)), {
     input: 0,
     output: 0,
     total: 5,
   });
 });
 
-Deno.test('_internals.rawRecord returns record for objects', () => {
-  assertEquals(_internals.rawRecord({ a: 1 }), { a: 1 });
-  assertEquals(_internals.rawRecord(null), undefined);
-  assertEquals(_internals.rawRecord(undefined), undefined);
-  assertEquals(_internals.rawRecord([1, 2]), undefined);
-  assertEquals(_internals.rawRecord('string'), undefined);
-  assertEquals(_internals.rawRecord(42), undefined);
+Deno.test('rawRecord returns record for objects', () => {
+  assertEquals(rawRecord({ a: 1 }), { a: 1 });
+  assertEquals(rawRecord(null), undefined);
+  assertEquals(rawRecord(undefined), undefined);
+  assertEquals(rawRecord([1, 2]), undefined);
+  assertEquals(rawRecord('string'), undefined);
+  assertEquals(rawRecord(42), undefined);
 });
 
-Deno.test('_internals.stringArray returns string arrays', () => {
-  assertEquals(_internals.stringArray(['a', 'b']), ['a', 'b']);
-  assertEquals(_internals.stringArray([]), undefined);
-  assertEquals(_internals.stringArray('not array'), undefined);
-  assertEquals(_internals.stringArray([1, 2]), undefined);
-  assertEquals(_internals.stringArray(['a', 1, 'b']), ['a', 'b']);
+Deno.test('stringArray returns string arrays', () => {
+  assertEquals(stringArray(['a', 'b']), ['a', 'b']);
+  assertEquals(stringArray([]), undefined);
+  assertEquals(stringArray('not array'), undefined);
+  assertEquals(stringArray([1, 2]), undefined);
+  assertEquals(stringArray(['a', 1, 'b']), ['a', 'b']);
 });
 
-Deno.test('_internals.metadataRecord extracts nested record', () => {
-  assertEquals(_internals.metadataRecord({ key: { nested: true } }, 'key'), { nested: true });
-  assertEquals(_internals.metadataRecord({ key: 'string' }, 'key'), undefined);
-  assertEquals(_internals.metadataRecord({}, 'missing'), undefined);
+Deno.test('metadataRecord extracts nested record', () => {
+  assertEquals(metadataRecord({ key: { nested: true } }, 'key'), { nested: true });
+  assertEquals(metadataRecord({ key: 'string' }, 'key'), undefined);
+  assertEquals(metadataRecord({}, 'missing'), undefined);
 });
 
-Deno.test('_internals.citationCandidates gathers all candidate locations', () => {
+Deno.test('citationCandidates gathers all candidate locations', () => {
   const raw = { citations: ['a'] };
-  const candidates = _internals.citationCandidates(raw);
+  const candidates = citationCandidates(raw);
   assertEquals(candidates.length, 6);
   assertEquals(candidates[0], ['a']);
 });
 
-Deno.test('_internals.nestedCitations finds top-level citations', () => {
-  assertEquals(_internals.nestedCitations({ citations: ['url1'] }), ['url1']);
+Deno.test('nestedCitations finds top-level citations', () => {
+  assertEquals(nestedCitations({ citations: ['url1'] }), ['url1']);
 });
 
-Deno.test('_internals.nestedCitations finds openrouter.citations', () => {
-  assertEquals(_internals.nestedCitations({ openrouter: { citations: ['url2'] } }), ['url2']);
+Deno.test('nestedCitations finds openrouter.citations', () => {
+  assertEquals(nestedCitations({ openrouter: { citations: ['url2'] } }), ['url2']);
 });
 
-Deno.test('_internals.nestedCitations finds providerMetadata.citations', () => {
-  assertEquals(_internals.nestedCitations({ providerMetadata: { citations: ['url3'] } }), ['url3']);
+Deno.test('nestedCitations finds providerMetadata.citations', () => {
+  assertEquals(nestedCitations({ providerMetadata: { citations: ['url3'] } }), ['url3']);
 });
 
-Deno.test('_internals.nestedCitations finds openrouter.providerMetadata.citations', () => {
+Deno.test('nestedCitations finds openrouter.providerMetadata.citations', () => {
   assertEquals(
-    _internals.nestedCitations({
+    nestedCitations({
       openrouter: { providerMetadata: { citations: ['url4'] } },
     }),
     ['url4'],
   );
 });
 
-Deno.test('_internals.nestedCitations finds provider_metadata.citations', () => {
-  assertEquals(_internals.nestedCitations({ provider_metadata: { citations: ['url5'] } }), [
+Deno.test('nestedCitations finds provider_metadata.citations', () => {
+  assertEquals(nestedCitations({ provider_metadata: { citations: ['url5'] } }), [
     'url5',
   ]);
 });
 
-Deno.test('_internals.nestedCitations finds openrouter.provider_metadata.citations', () => {
+Deno.test('nestedCitations finds openrouter.provider_metadata.citations', () => {
   assertEquals(
-    _internals.nestedCitations({
+    nestedCitations({
       openrouter: { provider_metadata: { citations: ['url6'] } },
     }),
     ['url6'],
   );
 });
 
-Deno.test('_internals.nestedCitations returns undefined when no citations', () => {
-  assertEquals(_internals.nestedCitations({}), undefined);
+Deno.test('nestedCitations returns undefined when no citations', () => {
+  assertEquals(nestedCitations({}), undefined);
 });
 
-Deno.test('_internals.nestedCitations filters non-string citations', () => {
-  assertEquals(_internals.nestedCitations({ citations: [1, 2] }), undefined);
+Deno.test('nestedCitations filters non-string citations', () => {
+  assertEquals(nestedCitations({ citations: [1, 2] }), undefined);
 });
 
-Deno.test('_internals.metadataAnnotations finds top-level annotations', () => {
-  assertEquals(_internals.metadataAnnotations({ annotations: [{ a: 1 }] }), [{ a: 1 }]);
+Deno.test('metadataAnnotations finds top-level annotations', () => {
+  assertEquals(metadataAnnotations({ annotations: [{ a: 1 }] }), [{ a: 1 }]);
 });
 
-Deno.test('_internals.metadataAnnotations finds openrouter.annotations', () => {
-  assertEquals(_internals.metadataAnnotations({ openrouter: { annotations: [{ b: 2 }] } }), [
+Deno.test('metadataAnnotations finds openrouter.annotations', () => {
+  assertEquals(metadataAnnotations({ openrouter: { annotations: [{ b: 2 }] } }), [
     { b: 2 },
   ]);
 });
 
-Deno.test('_internals.metadataAnnotations returns undefined when none', () => {
-  assertEquals(_internals.metadataAnnotations({}), undefined);
+Deno.test('metadataAnnotations returns undefined when none', () => {
+  assertEquals(metadataAnnotations({}), undefined);
 });
 
-Deno.test('_internals.metadataAnnotations ignores non-array annotations', () => {
-  assertEquals(_internals.metadataAnnotations({ annotations: 'not array' }), undefined);
+Deno.test('metadataAnnotations ignores non-array annotations', () => {
+  assertEquals(metadataAnnotations({ annotations: 'not array' }), undefined);
 });
 
-Deno.test('_internals.evidenceFromMetadata builds evidence event', () => {
-  const acc = _internals.createAccumulator();
-  const ev = _internals.evidenceFromMetadata({ citations: ['url'] }, acc);
+Deno.test('evidenceFromMetadata builds evidence event', () => {
+  const acc = createAccumulator();
+  const ev = evidenceFromMetadata({ citations: ['url'] }, acc);
   assertEquals(ev?.type, 'evidence');
   assertEquals(field(ev, 'evidence', 'citations'), ['url']);
   assertEquals(acc.evidenceSeen, true);
 });
 
-Deno.test('_internals.evidenceFromMetadata returns undefined when already seen', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('evidenceFromMetadata returns undefined when already seen', () => {
+  const acc = createAccumulator();
   acc.evidenceSeen = true;
-  assertEquals(_internals.evidenceFromMetadata({ citations: ['url'] }, acc), undefined);
+  assertEquals(evidenceFromMetadata({ citations: ['url'] }, acc), undefined);
 });
 
-Deno.test('_internals.evidenceFromMetadata returns undefined for non-record', () => {
-  const acc = _internals.createAccumulator();
-  assertEquals(_internals.evidenceFromMetadata(null, acc), undefined);
-  assertEquals(_internals.evidenceFromMetadata('string', acc), undefined);
+Deno.test('evidenceFromMetadata returns undefined for non-record', () => {
+  const acc = createAccumulator();
+  assertEquals(evidenceFromMetadata(null, acc), undefined);
+  assertEquals(evidenceFromMetadata('string', acc), undefined);
 });
 
-Deno.test('_internals.evidenceFromMetadata returns undefined when no citations or annotations', () => {
-  const acc = _internals.createAccumulator();
-  assertEquals(_internals.evidenceFromMetadata({}, acc), undefined);
+Deno.test('evidenceFromMetadata returns undefined when no citations or annotations', () => {
+  const acc = createAccumulator();
+  assertEquals(evidenceFromMetadata({}, acc), undefined);
 });
 
-Deno.test('_internals.toolArguments normalizes object input', () => {
-  assertEquals(_internals.toolArguments({ a: 1 }), { a: 1 });
+Deno.test('toolArguments normalizes object input', () => {
+  assertEquals(toolArguments({ a: 1 }), { a: 1 });
 });
 
-Deno.test('_internals.toolArguments returns undefined for undefined', () => {
-  assertEquals(_internals.toolArguments(undefined), undefined);
+Deno.test('toolArguments returns undefined for undefined', () => {
+  assertEquals(toolArguments(undefined), undefined);
 });
 
-Deno.test('_internals.toolArguments wraps non-object input', () => {
-  assertEquals(_internals.toolArguments('str'), { value: 'str' });
-  assertEquals(_internals.toolArguments(42), { value: 42 });
-  assertEquals(_internals.toolArguments([1, 2]), { value: [1, 2] });
+Deno.test('toolArguments wraps non-object input', () => {
+  assertEquals(toolArguments('str'), { value: 'str' });
+  assertEquals(toolArguments(42), { value: 42 });
+  assertEquals(toolArguments([1, 2]), { value: [1, 2] });
 });
 
-Deno.test('_internals.toolResultData returns record for objects', () => {
-  assertEquals(_internals.toolResultData({ ok: true }), { ok: true });
-  assertEquals(_internals.toolResultData('str'), undefined);
-  assertEquals(_internals.toolResultData(null), undefined);
+Deno.test('toolResultData returns record for objects', () => {
+  assertEquals(toolResultData({ ok: true }), { ok: true });
+  assertEquals(toolResultData('str'), undefined);
+  assertEquals(toolResultData(null), undefined);
 });
 
-Deno.test('_internals.rawThoughtEvent extracts thinking from delta', () => {
+Deno.test('rawThoughtEvent extracts thinking from delta', () => {
   const raw = { choices: [{ delta: { thinking: 'pondering...' } }] };
-  assertEquals(_internals.rawThoughtEvent(raw), { type: 'thought', text: 'pondering...' });
+  assertEquals(rawThoughtEvent(raw), { type: 'thought', text: 'pondering...' });
 });
 
-Deno.test('_internals.rawThoughtEvent returns undefined for non-string thinking', () => {
-  assertEquals(_internals.rawThoughtEvent({ choices: [{ delta: { thinking: 42 } }] }), undefined);
+Deno.test('rawThoughtEvent returns undefined for non-string thinking', () => {
+  assertEquals(rawThoughtEvent({ choices: [{ delta: { thinking: 42 } }] }), undefined);
 });
 
-Deno.test('_internals.rawThoughtEvent returns undefined without choices', () => {
-  assertEquals(_internals.rawThoughtEvent({}), undefined);
-  assertEquals(_internals.rawThoughtEvent({ choices: 'not array' }), undefined);
+Deno.test('rawThoughtEvent returns undefined without choices', () => {
+  assertEquals(rawThoughtEvent({}), undefined);
+  assertEquals(rawThoughtEvent({ choices: 'not array' }), undefined);
 });
 
-Deno.test('_internals.rawChoiceMessageEvidence extracts from message', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('rawChoiceMessageEvidence extracts from message', () => {
+  const acc = createAccumulator();
   const raw = {
     choices: [{ message: { citations: ['url'] } }],
   };
-  const ev = _internals.rawChoiceMessageEvidence(raw, acc);
+  const ev = rawChoiceMessageEvidence(raw, acc);
   assertEquals(ev?.type, 'evidence');
 });
 
-Deno.test('_internals.rawChoiceMessageEvidence returns undefined without choices', () => {
-  const acc = _internals.createAccumulator();
-  assertEquals(_internals.rawChoiceMessageEvidence({}, acc), undefined);
+Deno.test('rawChoiceMessageEvidence returns undefined without choices', () => {
+  const acc = createAccumulator();
+  assertEquals(rawChoiceMessageEvidence({}, acc), undefined);
 });
 
-Deno.test('_internals.rawChoiceMessageEvidence skips non-object messages', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('rawChoiceMessageEvidence skips non-object messages', () => {
+  const acc = createAccumulator();
   assertEquals(
-    _internals.rawChoiceMessageEvidence({ choices: [{ message: 'not object' }] }, acc),
+    rawChoiceMessageEvidence({ choices: [{ message: 'not object' }] }, acc),
     undefined,
   );
 });
 
-Deno.test('_internals.rawEvents collects thought and evidence', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('rawEvents collects thought and evidence', () => {
+  const acc = createAccumulator();
   const raw = {
     choices: [{ delta: { thinking: 'hmm' } }],
     citations: ['url'],
   };
-  const events = _internals.rawEvents(raw, acc);
+  const events = rawEvents(raw, acc);
   assertEquals(events.length, 2);
   assertEquals(events[0].type, 'thought');
   assertEquals(events[1].type, 'evidence');
 });
 
-Deno.test('_internals.rawEvents returns empty for non-record', () => {
-  const acc = _internals.createAccumulator();
-  assertEquals(_internals.rawEvents(null, acc), []);
-  assertEquals(_internals.rawEvents('string', acc), []);
+Deno.test('rawEvents returns empty for non-record', () => {
+  const acc = createAccumulator();
+  assertEquals(rawEvents(null, acc), []);
+  assertEquals(rawEvents('string', acc), []);
 });
 
-Deno.test('_internals.toolCallEvent maps tool call part', () => {
+Deno.test('toolCallEvent maps tool call part', () => {
   const part = {
     type: 'tool-call' as const,
     toolName: 'search',
     toolCallId: 'c1',
     input: { q: 'x' },
   };
-  const ev = _internals.toolCallEvent(
-    part as unknown as Parameters<typeof _internals.toolCallEvent>[0],
-  );
+  const ev = toolCallEvent(part);
   assertEquals(ev.type, 'tool');
   assertEquals(field(ev, 'tool', 'name'), 'search');
   assertEquals(field(ev, 'tool', 'arguments'), { q: 'x' });
   assertEquals(field(ev, 'tool', 'id'), 'c1');
 });
 
-Deno.test('_internals.toolResultEvent maps tool result part', () => {
+Deno.test('toolResultEvent maps tool result part', () => {
   const part = {
     type: 'tool-result' as const,
     toolName: 'search',
@@ -1427,15 +1467,13 @@ Deno.test('_internals.toolResultEvent maps tool result part', () => {
     input: { q: 'x' },
     output: { answer: 'found' },
   };
-  const ev = _internals.toolResultEvent(
-    part as unknown as Parameters<typeof _internals.toolResultEvent>[0],
-  );
+  const ev = toolResultEvent(part);
   assertEquals(ev.type, 'tool');
   assertEquals(field(ev, 'tool', 'phase'), 'complete');
   assertEquals(field(ev, 'tool', 'output'), { answer: 'found' });
 });
 
-Deno.test('_internals.toolResultEvent includes string output on complete phase', () => {
+Deno.test('toolResultEvent includes string output on complete phase', () => {
   const part = {
     type: 'tool-result' as const,
     toolName: 'fn',
@@ -1443,57 +1481,50 @@ Deno.test('_internals.toolResultEvent includes string output on complete phase',
     input: undefined,
     output: 'text result',
   };
-  const ev = _internals.toolResultEvent(
-    part as unknown as Parameters<typeof _internals.toolResultEvent>[0],
-  );
+  const ev = toolResultEvent(part);
   assertEquals(field(ev, 'tool', 'phase'), 'complete');
   assertEquals(field(ev, 'tool', 'output'), 'text result');
 });
 
-Deno.test('_internals.tokenEvent returns undefined for zero usage', () => {
+Deno.test('tokenEvent returns undefined for zero usage', () => {
   const part = {
     type: 'finish' as const,
     totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
   };
-  assertEquals(
-    _internals.tokenEvent(part as unknown as Parameters<typeof _internals.tokenEvent>[0]),
-    undefined,
-  );
+  assertEquals(tokenEvent(part), undefined);
 });
 
-Deno.test('_internals.tokenEvent returns token event for non-zero usage', () => {
+Deno.test('tokenEvent returns token event for non-zero usage', () => {
   const part = {
     type: 'finish' as const,
     totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
   };
-  const ev = _internals.tokenEvent(part as unknown as Parameters<typeof _internals.tokenEvent>[0]);
+  const ev = tokenEvent(part);
   assertEquals(ev?.type, 'tokens');
   assertEquals(field(ev, 'tokens'), { input: 10, output: 5, total: 15 });
 });
 
-Deno.test('_internals.finishEvent suppresses duplicate token emission', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('finishEvent suppresses duplicate token emission', () => {
+  const acc = createAccumulator();
   const part = {
     type: 'finish' as const,
     totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-  } as unknown as Parameters<typeof _internals.finishEvent>[0];
-  const first = _internals.finishEvent(part, acc);
+  };
+  const first = finishEvent(part, acc);
   assertEquals(first?.type, 'tokens');
   assertEquals(acc.emittedTokens, true);
-  const second = _internals.finishEvent(part, acc);
+  const second = finishEvent(part, acc);
   assertEquals(second, undefined);
 });
 
-Deno.test('_internals.sourceEvent maps URL source to evidence', () => {
+Deno.test('sourceEvent maps URL source to evidence', () => {
   const part = {
     type: 'source' as const,
     sourceType: 'url' as const,
     url: 'https://example.com',
     title: 'Example',
   };
-  const ev = _internals.sourceEvent(
-    part as unknown as Parameters<typeof _internals.sourceEvent>[0],
-  );
+  const ev = sourceEvent(part);
   assertEquals(ev.type, 'evidence');
   assertEquals(field(ev, 'evidence', 'citations'), ['https://example.com']);
   const sources = field(ev, 'evidence', 'sources') as R[];
@@ -1502,101 +1533,81 @@ Deno.test('_internals.sourceEvent maps URL source to evidence', () => {
   assertEquals(sources[0].type, 'web');
 });
 
-Deno.test('_internals.sourceEvent uses url as title fallback', () => {
+Deno.test('sourceEvent uses url as title fallback', () => {
   const part = {
     type: 'source' as const,
     sourceType: 'url' as const,
     url: 'https://example.com',
   };
-  const ev = _internals.sourceEvent(
-    part as unknown as Parameters<typeof _internals.sourceEvent>[0],
-  );
+  const ev = sourceEvent(part);
   const sources = field(ev, 'evidence', 'sources') as R[];
   assertEquals(sources[0].title, 'https://example.com');
 });
 
-Deno.test('_internals.sourceEvent maps non-url source to raw evidence', () => {
+Deno.test('sourceEvent maps non-url source to raw evidence', () => {
   const part = { type: 'source' as const, sourceType: 'other' };
-  const ev = _internals.sourceEvent(
-    part as unknown as Parameters<typeof _internals.sourceEvent>[0],
-  );
+  const ev = sourceEvent(part);
   assertEquals(ev.type, 'evidence');
   assertEquals(field(ev, 'evidence', 'citations'), undefined);
 });
 
-Deno.test('_internals.primaryEventFromPart maps text-delta', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.primaryEventFromPart>[0];
-  const ev = _internals.primaryEventFromPart({ type: 'text-delta', text: 'chunk' } as Part, acc);
+Deno.test('primaryEventFromPart maps text-delta', () => {
+  const acc = createAccumulator();
+  const ev = primaryEventFromPart(adversarialPart('text-delta', { text: 'chunk' }), acc);
   assertEquals(ev?.type, 'text');
   assertEquals(field(ev, 'text'), 'chunk');
   assertEquals(acc.text, 'chunk');
 });
 
-Deno.test('_internals.primaryEventFromPart maps reasoning-delta', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.primaryEventFromPart>[0];
-  const ev = _internals.primaryEventFromPart(
-    { type: 'reasoning-delta', text: 'thinking' } as Part,
-    acc,
-  );
+Deno.test('primaryEventFromPart maps reasoning-delta', () => {
+  const acc = createAccumulator();
+  const ev = primaryEventFromPart(adversarialPart('reasoning-delta', { text: 'thinking' }), acc);
   assertEquals(ev?.type, 'thought');
   assertEquals(field(ev, 'text'), 'thinking');
 });
 
-Deno.test('_internals.primaryEventFromPart maps error', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.primaryEventFromPart>[0];
-  const ev = _internals.primaryEventFromPart({ type: 'error', error: 'boom' } as Part, acc);
+Deno.test('primaryEventFromPart maps error', () => {
+  const acc = createAccumulator();
+  const ev = primaryEventFromPart(adversarialPart('error', { error: 'boom' }), acc);
   assertEquals(ev?.type, 'error');
   assertEquals(acc.errored, true);
 });
 
-Deno.test('_internals.primaryEventFromPart skips duplicate source events', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.primaryEventFromPart>[0];
-  const source = { type: 'source' as const, sourceType: 'url', url: 'https://a.com' } as Part;
-  const first = _internals.primaryEventFromPart(source, acc);
+Deno.test('primaryEventFromPart skips duplicate source events', () => {
+  const acc = createAccumulator();
+  const source = adversarialPart('source', { sourceType: 'url', url: 'https://a.com' });
+  const first = primaryEventFromPart(source, acc);
   assertEquals(first?.type, 'evidence');
   assertEquals(acc.evidenceSeen, true);
-  const second = _internals.primaryEventFromPart(source, acc);
+  const second = primaryEventFromPart(source, acc);
   assertEquals(second, undefined);
 });
 
-Deno.test('_internals.primaryEventFromPart returns undefined for unknown types', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.primaryEventFromPart>[0];
-  assertEquals(
-    _internals.primaryEventFromPart({ type: 'unknown-thing' } as unknown as Part, acc),
-    undefined,
-  );
+Deno.test('primaryEventFromPart returns undefined for unknown types', () => {
+  const acc = createAccumulator();
+  assertEquals(primaryEventFromPart(adversarialPart('unknown-thing'), acc), undefined);
 });
 
-Deno.test('_internals.eventFromPart falls through to providerMetadata', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.eventFromPart>[0];
-  const part = {
-    type: 'step-start' as const,
-    providerMetadata: { citations: ['url'] },
-  } as unknown as Part;
-  const events = _internals.eventFromPart(part, acc);
+Deno.test('eventFromPart falls through to providerMetadata', () => {
+  const acc = createAccumulator();
+  const part = adversarialPart('step-start', { providerMetadata: { citations: ['url'] } });
+  const events = eventFromPart(part, acc);
   assertEquals(events.length, 1);
   assertEquals(events[0].type, 'evidence');
 });
 
-Deno.test('_internals.eventFromPart returns empty for no match', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.eventFromPart>[0];
-  const part = { type: 'step-start' as const } as unknown as Part;
-  const events = _internals.eventFromPart(part, acc);
+Deno.test('eventFromPart returns empty for no match', () => {
+  const acc = createAccumulator();
+  const part = adversarialPart('step-start');
+  const events = eventFromPart(part, acc);
   assertEquals(events.length, 0);
 });
 
-Deno.test('_internals.finalEvents emits structured and done', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('finalEvents emits structured and done', () => {
+  const acc = createAccumulator();
   acc.text = '{"answer":"yes"}';
   const req = createMockTurnRequest('formatter', 'test');
-  const events = [..._internals.finalEvents(req, acc)];
+  const events = [...finalEvents(req, acc)];
   const hasStructured = events.some((e) => e.type === 'structured');
   const hasDone = events.some((e) => e.type === 'done');
   assertEquals(hasDone, true);
@@ -1605,57 +1616,55 @@ Deno.test('_internals.finalEvents emits structured and done', () => {
   }
 });
 
-Deno.test('_internals.finalEvents skips when errored', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('finalEvents skips when errored', () => {
+  const acc = createAccumulator();
   acc.errored = true;
   acc.text = '{"answer":"yes"}';
   const req = createMockTurnRequest('formatter', 'test');
-  const events = [..._internals.finalEvents(req, acc)];
+  const events = [...finalEvents(req, acc)];
   assertEquals(events.length, 0);
 });
 
-Deno.test('_internals.finalEvents emits done only when no structured text', () => {
-  const acc = _internals.createAccumulator();
+Deno.test('finalEvents emits done only when no structured text', () => {
+  const acc = createAccumulator();
   acc.text = '';
   const req = createMockTurnRequest('pinned', 'test');
-  const events = [..._internals.finalEvents(req, acc)];
+  const events = [...finalEvents(req, acc)];
   assertEquals(events.length, 1);
   assertEquals(events[0].type, 'done');
 });
 
-Deno.test('_internals.providerOptionsFor returns undefined for no thinking no structured', () => {
+Deno.test('providerOptionsFor returns undefined for no thinking no structured', () => {
   const req = createMockTurnRequest('pinned', 'test');
   req.thinking = 'none';
   req.structured = null;
-  assertEquals(_internals.providerOptionsFor(req), undefined);
+  assertEquals(providerOptionsFor(req), undefined);
 });
 
-Deno.test('_internals.providerOptionsFor includes reasoning effort', () => {
+Deno.test('providerOptionsFor includes reasoning effort', () => {
   const req = createMockTurnRequest('pinned', 'test');
   req.thinking = 'high';
   req.structured = null;
-  const opts = _internals.providerOptionsFor(req);
+  const opts = providerOptionsFor(req);
   assertEquals(field(opts, 'openrouter', 'reasoning'), { effort: 'high' });
 });
 
-Deno.test('_internals.missingOpenRouterKey returns error event', () => {
-  const ev = _internals.missingOpenRouterKey();
+Deno.test('missingOpenRouterKey returns error event', () => {
+  const ev = missingOpenRouterKey();
   assertEquals(ev.type, 'error');
 });
 
-Deno.test('_internals.providerMetadataEvent returns undefined without providerMetadata', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.providerMetadataEvent>[0];
+Deno.test('providerMetadataEvent returns undefined without providerMetadata', () => {
+  const acc = createAccumulator();
   assertEquals(
-    _internals.providerMetadataEvent({ type: 'text-delta', text: 'x' } as Part, acc),
+    providerMetadataEvent(adversarialPart('text-delta', { text: 'x' }), acc),
     undefined,
   );
 });
 
-Deno.test('_internals.providerMetadataEvent extracts evidence', () => {
-  const acc = _internals.createAccumulator();
-  type Part = Parameters<typeof _internals.providerMetadataEvent>[0];
-  const part = { type: 'step-finish', providerMetadata: { citations: ['url'] } } as unknown as Part;
-  const ev = _internals.providerMetadataEvent(part, acc);
+Deno.test('providerMetadataEvent extracts evidence', () => {
+  const acc = createAccumulator();
+  const part = adversarialPart('step-finish', { providerMetadata: { citations: ['url'] } });
+  const ev = providerMetadataEvent(part, acc);
   assertEquals(ev?.type, 'evidence');
 });

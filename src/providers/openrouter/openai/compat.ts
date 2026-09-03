@@ -10,6 +10,7 @@
  * @module
  */
 
+import { TheorumError } from '../../../guardrails/error.ts';
 import { getStructured } from '../../../kernel/registry/schemas.ts';
 import type {
   InteractionMediaPart,
@@ -19,7 +20,7 @@ import type {
   TurnHistoryMessage,
   WireFunctionTool,
 } from '../../../kernel/types.ts';
-import { exposeForTests } from '../../expose-for-tests.ts';
+import { parseToolArgumentsObject } from '../../shared/tool-args.ts';
 
 // ── gateway header config ───────────────────────────
 
@@ -39,12 +40,12 @@ function fallbackToolCallId(name?: string): string {
   return `call_${stringDefault(name, 'tool')}`;
 }
 
-function parseToolInput(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { _raw: raw };
+function parseToolInput(raw: string): Record<string, unknown> {
+  const parsed = parseToolArgumentsObject(raw);
+  if (!parsed.ok) {
+    throw new TheorumError(parsed.error);
   }
+  return parsed.value;
 }
 
 // ── content wire format ─────────────────────────────
@@ -242,19 +243,9 @@ export {
   openAiGatewayHeaders,
   parseToolInput,
   resolveResponseFormat,
+  stringDefault,
+  wireAudioPart,
+  wireHistoryMessage,
   wireMessageContent,
   wireTools,
 };
-
-exposeForTests('openai/compat', {
-  wireAudioPart,
-  wireMessageContent,
-  wireHistoryMessage,
-  buildChatMessages,
-  wireTools,
-  resolveResponseFormat,
-  openAiGatewayHeaders,
-  fallbackToolCallId,
-  parseToolInput,
-  stringDefault,
-});

@@ -17,9 +17,9 @@
 import { isAbortError, toErrorEvent } from '../../guardrails/error.ts';
 import { turnStopFromOpenAiFinishReason } from '../../kernel/stop.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
-import { buildChatMessages, wireMessageContent, wireTools } from '../openrouter/openai/compat.ts';
+import { buildChatMessages, wireTools } from '../openrouter/openai/compat.ts';
 import { parseSseStream } from '../shared/sse.ts';
+import { parseToolArgumentsObject } from '../shared/tool-args.ts';
 import type { LocalProviderConfig } from '../types.ts';
 
 /** Default OpenAI-compat base when the host omits `baseUrl` (Ollama's default port). */
@@ -27,7 +27,7 @@ export const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:11434';
 
 // ── wire types ──────────────────────────────────────
 
-interface OpenAiDelta {
+export interface OpenAiDelta {
   role?: string;
   content?: string | null;
   tool_calls?: Array<{
@@ -37,38 +37,38 @@ interface OpenAiDelta {
   }>;
 }
 
-interface OpenAiChoice {
+export interface OpenAiChoice {
   index: number;
   delta?: OpenAiDelta;
   finish_reason?: string | null;
 }
 
-interface OpenAiUsage {
+export interface OpenAiUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
 }
 
-interface OpenAiChunk {
+export interface OpenAiChunk {
   choices?: OpenAiChoice[];
   usage?: OpenAiUsage;
 }
 
-type PendingToolCall = { id: string; name: string; args: string };
+export type PendingToolCall = { id: string; name: string; args: string };
 
 // ── request mapping ─────────────────────────────────
 
-function normalizeBaseUrl(baseUrl: string): string {
+export function normalizeBaseUrl(baseUrl: string): string {
   let end = baseUrl.length;
   while (end > 0 && baseUrl.charCodeAt(end - 1) === 47) end -= 1;
   return baseUrl.slice(0, end);
 }
 
-function resolveBaseUrl(config?: LocalProviderConfig): string {
+export function resolveBaseUrl(config?: LocalProviderConfig): string {
   return normalizeBaseUrl(config?.baseUrl?.trim() || DEFAULT_LOCAL_BASE_URL);
 }
 
-function buildBody(req: ProviderCompleteRequest): Record<string, unknown> {
+export function buildBody(req: ProviderCompleteRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: req.apiId,
     messages: buildChatMessages(req),
@@ -84,18 +84,30 @@ function buildBody(req: ProviderCompleteRequest): Record<string, unknown> {
 
 // ── stream → TurnEvent ──────────────────────────────
 
-function flushPending(pending: Map<number, PendingToolCall>): TurnEvent[] {
+export function flushPending(pending: Map<number, PendingToolCall>): TurnEvent[] {
   const events: TurnEvent[] = [];
   for (const [, tc] of pending) {
-    let parsed: Record<string, unknown> = {};
-    try {
-      parsed = JSON.parse(tc.args) as Record<string, unknown>;
-    } catch {
-      // empty
+    const parsed = parseToolArgumentsObject(tc.args);
+    if (!parsed.ok) {
+      events.push({
+        type: 'tool',
+        tool: {
+          name: tc.name,
+          arguments: {},
+          id: tc.id,
+          phase: 'error',
+          failure: {
+            code: 'malformed_arguments',
+            message: parsed.error,
+            details: { raw: parsed.raw },
+          },
+        },
+      });
+      continue;
     }
     events.push({
       type: 'tool',
-      tool: { name: tc.name, arguments: parsed, id: tc.id },
+      tool: { name: tc.name, arguments: parsed.value, id: tc.id },
     });
   }
   pending.clear();
@@ -129,10 +141,9 @@ async function* streamOpenAiBody(body: ReadableStream<Uint8Array>): AsyncGenerat
   const pending = new Map<number, PendingToolCall>();
   let finishReason: string | null | undefined;
   for await (const raw of parseSseStream(body)) {
-    const chunk = raw as unknown as OpenAiChunk;
-    const usageEvent = tokensFromUsage(chunk.usage);
+    const usageEvent = tokensFromUsage(readOpenAiUsage(raw));
     if (usageEvent) yield usageEvent;
-    const choice = chunk.choices?.[0];
+    const choice = firstOpenAiChoice(raw);
     if (!choice) continue;
     yield* eventsFromChoiceDelta(choice.delta, pending);
     if (choice.finish_reason != null) {
@@ -142,6 +153,38 @@ async function* streamOpenAiBody(body: ReadableStream<Uint8Array>): AsyncGenerat
   }
   for (const event of flushPending(pending)) yield event;
   yield { type: 'done', stop: turnStopFromOpenAiFinishReason(finishReason) };
+}
+
+function readOpenAiUsage(raw: Record<string, unknown>): OpenAiUsage | undefined {
+  const usage = raw.usage;
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return undefined;
+  const row = usage as Record<string, unknown>;
+  return {
+    prompt_tokens: typeof row.prompt_tokens === 'number' ? row.prompt_tokens : undefined,
+    completion_tokens:
+      typeof row.completion_tokens === 'number' ? row.completion_tokens : undefined,
+    total_tokens: typeof row.total_tokens === 'number' ? row.total_tokens : undefined,
+  };
+}
+
+function firstOpenAiChoice(raw: Record<string, unknown>): OpenAiChoice | undefined {
+  if (!Array.isArray(raw.choices) || raw.choices.length === 0) return undefined;
+  const choice = raw.choices[0];
+  if (!choice || typeof choice !== 'object' || Array.isArray(choice)) return undefined;
+  const row = choice as Record<string, unknown>;
+  const deltaRaw = row.delta;
+  const delta =
+    deltaRaw && typeof deltaRaw === 'object' && !Array.isArray(deltaRaw)
+      ? (deltaRaw as OpenAiDelta)
+      : undefined;
+  return {
+    index: typeof row.index === 'number' ? row.index : 0,
+    delta,
+    finish_reason:
+      typeof row.finish_reason === 'string' || row.finish_reason === null
+        ? (row.finish_reason as string | null)
+        : undefined,
+  };
 }
 
 function tokensFromUsage(usage: OpenAiUsage | undefined): TurnEvent | undefined {
@@ -202,16 +245,10 @@ function createLocalProvider(config?: LocalProviderConfig): ModelProvider {
   };
 }
 
-export { createLocalProvider };
-
-markModuleLoad('local-adapter');
-
-exposeForTests('local', {
-  inputToContent: wireMessageContent,
-  historyToWire: buildChatMessages,
-  toolsToWire: wireTools,
-  buildBody,
-  flushPending,
-  resolveBaseUrl,
-  DEFAULT_LOCAL_BASE_URL,
-});
+export {
+  accumulateToolCalls,
+  buildChatMessages as historyToWire,
+  createLocalProvider,
+  streamComplete,
+  wireTools as toolsToWire,
+};

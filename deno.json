@@ -79,6 +79,7 @@
     "verify:canary-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-guardrails-live.ts",
     "verify:guardrails-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-guardrails-live.ts",
     "verify:tools-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-tools-live.ts",
+    "verify:runner-live": "deno run --allow-read --allow-net --allow-env --allow-sys scripts/verify-runner-live.ts",
     "stryker:guardrails": "npx stryker run stryker.guardrails.config.json",
     "stryker:tools": "npx stryker run stryker.tools.config.json"
   }

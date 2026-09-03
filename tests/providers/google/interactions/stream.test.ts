@@ -1,5 +1,4 @@
 import '../../../fixtures/test-host.ts';
-import '../../../fixtures/enable-test-internals.ts';
 import { PUBLIC_UNAVAILABLE } from '../../../../src/guardrails/error.ts';
 import { assertEquals } from '../../../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../../../src/kernel/registry/resolve.ts';
@@ -8,12 +7,28 @@ import {
   camelToSnake,
   toInteractionsBody,
 } from '../../../../src/providers/google/interactions/framing.ts';
-import { createInteractionsProvider } from '../../../../src/providers/google/interactions/stream.ts';
+import {
+  createInteractionsProvider,
+  eventType,
+  foldArgumentsDelta,
+  foldDeltaPayload,
+  foldFunctionCallDelta,
+  foldPayload,
+  foldStepStart,
+  isCompleteEvent,
+  isDeltaEvent,
+  isRawPcmMime,
+  newStreamFold,
+  normalizeSpeechMedia,
+  readData,
+  readMime,
+  scanMediaParts,
+  withTap,
+  yieldMediaChunk,
+} from '../../../../src/providers/google/interactions/stream.ts';
 import type { GeminiVault } from '../../../../src/providers/google/keys.ts';
 import { INTERACTIONS_JSON_URL, INTERACTIONS_URL } from '../../../../src/providers/google/urls.ts';
-import { testInternals } from '../../../fixtures/testInternals.js';
-
-const _internals = testInternals('google-interactions');
+import { base64ToBytes, bytesToBase64 } from '../../../../src/providers/shared/pcm.ts';
 
 const vault: GeminiVault = {
   freeA: 'free-a-key',
@@ -351,6 +366,7 @@ Deno.test('provider emits Google grounding metadata as a grounding event', async
       type: 'maps',
       uri: 'https://maps.google.com/?cid=1',
       title: 'Plant Shop',
+      placeId: 'places/abc',
     },
     { type: 'web', uri: 'https://example.com/care', title: 'Care source' },
   ]);
@@ -602,146 +618,146 @@ Deno.test('provider handles null body, direct event usage/grounding, and structu
   assertEquals(structEv !== undefined, true);
 });
 
-Deno.test('_internals.base64ToBytes decodes known base64 values', () => {
-  assertEquals(_internals.base64ToBytes('aGVsbG8='), new TextEncoder().encode('hello'));
-  assertEquals(_internals.base64ToBytes(''), new Uint8Array());
+Deno.test('base64ToBytes decodes known base64 values', () => {
+  assertEquals(base64ToBytes('aGVsbG8='), new TextEncoder().encode('hello'));
+  assertEquals(base64ToBytes(''), new Uint8Array());
 });
 
-Deno.test('_internals.bytesToBase64 encodes known byte values', () => {
-  assertEquals(_internals.bytesToBase64(new TextEncoder().encode('hello')), 'aGVsbG8=');
-  assertEquals(_internals.bytesToBase64(new Uint8Array()), '');
+Deno.test('bytesToBase64 encodes known byte values', () => {
+  assertEquals(bytesToBase64(new TextEncoder().encode('hello')), 'aGVsbG8=');
+  assertEquals(bytesToBase64(new Uint8Array()), '');
 });
 
 Deno.test('base64 helpers roundtrip arbitrary bytes', () => {
   const bytes = new Uint8Array([0, 1, 2, 250, 251, 252, 253, 254, 255]);
-  const encoded = _internals.bytesToBase64(bytes);
-  assertEquals(_internals.base64ToBytes(encoded), bytes);
+  const encoded = bytesToBase64(bytes);
+  assertEquals(base64ToBytes(encoded), bytes);
 });
 
-Deno.test('_internals.isRawPcmMime recognizes raw PCM mime types case-insensitively', () => {
-  assertEquals(_internals.isRawPcmMime('audio/pcm'), true);
-  assertEquals(_internals.isRawPcmMime('audio/l16'), true);
-  assertEquals(_internals.isRawPcmMime('audio/raw'), true);
-  assertEquals(_internals.isRawPcmMime('AUDIO/PCM'), true);
+Deno.test('isRawPcmMime recognizes raw PCM mime types case-insensitively', () => {
+  assertEquals(isRawPcmMime('audio/pcm'), true);
+  assertEquals(isRawPcmMime('audio/l16'), true);
+  assertEquals(isRawPcmMime('audio/raw'), true);
+  assertEquals(isRawPcmMime('AUDIO/PCM'), true);
 });
 
-Deno.test('_internals.isRawPcmMime rejects non-PCM mime types', () => {
-  assertEquals(_internals.isRawPcmMime('audio/wav'), false);
-  assertEquals(_internals.isRawPcmMime('audio/mpeg'), false);
+Deno.test('isRawPcmMime rejects non-PCM mime types', () => {
+  assertEquals(isRawPcmMime('audio/wav'), false);
+  assertEquals(isRawPcmMime('audio/mpeg'), false);
 });
 
-Deno.test('_internals.normalizeSpeechMedia returns event unchanged when speech is false', () => {
+Deno.test('normalizeSpeechMedia returns event unchanged when speech is false', () => {
   const event: TurnEvent = {
     type: 'media',
     media: { mimeType: 'audio/pcm', data: 'abc' },
   };
-  assertEquals(_internals.normalizeSpeechMedia(event, false), event);
+  assertEquals(normalizeSpeechMedia(event, false), event);
 });
 
-Deno.test('_internals.normalizeSpeechMedia returns non-media events unchanged', () => {
+Deno.test('normalizeSpeechMedia returns non-media events unchanged', () => {
   const event: TurnEvent = { type: 'text', text: 'hi' };
-  assertEquals(_internals.normalizeSpeechMedia(event, true), event);
+  assertEquals(normalizeSpeechMedia(event, true), event);
 });
 
-Deno.test('_internals.normalizeSpeechMedia returns non-PCM media events unchanged', () => {
+Deno.test('normalizeSpeechMedia returns non-PCM media events unchanged', () => {
   const event: TurnEvent = {
     type: 'media',
     media: { mimeType: 'audio/wav', data: 'abc' },
   };
-  assertEquals(_internals.normalizeSpeechMedia(event, true), event);
+  assertEquals(normalizeSpeechMedia(event, true), event);
 });
 
-Deno.test('_internals.normalizeSpeechMedia wraps raw PCM media as WAV when speech is true', () => {
+Deno.test('normalizeSpeechMedia wraps raw PCM media as WAV when speech is true', () => {
   const pcm = new Uint8Array([1, 2, 3, 4]);
   const event: TurnEvent = {
     type: 'media',
-    media: { mimeType: 'audio/pcm', data: _internals.bytesToBase64(pcm) },
+    media: { mimeType: 'audio/pcm', data: bytesToBase64(pcm) },
   };
-  const result = _internals.normalizeSpeechMedia(event, true);
+  const result = normalizeSpeechMedia(event, true);
   assertEquals(result.type, 'media');
   const media = result.type === 'media' ? result.media : undefined;
   assertEquals(media?.mimeType, 'audio/wav');
-  const bytes = _internals.base64ToBytes(media?.data ?? '');
+  const bytes = base64ToBytes(media?.data ?? '');
   assertEquals(new TextDecoder().decode(bytes.slice(0, 4)), 'RIFF');
   assertEquals(new TextDecoder().decode(bytes.slice(8, 12)), 'WAVE');
 });
 
-Deno.test('_internals.readData and readMime extract part media properties', () => {
-  assertEquals(_internals.readData({ data: 'abc' }), 'abc');
-  assertEquals(_internals.readData({ data: '' }), undefined);
-  assertEquals(_internals.readData({}), undefined);
+Deno.test('readData and readMime extract part media properties', () => {
+  assertEquals(readData({ data: 'abc' }), 'abc');
+  assertEquals(readData({ data: '' }), undefined);
+  assertEquals(readData({}), undefined);
 
-  assertEquals(_internals.readMime({ mime_type: 'image/png' }), 'image/png');
-  assertEquals(_internals.readMime({ mimeType: 'audio/wav' }), 'audio/wav');
-  assertEquals(_internals.readMime({}), undefined);
+  assertEquals(readMime({ mime_type: 'image/png' }), 'image/png');
+  assertEquals(readMime({ mimeType: 'audio/wav' }), 'audio/wav');
+  assertEquals(readMime({}), undefined);
 });
 
-Deno.test('_internals.yieldMediaChunk yields media events for binary chunks', () => {
+Deno.test('yieldMediaChunk yields media events for binary chunks', () => {
   const chunks = Array.from(
-    _internals.yieldMediaChunk({ data: 'aGVsbG8=', mime_type: 'image/png' }),
+    yieldMediaChunk({ data: 'aGVsbG8=', mime_type: 'image/png' }),
   );
   assertEquals(chunks.length, 1);
   assertEquals((chunks[0] as { type: string }).type, 'media');
 
-  const pcmBytes = _internals.bytesToBase64(new Uint8Array([0, 0, 0, 0]));
+  const pcmBytes = bytesToBase64(new Uint8Array([0, 0, 0, 0]));
   const pcmChunks = Array.from(
-    _internals.yieldMediaChunk({ data: pcmBytes, mime_type: 'audio/pcm' }),
+    yieldMediaChunk({ data: pcmBytes, mime_type: 'audio/pcm' }),
   );
   assertEquals(pcmChunks.length, 1);
   assertEquals((pcmChunks[0] as { media?: { mimeType?: string } })?.media?.mimeType, 'audio/wav');
 
-  const empty = Array.from(_internals.yieldMediaChunk({}));
+  const empty = Array.from(yieldMediaChunk({}));
   assertEquals(empty.length, 0);
 });
 
-Deno.test('_internals.scanMediaParts scans nested content arrays', () => {
+Deno.test('scanMediaParts scans nested content arrays', () => {
   const parts = [
     { type: 'image', data: 'aGVsbG8=', mime_type: 'image/png' },
     { type: 'text', text: 'ignore text' },
     null,
   ];
-  const events = Array.from(_internals.scanMediaParts(parts));
+  const events = Array.from(scanMediaParts(parts));
   assertEquals(events.length, 1);
   assertEquals((events[0] as { type: string }).type, 'media');
 
-  const notArray = Array.from(_internals.scanMediaParts('invalid'));
+  const notArray = Array.from(scanMediaParts('invalid'));
   assertEquals(notArray.length, 0);
 });
 
-Deno.test('_internals.eventType prefers event_type, falls back to type, then empty string', () => {
+Deno.test('eventType prefers event_type, falls back to type, then empty string', () => {
   assertEquals(
-    _internals.eventType({ event_type: 'content.delta', type: 'ignored' }),
+    eventType({ event_type: 'content.delta', type: 'ignored' }),
     'content.delta',
   );
-  assertEquals(_internals.eventType({ type: 'interaction.complete' }), 'interaction.complete');
-  assertEquals(_internals.eventType({}), '');
+  assertEquals(eventType({ type: 'interaction.complete' }), 'interaction.complete');
+  assertEquals(eventType({}), '');
 });
 
-Deno.test('_internals.isDeltaEvent matches delta kinds only', () => {
-  assertEquals(_internals.isDeltaEvent('content.delta'), true);
-  assertEquals(_internals.isDeltaEvent('step.delta'), true);
-  assertEquals(_internals.isDeltaEvent('interaction.complete'), false);
-  assertEquals(_internals.isDeltaEvent('other'), false);
+Deno.test('isDeltaEvent matches delta kinds only', () => {
+  assertEquals(isDeltaEvent('content.delta'), true);
+  assertEquals(isDeltaEvent('step.delta'), true);
+  assertEquals(isDeltaEvent('interaction.complete'), false);
+  assertEquals(isDeltaEvent('other'), false);
 });
 
-Deno.test('_internals.isCompleteEvent matches interaction completion kinds', () => {
-  assertEquals(_internals.isCompleteEvent('interaction.complete'), true);
-  assertEquals(_internals.isCompleteEvent('interaction.completed'), true);
-  assertEquals(_internals.isCompleteEvent('interaction.created'), false);
-  assertEquals(_internals.isCompleteEvent('interaction.status_update'), false);
-  assertEquals(_internals.isCompleteEvent('content.delta'), false);
+Deno.test('isCompleteEvent matches interaction completion kinds', () => {
+  assertEquals(isCompleteEvent('interaction.complete'), true);
+  assertEquals(isCompleteEvent('interaction.completed'), true);
+  assertEquals(isCompleteEvent('interaction.created'), false);
+  assertEquals(isCompleteEvent('interaction.status_update'), false);
+  assertEquals(isCompleteEvent('content.delta'), false);
 });
 
-Deno.test('_internals.foldArgumentsDelta appends streamed argument chunks', () => {
-  const fold = _internals.newStreamFold();
-  _internals.foldArgumentsDelta({ arguments: '{"q":' }, 0, fold);
-  _internals.foldArgumentsDelta({ arguments: '"query"}' }, 0, fold);
+Deno.test('foldArgumentsDelta appends streamed argument chunks', () => {
+  const fold = newStreamFold();
+  foldArgumentsDelta({ arguments: '{"q":' }, 0, fold);
+  foldArgumentsDelta({ arguments: '"query"}' }, 0, fold);
   assertEquals(fold.functionCalls.get(0)?.arguments, '{"q":"query"}');
 });
 
-Deno.test('_internals.foldFunctionCallDelta parses function calls and deduplicates', () => {
-  const fold = _internals.newStreamFold();
-  const events1 = _internals.foldFunctionCallDelta(
+Deno.test('foldFunctionCallDelta parses function calls and deduplicates', () => {
+  const fold = newStreamFold();
+  const events1 = foldFunctionCallDelta(
     { id: 'call_1', name: 'search', arguments: '{"q":"test"}' },
     fold,
   );
@@ -752,27 +768,27 @@ Deno.test('_internals.foldFunctionCallDelta parses function calls and deduplicat
   assertEquals(events1[0]?.tool?.arguments, { q: 'test' });
 
   // Deduplication check
-  const events2 = _internals.foldFunctionCallDelta(
+  const events2 = foldFunctionCallDelta(
     { id: 'call_1', name: 'search', arguments: { q: 'test' } },
     fold,
   );
   assertEquals(events2.length, 0);
 });
 
-Deno.test('_internals.foldDeltaPayload accumulates text into the fold', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldDeltaPayload({ delta: { type: 'text', text: 'hello' } }, fold);
+Deno.test('foldDeltaPayload accumulates text into the fold', () => {
+  const fold = newStreamFold();
+  const events = foldDeltaPayload({ delta: { type: 'text', text: 'hello' } }, fold);
   assertEquals(fold.text, 'hello');
   assertEquals(events, [{ type: 'text', text: 'hello' }]);
 
-  const more = _internals.foldDeltaPayload({ delta: { type: 'text', text: ' world' } }, fold);
+  const more = foldDeltaPayload({ delta: { type: 'text', text: ' world' } }, fold);
   assertEquals(fold.text, 'hello world');
   assertEquals(more, [{ type: 'text', text: ' world' }]);
 });
 
-Deno.test('_internals.foldPayload folds a delta event and accumulates text', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload folds a delta event and accumulates text', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     { event_type: 'content.delta', delta: { type: 'text', text: 'hi' } },
     fold,
   );
@@ -780,19 +796,19 @@ Deno.test('_internals.foldPayload folds a delta event and accumulates text', () 
   assertEquals(events, [{ type: 'text', text: 'hi' }]);
 });
 
-Deno.test('_internals.foldPayload folds a complete event', () => {
-  const fold = _internals.newStreamFold();
+Deno.test('foldPayload folds a complete event', () => {
+  const fold = newStreamFold();
   fold.text = 'already streamed';
-  const events = _internals.foldPayload(
+  const events = foldPayload(
     { event_type: 'interaction.complete', interaction: {} },
     fold,
   );
   assertEquals(Array.isArray(events), true);
 });
 
-Deno.test('_internals.foldPayload extracts direct usage metadata not covered by delta/complete events', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload extracts direct usage metadata not covered by delta/complete events', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     {
       event_type: 'unknown.kind',
       usage_metadata: { prompt_token_count: 3, candidates_token_count: 7 },
@@ -803,10 +819,10 @@ Deno.test('_internals.foldPayload extracts direct usage metadata not covered by 
   assertEquals(tokens !== undefined, true);
 });
 
-Deno.test('_internals.foldPayload extracts direct grounding metadata not covered by delta/complete events', () => {
-  const fold = _internals.newStreamFold();
+Deno.test('foldPayload extracts direct grounding metadata not covered by delta/complete events', () => {
+  const fold = newStreamFold();
   const groundingMetadata = { groundingChunks: [{ web: { uri: 'https://example.com' } }] };
-  const events = _internals.foldPayload(
+  const events = foldPayload(
     { event_type: 'unknown.kind', grounding_metadata: groundingMetadata },
     fold,
   );
@@ -814,10 +830,10 @@ Deno.test('_internals.foldPayload extracts direct grounding metadata not covered
   assertEquals(grounding !== undefined, true);
 });
 
-Deno.test('_internals.foldPayload emits grounding + evidence for Interactions google_search_result', () => {
-  const fold = _internals.newStreamFold();
+Deno.test('foldPayload emits grounding + evidence for Interactions google_search_result', () => {
+  const fold = newStreamFold();
   const chipHtml = '<div class="chip">photosynthesis</div>';
-  const events = _internals.foldPayload(
+  const events = foldPayload(
     {
       event_type: 'step.delta',
       delta: {
@@ -838,9 +854,128 @@ Deno.test('_internals.foldPayload emits grounding + evidence for Interactions go
   assertEquals(evidence?.evidence?.raw?.type, 'google_search_result');
 });
 
-Deno.test('_internals.foldPayload emits evidence for code_execution_call deltas', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload emits grounding chunks from google_maps_result places', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
+    {
+      event_type: 'step.delta',
+      delta: {
+        type: 'google_maps_result',
+        call_id: 'call_maps_1',
+        result: [
+          {
+            places: [
+              {
+                place_id: 'ChIJ_primary',
+                name: 'Swansons Nursery - Google Maps',
+                url: 'https://maps.google.com/maps?cid=1',
+              },
+              {
+                place_id: 'ChIJ_primary',
+                name: 'Review of Swansons Nursery - Google Maps',
+                url: 'https://www.google.com/maps/reviews/data=!1',
+              },
+              {
+                place_id: 'ChIJ_other',
+                name: 'Sky Nursery - Google Maps',
+                url: 'https://maps.google.com/maps?cid=2',
+              },
+            ],
+          },
+        ],
+      },
+    },
+    fold,
+  );
+  const grounding = events.find((e) => e.type === 'grounding')?.grounding;
+  assertEquals(grounding?.chunks?.length, 2);
+  assertEquals(grounding?.sources?.length, 2);
+  assertEquals(
+    (grounding?.chunks?.[0] as { maps?: { title?: string; placeId?: string } }).maps?.title,
+    'Swansons Nursery',
+  );
+  assertEquals(
+    (grounding?.chunks?.[0] as { maps?: { placeId?: string } }).maps?.placeId,
+    'ChIJ_primary',
+  );
+  assertEquals(grounding?.sources?.[0]?.placeId, 'ChIJ_primary');
+});
+
+Deno.test('foldPayload emits grounding chunks from model_output place_citation annotations', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
+    {
+      event_type: 'interaction.complete',
+      interaction: {
+        status: 'completed',
+        id: 'ix_1',
+        steps: [
+          {
+            type: 'model_output',
+            content: [
+              {
+                type: 'text',
+                text: 'Try Swansons.',
+                annotations: [
+                  {
+                    type: 'place_citation',
+                    place_id: 'ChIJ_cite',
+                    name: 'Swansons Nursery - Google Maps',
+                    url: 'https://maps.google.com/maps?cid=9',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    fold,
+  );
+  const grounding = events.find((e) => e.type === 'grounding')?.grounding;
+  assertEquals(grounding?.sources?.length, 1);
+  assertEquals(grounding?.chunks?.length, 1);
+  assertEquals(grounding?.sources?.[0]?.placeId, 'ChIJ_cite');
+  assertEquals(grounding?.sources?.[0]?.title, 'Swansons Nursery');
+});
+
+Deno.test('foldPayload re-emits google_maps_result evidence once result arrives', () => {
+  const fold = newStreamFold();
+  const stub = foldPayload(
+    {
+      event_type: 'step.start',
+      step: { type: 'google_maps_result', call_id: 'call_1', signature: '' },
+    },
+    fold,
+  );
+  assertEquals(stub.filter((e) => e.type === 'evidence').length, 1);
+  assertEquals(
+    (stub[0] as { evidence?: { raw?: { result?: unknown } } }).evidence?.raw?.result,
+    undefined,
+  );
+  const withResult = foldPayload(
+    {
+      event_type: 'step.delta',
+      delta: {
+        type: 'google_maps_result',
+        call_id: 'call_1',
+        result: [{ places: [{ place_id: 'p1', name: 'Nursery', url: 'https://maps.google.com/?cid=1' }] }],
+      },
+    },
+    fold,
+  );
+  const evidence = withResult.filter((e) => e.type === 'evidence');
+  assertEquals(evidence.length, 1);
+  assertEquals(
+    Array.isArray((evidence[0] as { evidence?: { raw?: { result?: unknown } } }).evidence?.raw?.result),
+    true,
+  );
+  assertEquals(withResult.some((e) => e.type === 'grounding'), true);
+});
+
+Deno.test('foldPayload emits evidence for code_execution_call deltas', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     {
       event_type: 'step.delta',
       delta: {
@@ -858,9 +993,9 @@ Deno.test('_internals.foldPayload emits evidence for code_execution_call deltas'
   assertEquals(evidence?.evidence?.code, 'print(1)');
 });
 
-Deno.test('_internals.foldPayload streams code exec then skips duplicate steps on complete', () => {
-  const fold = _internals.newStreamFold();
-  _internals.foldPayload(
+Deno.test('foldPayload streams code exec then skips duplicate steps on complete', () => {
+  const fold = newStreamFold();
+  foldPayload(
     {
       event_type: 'step.start',
       index: 0,
@@ -872,7 +1007,7 @@ Deno.test('_internals.foldPayload streams code exec then skips duplicate steps o
     },
     fold,
   );
-  _internals.foldPayload(
+  foldPayload(
     {
       event_type: 'step.delta',
       index: 1,
@@ -884,7 +1019,7 @@ Deno.test('_internals.foldPayload streams code exec then skips duplicate steps o
     },
     fold,
   );
-  const completed = _internals.foldPayload(
+  const completed = foldPayload(
     {
       event_type: 'interaction.completed',
       interaction: {
@@ -918,9 +1053,9 @@ Deno.test('_internals.foldPayload streams code exec then skips duplicate steps o
   );
 });
 
-Deno.test('_internals.foldPayload replays batched steps when nothing streamed', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload replays batched steps when nothing streamed', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     {
       event_type: 'interaction.completed',
       interaction: {
@@ -960,9 +1095,9 @@ Deno.test('_internals.foldPayload replays batched steps when nothing streamed', 
   );
 });
 
-Deno.test('_internals.foldPayload emits code exec on step.stop when no delta arrived', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload emits code exec on step.stop when no delta arrived', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     {
       event_type: 'step.stop',
       index: 0,
@@ -983,9 +1118,9 @@ Deno.test('_internals.foldPayload emits code exec on step.stop when no delta arr
   assertEquals(evidence?.evidence?.isError, false);
 });
 
-Deno.test('_internals.foldPayload emits tools on interaction.status_update requires_action', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload emits tools on interaction.status_update requires_action', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     {
       event_type: 'interaction.status_update',
       interaction: {
@@ -1014,9 +1149,9 @@ Deno.test('_internals.foldPayload emits tools on interaction.status_update requi
   );
 });
 
-Deno.test('_internals.foldPayload emits tool events when interaction requires_action', () => {
-  const fold = _internals.newStreamFold();
-  const events = _internals.foldPayload(
+Deno.test('foldPayload emits tool events when interaction requires_action', () => {
+  const fold = newStreamFold();
+  const events = foldPayload(
     {
       event_type: 'interaction.completed',
       interaction: {
@@ -1042,18 +1177,18 @@ Deno.test('_internals.foldPayload emits tool events when interaction requires_ac
   assertEquals(tool?.tool?.arguments, { orderId: '42' });
 });
 
-Deno.test('_internals.foldStepStart ignores empty steps and seeds function_call', () => {
-  const fold = _internals.newStreamFold();
-  assertEquals(_internals.foldStepStart({ event_type: 'step.start' }, fold), []);
+Deno.test('foldStepStart ignores empty steps and seeds function_call', () => {
+  const fold = newStreamFold();
+  assertEquals(foldStepStart({ event_type: 'step.start' }, fold), []);
   assertEquals(
-    _internals.foldStepStart(
+    foldStepStart(
       { event_type: 'step.start', index: 0, step: { type: 'thought' } },
       fold,
     ),
     [],
   );
   assertEquals(
-    _internals.foldStepStart(
+    foldStepStart(
       {
         event_type: 'step.start',
         index: 1,
@@ -1064,13 +1199,13 @@ Deno.test('_internals.foldStepStart ignores empty steps and seeds function_call'
     [],
   );
   assertEquals(
-    _internals.foldStepStart(
+    foldStepStart(
       { event_type: 'step.start', index: 2, step: { type: 'code_execution_call' } },
       fold,
     ),
     [],
   );
-  const started = _internals.foldStepStart(
+  const started = foldStepStart(
     {
       event_type: 'step.start',
       index: 3,
@@ -1082,8 +1217,8 @@ Deno.test('_internals.foldStepStart ignores empty steps and seeds function_call'
 });
 
 Deno.test('foldPayload emits tool when function_call arrives on step.start with object arguments', () => {
-  const fold = _internals.newStreamFold();
-  const started = _internals.foldPayload(
+  const fold = newStreamFold();
+  const started = foldPayload(
     {
       event_type: 'step.start',
       index: 1,
@@ -1091,8 +1226,8 @@ Deno.test('foldPayload emits tool when function_call arrives on step.start with 
     },
     fold,
   );
-  const stopped = _internals.foldPayload({ event_type: 'step.stop', index: 1 }, fold);
-  const completed = _internals.foldPayload(
+  const stopped = foldPayload({ event_type: 'step.stop', index: 1 }, fold);
+  const completed = foldPayload(
     {
       event_type: 'interaction.completed',
       interaction: { id: 'v1_live', status: 'requires_action' },
@@ -1105,18 +1240,18 @@ Deno.test('foldPayload emits tool when function_call arrives on step.start with 
   assertEquals(tools[0]?.tool?.id, 'call_live');
 });
 
-Deno.test('_internals.foldDeltaPayload accumulates function arguments and media', () => {
-  const fold = _internals.newStreamFold();
-  assertEquals(_internals.foldDeltaPayload({ event_type: 'step.delta' }, fold), []);
-  _internals.foldDeltaPayload(
+Deno.test('foldDeltaPayload accumulates function arguments and media', () => {
+  const fold = newStreamFold();
+  assertEquals(foldDeltaPayload({ event_type: 'step.delta' }, fold), []);
+  foldDeltaPayload(
     { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '{"a":' } },
     fold,
   );
-  _internals.foldDeltaPayload(
+  foldDeltaPayload(
     { event_type: 'step.delta', index: 0, delta: { type: 'arguments', arguments: '1}' } },
     fold,
   );
-  const media = _internals.foldDeltaPayload(
+  const media = foldDeltaPayload(
     {
       event_type: 'step.delta',
       delta: { type: 'image', mime_type: 'image/png', data: 'img' },
@@ -1126,7 +1261,7 @@ Deno.test('_internals.foldDeltaPayload accumulates function arguments and media'
   assertEquals(media[0]?.type, 'media');
 });
 
-Deno.test('_internals.withTap wraps the transport fetch without mutating other fields', () => {
+Deno.test('withTap wraps the transport fetch without mutating other fields', () => {
   const calls: string[] = [];
   const transport = {
     vault,
@@ -1137,7 +1272,7 @@ Deno.test('_internals.withTap wraps the transport fetch without mutating other f
     },
   };
   const req = fromChatProfile();
-  const wrapped = _internals.withTap(req, transport);
+  const wrapped = withTap(req, transport);
   assertEquals(wrapped.vault, vault);
   assertEquals(wrapped.wait, noWait);
   assertEquals(typeof wrapped.fetch, 'function');

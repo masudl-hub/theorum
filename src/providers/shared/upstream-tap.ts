@@ -1,16 +1,15 @@
 import type { ProviderCompleteRequest } from '../../kernel/types.ts';
-import { exposeForTests } from '../expose-for-tests.ts';
 
 const SECRET_HEADER = /key|auth|cookie|secret|token/i;
 
-function tapeHeaderValue(key: string, value: string): string {
+export function tapeHeaderValue(key: string, value: string): string {
   if (SECRET_HEADER.test(key)) {
     return '[redacted]';
   }
   return value;
 }
 
-function tapeHeaders(headers?: HeadersInit): Record<string, string> {
+export function tapeHeaders(headers?: HeadersInit): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of new Headers(headers).entries()) {
     out[key] = tapeHeaderValue(key, value);
@@ -18,14 +17,14 @@ function tapeHeaders(headers?: HeadersInit): Record<string, string> {
   return out;
 }
 
-function throwRow(err: unknown): Record<string, unknown> {
+export function throwRow(err: unknown): Record<string, unknown> {
   if (err instanceof Error) {
     return { eventType: 'http_throw', name: err.name, message: err.message };
   }
   return { eventType: 'http_throw', name: 'Error', message: String(err) };
 }
 
-function tapFetch(
+export function tapFetch(
   tap: ProviderCompleteRequest['tapUpstream'],
   send: typeof fetch = fetch,
 ): typeof fetch {
@@ -54,7 +53,3 @@ function tapFetch(
     }
   };
 }
-
-export { tapFetch };
-
-exposeForTests('upstream-tap', { tapeHeaderValue, tapeHeaders, throwRow, tapFetch });

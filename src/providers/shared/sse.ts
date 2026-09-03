@@ -1,17 +1,15 @@
-import { exposeForTests } from '../expose-for-tests.ts';
-
 const DATA_PREFIX = 'data: ';
 const EVENT_PREFIX = 'event: ';
 const DONE = '[DONE]';
 
-function asObject(parsed: unknown): Record<string, unknown> | undefined {
+export function asObject(parsed: unknown): Record<string, unknown> | undefined {
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     return parsed as Record<string, unknown>;
   }
   return undefined;
 }
 
-function dataRecord(raw: string, sseEvent: string): Record<string, unknown> {
+export function dataRecord(raw: string, sseEvent: string): Record<string, unknown> {
   const data = raw.slice(DATA_PREFIX.length).trim();
   const row: Record<string, unknown> = {};
   if (sseEvent) {
@@ -37,7 +35,7 @@ function dataRecord(raw: string, sseEvent: string): Record<string, unknown> {
   }
 }
 
-function takeSsePayloads(
+export function takeSsePayloads(
   buffer: string,
   pendingEvent = '',
 ): { rest: string; payloads: Record<string, unknown>[]; pendingEvent: string } {
@@ -60,7 +58,7 @@ function takeSsePayloads(
  * Async SSE stream chunk reader built on `takeSsePayloads`.
  * Yields every raw payload record (including `sse_done` and `sse_unparsed`).
  */
-async function* readSseChunks(
+export async function* readSseChunks(
   body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<Record<string, unknown>> {
   const reader = body.getReader();
@@ -85,7 +83,7 @@ async function* readSseChunks(
  * Yields parsed JSON objects from `data:` lines; silently skips malformed
  * payloads and terminates on `[DONE]`.
  */
-async function* parseSseStream(
+export async function* parseSseStream(
   body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<Record<string, unknown>> {
   for await (const payload of readSseChunks(body)) {
@@ -94,7 +92,3 @@ async function* parseSseStream(
     yield payload;
   }
 }
-
-export { parseSseStream, readSseChunks, takeSsePayloads };
-
-exposeForTests('sse', { asObject, dataRecord, parseSseStream, readSseChunks, takeSsePayloads });

@@ -1,15 +1,18 @@
-import '../../fixtures/enable-test-internals.ts';
 import { assertEquals } from '../../../src/kernel/engine/assert.ts';
 import type {
   ProviderCompleteRequest,
   TurnEvent,
   TurnHistoryMessage,
 } from '../../../src/kernel/types.ts';
-import { createLocalProvider, DEFAULT_LOCAL_BASE_URL } from '../../../src/providers/local/local.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
+import {
+  createLocalProvider,
+  DEFAULT_LOCAL_BASE_URL,
+  flushPending,
+  historyToWire,
+  resolveBaseUrl,
+  toolsToWire,
+} from '../../../src/providers/local/local.ts';
 import { testWireTool } from '../../fixtures/wire-tools.ts';
-
-const internals = testInternals('local');
 
 async function collect(iter: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];
@@ -49,27 +52,18 @@ function baseReq(overrides: Partial<ProviderCompleteRequest> = {}): ProviderComp
 }
 
 Deno.test('resolveBaseUrl defaults to loopback Ollama port', () => {
-  assertEquals(internals.resolveBaseUrl(), DEFAULT_LOCAL_BASE_URL);
-  assertEquals(internals.resolveBaseUrl({}), DEFAULT_LOCAL_BASE_URL);
-  assertEquals(
-    internals.resolveBaseUrl({ baseUrl: 'http://localhost:8080/' }),
-    'http://localhost:8080',
-  );
-  assertEquals(
-    internals.resolveBaseUrl({ baseUrl: '  http://10.0.0.2:1234  ' }),
-    'http://10.0.0.2:1234',
-  );
+  assertEquals(resolveBaseUrl(), DEFAULT_LOCAL_BASE_URL);
+  assertEquals(resolveBaseUrl({}), DEFAULT_LOCAL_BASE_URL);
+  assertEquals(resolveBaseUrl({ baseUrl: 'http://localhost:8080/' }), 'http://localhost:8080');
+  assertEquals(resolveBaseUrl({ baseUrl: '  http://10.0.0.2:1234  ' }), 'http://10.0.0.2:1234');
 });
 
 Deno.test('resolveBaseUrl does not read OLLAMA_HOST', () => {
   const prev = Deno.env.get('OLLAMA_HOST');
   try {
     Deno.env.set('OLLAMA_HOST', 'http://env-should-not-win:9999');
-    assertEquals(internals.resolveBaseUrl(), DEFAULT_LOCAL_BASE_URL);
-    assertEquals(
-      internals.resolveBaseUrl({ baseUrl: 'http://explicit:11434' }),
-      'http://explicit:11434',
-    );
+    assertEquals(resolveBaseUrl(), DEFAULT_LOCAL_BASE_URL);
+    assertEquals(resolveBaseUrl({ baseUrl: 'http://explicit:11434' }), 'http://explicit:11434');
   } finally {
     if (prev === undefined) Deno.env.delete('OLLAMA_HOST');
     else Deno.env.set('OLLAMA_HOST', prev);
@@ -77,7 +71,7 @@ Deno.test('resolveBaseUrl does not read OLLAMA_HOST', () => {
 });
 
 Deno.test('historyToWire maps history parts including images', () => {
-  const msgs = internals.historyToWire(
+  const msgs = historyToWire(
     baseReq({
       history: [
         {
@@ -95,20 +89,21 @@ Deno.test('historyToWire maps history parts including images', () => {
   assertEquals(msgs[0], { role: 'system', content: 'Be brief.' });
   assertEquals(msgs[1].role, 'user');
   assertEquals(Array.isArray(msgs[1].content), true);
-  assertEquals(msgs[1].content[0], { type: 'text', text: 'look' });
-  assertEquals(msgs[1].content[1].type, 'image_url');
-  assertEquals(msgs[1].content[1].image_url.url, 'data:image/png;base64,abc');
+  const parts = msgs[1].content as Array<Record<string, unknown>>;
+  assertEquals(parts[0], { type: 'text', text: 'look' });
+  assertEquals(parts[1]?.type, 'image_url');
+  const imageUrl = parts[1]?.image_url as { url?: string } | undefined;
+  assertEquals(imageUrl?.url, 'data:image/png;base64,abc');
   assertEquals(msgs[2], { role: 'assistant', content: 'nice' });
   assertEquals(msgs[3], { role: 'user', content: 'again' });
 });
 
 Deno.test('historyToWire preserves tool call exchanges', () => {
-  const msgs = internals.historyToWire(
+  const msgs = historyToWire(
     baseReq({
       history: [
         {
           role: 'assistant',
-          content: null as unknown as string,
           tool_calls: [
             {
               id: 'call_1',
@@ -127,7 +122,10 @@ Deno.test('historyToWire preserves tool call exchanges', () => {
       input: [{ type: 'text', text: 'next' }],
     }),
   );
-  assertEquals(msgs[1].tool_calls?.[0].function.name, 'lookup');
+  assertEquals(
+    (msgs[1].tool_calls as Array<{ function: { name: string } }> | undefined)?.[0].function.name,
+    'lookup',
+  );
   assertEquals(msgs[2], {
     role: 'tool',
     tool_call_id: 'call_1',
@@ -137,11 +135,12 @@ Deno.test('historyToWire preserves tool call exchanges', () => {
 });
 
 Deno.test('toolsToWire maps dynamic tools only', () => {
-  assertEquals(internals.toolsToWire(undefined), undefined);
-  assertEquals(internals.toolsToWire([]), undefined);
+  assertEquals(toolsToWire(undefined), undefined);
+  assertEquals(toolsToWire([]), undefined);
   assertEquals(
-    internals.toolsToWire([
+    toolsToWire([
       {
+        type: 'function',
         name: 'ping',
         description: 'Ping',
         parameters: { type: 'object', properties: {} },
@@ -233,6 +232,22 @@ Deno.test('createLocalProvider maps finish_reason length and tool_calls', async 
   assertEquals(tool?.tool?.arguments, { x: 1 });
   assertEquals(tool?.tool?.id, 'c1');
   assertEquals(toolEvents.find((e) => e.type === 'done')?.stop?.kind, 'tool');
+});
+
+Deno.test('flushPending emits malformed_arguments on bad tool JSON', () => {
+  const pending = new Map<number, { id: string; name: string; args: string }>([
+    [0, { id: 'c1', name: 'ping', args: '{not-json' }],
+    [1, { id: 'c2', name: 'ok', args: '{"x":1}' }],
+    [2, { id: 'c3', name: 'empty', args: '' }],
+  ]);
+  const events = flushPending(pending);
+  assertEquals(events.length, 3);
+  assertEquals(events[0]?.tool?.phase, 'error');
+  assertEquals(events[0]?.tool?.failure?.code, 'malformed_arguments');
+  assertEquals(events[1]?.tool?.arguments, { x: 1 });
+  assertEquals(events[1]?.tool?.phase, undefined);
+  assertEquals(events[2]?.tool?.arguments, {});
+  assertEquals(pending.size, 0);
 });
 
 Deno.test('createLocalProvider yields error event on HTTP failure', async () => {

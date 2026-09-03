@@ -1,13 +1,13 @@
-import { publicError, throwIfAborted, toErrorEvent } from '../../../guardrails/error.ts';
-import { providerCompleteRequest } from '../../registry/provider-request.ts';
-import type { ModelProvider, Profile, ResolvedGeneration, TurnEvent } from '../../types.ts';
 import {
   type CanaryStreamGate,
   createCanaryStreamGate,
   eventHasCanary,
   isStreamedCanaryEvent,
   redactCanary,
-} from '../boundary.ts';
+} from '../../../guardrails/canary.ts';
+import { publicError, throwIfAborted, toErrorEvent } from '../../../guardrails/error.ts';
+import { providerCompleteRequest } from '../../registry/provider-request.ts';
+import type { ModelProvider, Profile, ResolvedGeneration, TurnEvent } from '../../types.ts';
 
 function systemFromProfile(profile: Profile, role: string): string {
   const { identity } = profile;

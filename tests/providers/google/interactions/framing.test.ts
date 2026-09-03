@@ -1,5 +1,4 @@
 import '../../../fixtures/test-host.ts';
-import '../../../fixtures/enable-test-internals.ts';
 import { assertEquals, assertThrows } from '@std/assert';
 import { TheorumError } from '../../../../src/guardrails/error.ts';
 import type {
@@ -7,25 +6,22 @@ import type {
   ProviderCompleteRequest,
   TurnHistoryMessage,
 } from '../../../../src/kernel/types.ts';
-import { testInternals } from '../../../fixtures/testInternals.js';
-import { testWireTool } from '../../../fixtures/wire-tools.ts';
-import '../../../../src/providers/google/interactions/framing.ts';
-
-const {
-  camelToSnake,
-  toGoogleValue,
-  wirePart,
-  userInputStep,
-  historyStep,
-  systemHoldsUserInput,
-  jsonResponseFormat,
+import {
+  applyOptionalRequestFields,
   attachResponseFormat,
   attachSpeechConfig,
-  inputStepsFromRequest,
-  applyOptionalRequestFields,
   baseInteractionsBody,
+  camelToSnake,
+  historyStep,
+  inputStepsFromRequest,
+  jsonResponseFormat,
+  systemHoldsUserInput,
+  toGoogleValue,
   toInteractionsBody,
-} = testInternals('interactions');
+  userInputStep,
+  wirePart,
+} from '../../../../src/providers/google/interactions/framing.ts';
+import { testWireTool } from '../../../fixtures/wire-tools.ts';
 
 function baseReq(overrides: Partial<ProviderCompleteRequest> = {}): ProviderCompleteRequest {
   return {
@@ -248,6 +244,22 @@ Deno.test('attachResponseFormat sets an image-only response format by default', 
   assertEquals(Object.hasOwn(camel, 'responseModalities'), false);
 });
 
+Deno.test('attachResponseFormat omits aspect and size when image pins are unset', () => {
+  const req = baseReq({
+    image: {
+      type: 'image',
+      mimeType: 'image/png',
+      includeText: false,
+    },
+  });
+  const camel: Record<string, unknown> = {};
+  attachResponseFormat(req, camel);
+  assertEquals(camel.responseFormat, {
+    type: 'image',
+    mimeType: 'image/png',
+  });
+});
+
 Deno.test('attachResponseFormat sets text and image response formats when includeText is true', () => {
   const req = baseReq({
     image: {
@@ -325,8 +337,10 @@ Deno.test('inputStepsFromRequest emits history steps followed by user input', ()
   });
   const steps = inputStepsFromRequest(req);
   assertEquals(steps.length, 2);
-  assertEquals(steps[0]?.content[0]?.text, 'earlier');
-  assertEquals(steps[1]?.content[0]?.text, 'now');
+  const firstContent = steps[0]?.content as Array<{ text?: string }> | undefined;
+  const secondContent = steps[1]?.content as Array<{ text?: string }> | undefined;
+  assertEquals(firstContent?.[0]?.text, 'earlier');
+  assertEquals(secondContent?.[0]?.text, 'now');
 });
 
 Deno.test('inputStepsFromRequest omits user input when history exists and input is empty', () => {

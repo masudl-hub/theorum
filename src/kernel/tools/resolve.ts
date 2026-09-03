@@ -5,7 +5,6 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
-import { exposeForTests } from '../../providers/expose-for-tests.ts';
 import type { ModelId, Profile, ToolId, TurnRequest } from '../types.ts';
 import { getTool } from './registry.ts';
 import type {
@@ -15,7 +14,7 @@ import type {
   WireFunctionTool,
 } from './types.ts';
 
-function pathMatches(catalogPaths: string[], turnPath?: string): boolean {
+export function pathMatches(catalogPaths: string[], turnPath?: string): boolean {
   if (catalogPaths.includes('*')) {
     return true;
   }
@@ -25,7 +24,7 @@ function pathMatches(catalogPaths: string[], turnPath?: string): boolean {
   return catalogPaths.includes(turnPath);
 }
 
-function applyBuiltinMutualExclusions(requested: string[]): string[] {
+export function applyBuiltinMutualExclusions(requested: string[]): string[] {
   return requested.filter((id) => {
     const tool = getTool(id);
     if (tool?.type !== 'builtin') {
@@ -36,7 +35,7 @@ function applyBuiltinMutualExclusions(requested: string[]): string[] {
   });
 }
 
-function resolveAllowedCustomToolIds(profile: Profile, req: TurnRequest): ToolId[] {
+export function resolveAllowedCustomToolIds(profile: Profile, req: TurnRequest): ToolId[] {
   return profile.tools.allow.filter((id) => {
     const tool = getTool(id);
     if (!tool || tool.type === 'builtin') {
@@ -47,7 +46,11 @@ function resolveAllowedCustomToolIds(profile: Profile, req: TurnRequest): ToolId
 }
 
 /** Provider builtins listed on the selected model — on for the turn (path-filtered). */
-function resolveModelBuiltinIds(profile: Profile, req: TurnRequest, modelId: ModelId): ToolId[] {
+export function resolveModelBuiltinIds(
+  profile: Profile,
+  req: TurnRequest,
+  modelId: ModelId,
+): ToolId[] {
   const spec = profile.model.config[modelId];
   if (!spec) {
     return [];
@@ -61,7 +64,7 @@ function resolveModelBuiltinIds(profile: Profile, req: TurnRequest, modelId: Mod
   });
 }
 
-function wireForTool(name: string): WireFunctionTool | undefined {
+export function wireForTool(name: string): WireFunctionTool | undefined {
   const tool = getTool(name);
   if (!tool || tool.type === 'builtin') {
     return undefined;
@@ -74,7 +77,7 @@ function wireForTool(name: string): WireFunctionTool | undefined {
   };
 }
 
-function buildWire(visible: ToolId[]): WireFunctionTool[] {
+export function buildWire(visible: ToolId[]): WireFunctionTool[] {
   const out: WireFunctionTool[] = [];
   for (const id of visible) {
     const wire = wireForTool(id);
@@ -85,7 +88,7 @@ function buildWire(visible: ToolId[]): WireFunctionTool[] {
   return out;
 }
 
-function promoteTool(state: TurnToolSnapshot, id: ToolId): void {
+export function promoteTool(state: TurnToolSnapshot, id: ToolId): void {
   if (state.visible.includes(id)) {
     return;
   }
@@ -96,7 +99,7 @@ function promoteTool(state: TurnToolSnapshot, id: ToolId): void {
   }
 }
 
-function promoteBuiltin(state: TurnToolSnapshot, id: ToolId): void {
+export function promoteBuiltin(state: TurnToolSnapshot, id: ToolId): void {
   if (state.builtins.includes(id)) {
     return;
   }
@@ -115,11 +118,11 @@ function promoteBuiltin(state: TurnToolSnapshot, id: ToolId): void {
   state.builtins.push(id);
 }
 
-function initialVisible(gated: ToolId[]): ToolId[] {
+export function initialVisible(gated: ToolId[]): ToolId[] {
   return gated.filter((id) => getTool(id)?.loadTier === 'T0');
 }
 
-function initialBuiltins(gated: ToolId[]): ToolId[] {
+export function initialBuiltins(gated: ToolId[]): ToolId[] {
   return applyBuiltinMutualExclusions(
     gated.filter((id) => {
       const tool = getTool(id);
@@ -129,7 +132,11 @@ function initialBuiltins(gated: ToolId[]): ToolId[] {
 }
 
 /** Build the initial tool snapshot for a turn (T0 wired; T1/T2 pending). */
-function resolveTurnTools(profile: Profile, req: TurnRequest, modelId: ModelId): TurnToolSnapshot {
+export function resolveTurnTools(
+  profile: Profile,
+  req: TurnRequest,
+  modelId: ModelId,
+): TurnToolSnapshot {
   const customAllowed = resolveAllowedCustomToolIds(profile, req);
   const modelBuiltins = resolveModelBuiltinIds(profile, req, modelId);
   const gated = [...customAllowed, ...modelBuiltins];
@@ -148,7 +155,7 @@ function resolveTurnTools(profile: Profile, req: TurnRequest, modelId: ModelId):
 }
 
 /** Resolve T0 snapshot and expand T1 selections from `profile.tools.t1Policy`. */
-async function prepareTurnToolSnapshot(
+export async function prepareTurnToolSnapshot(
   profile: Profile,
   req: TurnRequest,
   modelId: ModelId,
@@ -159,7 +166,7 @@ async function prepareTurnToolSnapshot(
 }
 
 /** Deep-clone a turn snapshot so host-side concurrent invokes do not share mutable state. */
-function cloneTurnToolSnapshot(state: TurnToolSnapshot): TurnToolSnapshot {
+export function cloneTurnToolSnapshot(state: TurnToolSnapshot): TurnToolSnapshot {
   return {
     builtins: [...state.builtins],
     gated: [...state.gated],
@@ -172,7 +179,7 @@ function cloneTurnToolSnapshot(state: TurnToolSnapshot): TurnToolSnapshot {
 }
 
 /** Wire T1 tools selected by `profile.tools.t1Policy`. */
-async function expandT1Policy(
+export async function expandT1Policy(
   state: TurnToolSnapshot,
   profile: Profile,
   req: TurnRequest,
@@ -220,7 +227,7 @@ async function expandT1Policy(
 const LOADED_ID_BLOCKLIST = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Promote T2 tools into the visible set after tools.t2Loader returns { loaded }. */
-function promoteLoadedTools(
+export function promoteLoadedTools(
   state: TurnToolSnapshot,
   loaded: string[],
   profile: Profile,
@@ -264,7 +271,7 @@ function promoteLoadedTools(
   return { promoted };
 }
 
-function promotionFailure(id: string, profile: Profile): ToolFailure | undefined {
+export function promotionFailure(id: string, profile: Profile): ToolFailure | undefined {
   if (!profile.tools.allow.includes(id)) {
     return {
       code: 'invalid_output',
@@ -292,27 +299,3 @@ function promotionFailure(id: string, profile: Profile): ToolFailure | undefined
   }
   return undefined;
 }
-
-exposeForTests('kernel-tools-resolve', {
-  pathMatches,
-  applyBuiltinMutualExclusions,
-  resolveAllowedCustomToolIds,
-  resolveModelBuiltinIds,
-  wireForTool,
-  buildWire,
-  cloneTurnToolSnapshot,
-  promoteTool,
-  promoteBuiltin,
-  initialVisible,
-  initialBuiltins,
-  promoteLoadedTools,
-  promotionFailure,
-});
-
-export {
-  cloneTurnToolSnapshot,
-  expandT1Policy,
-  prepareTurnToolSnapshot,
-  promoteLoadedTools,
-  resolveTurnTools,
-};

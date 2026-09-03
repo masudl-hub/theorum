@@ -16,11 +16,9 @@ import type {
   TurnTokens,
   WireFunctionTool,
 } from '../../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../../expose-for-tests.ts';
 import { base64ToBytes, bytesToBase64, wrapPcmAsWav } from '../../shared/pcm.ts';
+import { parseToolArgumentsObject } from '../../shared/tool-args.ts';
 import { GEMINI_LIVE_WS_URL } from '../urls.ts';
-
-markModuleLoad('google-live-framing');
 
 /** Default VAD configuration when omitted on profile. */
 const DEFAULT_VAD: Required<LiveVadSpec> = {
@@ -36,7 +34,7 @@ export function buildGeminiLiveWebSocketUrl(apiKey: string): string {
   return `${GEMINI_LIVE_WS_URL}?key=${encodeURIComponent(apiKey)}`;
 }
 
-function wireFunctionDeclaration(decl: WireFunctionTool): Record<string, unknown> {
+export function wireFunctionDeclaration(decl: WireFunctionTool): Record<string, unknown> {
   return {
     name: decl.name,
     description: decl.description,
@@ -44,7 +42,7 @@ function wireFunctionDeclaration(decl: WireFunctionTool): Record<string, unknown
   };
 }
 
-function wireLiveTools(req: ProviderCompleteRequest): Array<Record<string, unknown>> {
+export function wireLiveTools(req: ProviderCompleteRequest): Array<Record<string, unknown>> {
   const functionDeclarations: Array<Record<string, unknown>> = [];
   for (const id of req.builtins) {
     const entry = getTool(id);
@@ -303,22 +301,8 @@ export function parseGeminiLiveMessage(raw: unknown): Record<string, unknown> | 
   }
 }
 
-function parseFunctionArguments(raw: unknown): Record<string, unknown> {
-  if (!raw) return {};
-  if (typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
-  }
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {
-      return {};
-    }
-  }
-  return {};
+export function parseFunctionArguments(raw: unknown): ReturnType<typeof parseToolArgumentsObject> {
+  return parseToolArgumentsObject(raw);
 }
 
 function readTokenCount(
@@ -330,7 +314,7 @@ function readTokenCount(
   return typeof val === 'number' ? val : 0;
 }
 
-function extractUsageTokens(metadata: Record<string, unknown>): TurnTokens | undefined {
+export function extractUsageTokens(metadata: Record<string, unknown>): TurnTokens | undefined {
   const prompt = readTokenCount(metadata, 'promptTokenCount', 'prompt_token_count');
   const output = readTokenCount(metadata, 'responseTokenCount', 'response_token_count');
   const thinking = readTokenCount(metadata, 'thoughtsTokenCount', 'thoughts_token_count');
@@ -365,16 +349,33 @@ function foldToolCalls(message: Record<string, unknown>, events: TurnEvent[]): v
     | undefined;
   if (!toolCall?.functionCalls || !Array.isArray(toolCall.functionCalls)) return;
   for (const call of toolCall.functionCalls) {
-    if (call.name) {
+    if (!call.name) continue;
+    const parsed = parseFunctionArguments(call.args);
+    if (!parsed.ok) {
       events.push({
         type: 'tool',
         tool: {
           id: call.id,
           name: call.name,
-          arguments: parseFunctionArguments(call.args),
+          arguments: {},
+          phase: 'error',
+          failure: {
+            code: 'malformed_arguments',
+            message: parsed.error,
+            details: { raw: parsed.raw },
+          },
         },
       });
+      continue;
     }
+    events.push({
+      type: 'tool',
+      tool: {
+        id: call.id,
+        name: call.name,
+        arguments: parsed.value,
+      },
+    });
   }
 }
 
@@ -471,20 +472,3 @@ export function foldGeminiLiveServerMessage(
   foldUsageMetadata(message, events);
   return events;
 }
-
-exposeForTests('google-live-framing', {
-  base64ToBytes,
-  bytesToBase64,
-  extractUsageTokens,
-  parseFunctionArguments,
-  wireFunctionDeclaration,
-  wireLiveTools,
-  buildGeminiLiveSetupMessage,
-  buildGeminiLiveClientContent,
-  buildGeminiLiveRealtimeInput,
-  buildGeminiLiveRealtimeText,
-  buildGeminiLiveToolResponse,
-  buildGeminiLiveToolResponses,
-  parseGeminiLiveMessage,
-  foldGeminiLiveServerMessage,
-});

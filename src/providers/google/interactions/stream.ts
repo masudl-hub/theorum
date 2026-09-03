@@ -25,9 +25,9 @@ import {
 } from '../../../kernel/engine/delta.ts';
 import { asRecord } from '../../../kernel/engine/record.ts';
 import type { ModelProvider, ProviderCompleteRequest, TurnEvent } from '../../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../../expose-for-tests.ts';
 import { base64ToBytes, bytesToBase64, wrapPcmAsWav } from '../../shared/pcm.ts';
 import { readSseChunks } from '../../shared/sse.ts';
+import { type ParsedToolArguments, parseToolArgumentsObject } from '../../shared/tool-args.ts';
 import { tapFetch } from '../../shared/upstream-tap.ts';
 import { fetchGemini, type GeminiTransport } from '../keys.ts';
 import { INTERACTIONS_JSON_URL, INTERACTIONS_URL } from '../urls.ts';
@@ -35,13 +35,13 @@ import { toInteractionsBody } from './framing.ts';
 
 const HTTP_OK = 200;
 
-interface PendingFunctionCall {
+export interface PendingFunctionCall {
   id?: string;
   name?: string;
   arguments: string;
 }
 
-interface StreamFold {
+export interface StreamFold {
   text: string;
   functionCalls: Map<number, PendingFunctionCall>;
   emittedToolKeys: Set<string>;
@@ -50,14 +50,14 @@ interface StreamFold {
   sawStreamedMedia: boolean;
 }
 
-function isRawPcmMime(mime: string): boolean {
+export function isRawPcmMime(mime: string): boolean {
   const lower = mime.toLowerCase();
   return (
     lower.startsWith('audio/pcm') || lower.startsWith('audio/raw') || lower.startsWith('audio/l16')
   );
 }
 
-function normalizeSpeechMedia(event: TurnEvent, speech: boolean): TurnEvent {
+export function normalizeSpeechMedia(event: TurnEvent, speech: boolean): TurnEvent {
   if (!speech || event.type !== 'media' || !event.media) {
     return event;
   }
@@ -73,7 +73,7 @@ function normalizeSpeechMedia(event: TurnEvent, speech: boolean): TurnEvent {
   };
 }
 
-function newStreamFold(): StreamFold {
+export function newStreamFold(): StreamFold {
   return {
     text: '',
     functionCalls: new Map(),
@@ -84,33 +84,33 @@ function newStreamFold(): StreamFold {
   };
 }
 
-function eventType(payload: Record<string, unknown>): string {
+export function eventType(payload: Record<string, unknown>): string {
   return String(payload.event_type ?? payload.type ?? '');
 }
 
-function isDeltaEvent(type: string): boolean {
+export function isDeltaEvent(type: string): boolean {
   return type === 'content.delta' || type === 'step.delta';
 }
 
-function isCompleteEvent(type: string): boolean {
+export function isCompleteEvent(type: string): boolean {
   return type === 'interaction.complete' || type === 'interaction.completed';
 }
 
-function* yieldGrounding(event: Record<string, unknown>): Generator<TurnEvent> {
+export function* yieldGrounding(event: Record<string, unknown>): Generator<TurnEvent> {
   const g = groundingFromEvent(event);
   if (g) {
     yield g;
   }
 }
 
-function* yieldTokens(event: Record<string, unknown>): Generator<TurnEvent> {
+export function* yieldTokens(event: Record<string, unknown>): Generator<TurnEvent> {
   const tokens = extractTokenEvent(event);
   if (tokens) {
     yield tokens;
   }
 }
 
-function functionCallKey(tool: {
+export function functionCallKey(tool: {
   name?: string;
   id?: string;
   arguments?: Record<string, unknown>;
@@ -118,20 +118,33 @@ function functionCallKey(tool: {
   return `${tool.name ?? ''}:${tool.id ?? ''}:${JSON.stringify(tool.arguments ?? {})}`;
 }
 
-function* yieldEvidenceStep(
+export function* yieldEvidenceStep(
   step: Record<string, unknown>,
   emittedKeys: Set<string>,
 ): Generator<TurnEvent> {
   const event = googleBuiltinEvidence(step);
   const ev = event.evidence;
   if (!ev) return;
-  const key = `${ev.kind ?? ev.raw?.type ?? ''}:${ev.callId ?? ev.id ?? ''}:${ev.code ?? ev.result ?? ''}`;
+  const kind = String(ev.kind ?? ev.raw?.type ?? '');
+  const id =
+    (typeof ev.callId === 'string' && ev.callId) ||
+    (typeof ev.id === 'string' && ev.id) ||
+    (typeof ev.raw?.call_id === 'string' && ev.raw.call_id) ||
+    (typeof ev.raw?.id === 'string' && ev.raw.id) ||
+    '';
+  const hasResult = ev.raw?.result !== undefined;
+  // Stub maps/search starts often arrive before `result`; allow a second emit once result lands.
+  const key = `${kind}:${id}:${hasResult ? 'result' : 'stub'}:${ev.code ?? ''}`;
   if (emittedKeys.has(key)) return;
+  // Prefer the result-bearing emit: drop the stub key so hosts don't keep an empty payload.
+  if (hasResult) {
+    emittedKeys.delete(`${kind}:${id}:stub:`);
+  }
   emittedKeys.add(key);
   yield event;
 }
 
-function recordCodeStep(
+export function recordCodeStep(
   index: number,
   delta: Record<string, unknown>,
   steps: Map<number, Record<string, unknown>>,
@@ -144,11 +157,11 @@ function recordCodeStep(
   mergeCodeExecutionPayload(existing, delta);
 }
 
-function isCompleteCodeStep(step: Record<string, unknown>): boolean {
+export function isCompleteCodeStep(step: Record<string, unknown>): boolean {
   return step.arguments !== undefined || step.result !== undefined;
 }
 
-function* flushCompletedCodeSteps(
+export function* flushCompletedCodeSteps(
   steps: Map<number, Record<string, unknown>>,
   emittedKeys: Set<string>,
 ): Generator<TurnEvent> {
@@ -169,7 +182,7 @@ function* flushCompletedCodeSteps(
   }
 }
 
-function foldStepStart(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+export function foldStepStart(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
   const step = asRecord(payload.step);
   if (!step) return [];
   const type = String(step.type ?? '');
@@ -195,29 +208,20 @@ function foldStepStart(payload: Record<string, unknown>, fold: StreamFold): Turn
   return [];
 }
 
-function parseArgumentsObject(raw: unknown): Record<string, unknown> {
-  if (typeof raw === 'string') {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return {};
-    }
-  }
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
-  }
-  return {};
+export type { ParsedToolArguments };
+
+export function parseArgumentsObject(raw: unknown): ParsedToolArguments {
+  return parseToolArgumentsObject(raw);
 }
 
-function foldArgumentsDelta(delta: Record<string, unknown>, index: number, fold: StreamFold): void {
-  const existing = fold.functionCalls.get(index) ?? { arguments: '' };
-  const chunk = typeof delta.arguments === 'string' ? delta.arguments : '';
-  existing.arguments += chunk;
-  fold.functionCalls.set(index, existing);
-}
-
-function emitUniqueToolEvent(
-  tool: { id?: string; name: string; arguments: Record<string, unknown> },
+export function emitUniqueToolEvent(
+  tool: {
+    id?: string;
+    name: string;
+    arguments: Record<string, unknown>;
+    phase?: 'error';
+    failure?: { code: string; message: string; details?: unknown };
+  },
   fold: StreamFold,
 ): TurnEvent[] {
   const key = functionCallKey(tool);
@@ -226,13 +230,53 @@ function emitUniqueToolEvent(
   return [{ type: 'tool', tool }];
 }
 
-function foldFunctionCallDelta(delta: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
-  const id = typeof delta.id === 'string' ? delta.id : undefined;
-  const name = typeof delta.name === 'string' ? delta.name : '';
-  return emitUniqueToolEvent({ id, name, arguments: parseArgumentsObject(delta.arguments) }, fold);
+/** Emit a tool call, or a structured tool failure when arguments cannot be parsed. */
+export function emitToolCallFromRawArguments(
+  tool: { id?: string; name: string },
+  rawArguments: unknown,
+  fold: StreamFold,
+): TurnEvent[] {
+  const parsed = parseArgumentsObject(rawArguments);
+  if (!parsed.ok) {
+    return emitUniqueToolEvent(
+      {
+        id: tool.id,
+        name: tool.name,
+        arguments: {},
+        phase: 'error',
+        failure: {
+          code: 'malformed_arguments',
+          message: parsed.error,
+          details: { raw: parsed.raw },
+        },
+      },
+      fold,
+    );
+  }
+  return emitUniqueToolEvent({ id: tool.id, name: tool.name, arguments: parsed.value }, fold);
 }
 
-function foldDeltaPayload(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+export function foldArgumentsDelta(
+  delta: Record<string, unknown>,
+  index: number,
+  fold: StreamFold,
+): void {
+  const existing = fold.functionCalls.get(index) ?? { arguments: '' };
+  const chunk = typeof delta.arguments === 'string' ? delta.arguments : '';
+  existing.arguments += chunk;
+  fold.functionCalls.set(index, existing);
+}
+
+export function foldFunctionCallDelta(
+  delta: Record<string, unknown>,
+  fold: StreamFold,
+): TurnEvent[] {
+  const id = typeof delta.id === 'string' ? delta.id : undefined;
+  const name = typeof delta.name === 'string' ? delta.name : '';
+  return emitToolCallFromRawArguments({ id, name }, delta.arguments, fold);
+}
+
+export function foldDeltaPayload(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
   const delta = asRecord(payload.delta);
   if (!delta) {
     return [];
@@ -263,19 +307,19 @@ function foldDeltaPayload(payload: Record<string, unknown>, fold: StreamFold): T
   return events;
 }
 
-function readData(part: Record<string, unknown>): string | undefined {
+export function readData(part: Record<string, unknown>): string | undefined {
   const data = part.data;
   if (typeof data === 'string' && data.length > 0) return data;
   return undefined;
 }
 
-function readMime(part: Record<string, unknown>): string | undefined {
+export function readMime(part: Record<string, unknown>): string | undefined {
   const mime = part.mime_type ?? part.mimeType;
   if (typeof mime === 'string' && mime.length > 0) return mime;
   return undefined;
 }
 
-function* yieldMediaChunk(part: Record<string, unknown>): Generator<TurnEvent> {
+export function* yieldMediaChunk(part: Record<string, unknown>): Generator<TurnEvent> {
   const data = readData(part);
   if (!data) return;
   const mime = readMime(part) ?? 'application/octet-stream';
@@ -290,7 +334,7 @@ function* yieldMediaChunk(part: Record<string, unknown>): Generator<TurnEvent> {
   yield { type: 'media', media: { mimeType: mime, data } };
 }
 
-function* scanMediaParts(content: unknown): Generator<TurnEvent> {
+export function* scanMediaParts(content: unknown): Generator<TurnEvent> {
   if (!Array.isArray(content)) return;
   for (const item of content) {
     if (!item || typeof item !== 'object') continue;
@@ -302,21 +346,18 @@ function* scanMediaParts(content: unknown): Generator<TurnEvent> {
   }
 }
 
-function emitPendingFunctionCall(index: number, fold: StreamFold): TurnEvent[] {
+export function emitPendingFunctionCall(index: number, fold: StreamFold): TurnEvent[] {
   const pending = fold.functionCalls.get(index);
   if (!pending) return [];
   fold.functionCalls.delete(index);
-  return emitUniqueToolEvent(
-    {
-      id: pending.id,
-      name: pending.name ?? '',
-      arguments: parseArgumentsObject(pending.arguments || {}),
-    },
+  return emitToolCallFromRawArguments(
+    { id: pending.id, name: pending.name ?? '' },
+    pending.arguments || {},
     fold,
   );
 }
 
-function foldStepStop(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+export function foldStepStop(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
   const index = typeof payload.index === 'number' ? payload.index : 0;
   const fromFunctionCall = emitPendingFunctionCall(index, fold);
   if (fromFunctionCall.length > 0) {
@@ -334,7 +375,10 @@ function foldStepStop(payload: Record<string, unknown>, fold: StreamFold): TurnE
   return [];
 }
 
-function foldInteractionSteps(interaction: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+export function foldInteractionSteps(
+  interaction: Record<string, unknown>,
+  fold: StreamFold,
+): TurnEvent[] {
   const events: TurnEvent[] = [];
   const steps = interaction.steps;
   if (!Array.isArray(steps)) return events;
@@ -346,18 +390,16 @@ function foldInteractionSteps(interaction: Record<string, unknown>, fold: Stream
     if (stepType === 'function_call') {
       const id = typeof step.id === 'string' ? step.id : undefined;
       const name = typeof step.name === 'string' ? step.name : '';
-      const tool = { id, name, arguments: parseArgumentsObject(step.arguments) };
-      const key = functionCallKey(tool);
-      if (!fold.emittedToolKeys.has(key)) {
-        fold.emittedToolKeys.add(key);
-        events.push({ type: 'tool', tool });
-      }
+      events.push(...emitToolCallFromRawArguments({ id, name }, step.arguments, fold));
     }
   }
   return events;
 }
 
-function foldCompleteEvents(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+export function foldCompleteEvents(
+  payload: Record<string, unknown>,
+  fold: StreamFold,
+): TurnEvent[] {
   const events: TurnEvent[] = [];
   const fromComp = eventsFromComplete(payload, fold.text.length > 0);
   for (const ev of fromComp) {
@@ -374,7 +416,7 @@ function foldCompleteEvents(payload: Record<string, unknown>, fold: StreamFold):
   return events;
 }
 
-function foldPayload(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
+export function foldPayload(payload: Record<string, unknown>, fold: StreamFold): TurnEvent[] {
   const events: TurnEvent[] = [];
   for (const ev of yieldGrounding(payload)) events.push(ev);
 
@@ -406,7 +448,10 @@ function foldPayload(payload: Record<string, unknown>, fold: StreamFold): TurnEv
   return events;
 }
 
-function* finalizeStructured(req: ProviderCompleteRequest, fold: StreamFold): Generator<TurnEvent> {
+export function* finalizeStructured(
+  req: ProviderCompleteRequest,
+  fold: StreamFold,
+): Generator<TurnEvent> {
   if (req.structured && fold.text) {
     const structured = tryStructured(fold.text);
     if (structured !== undefined) {
@@ -415,7 +460,7 @@ function* finalizeStructured(req: ProviderCompleteRequest, fold: StreamFold): Ge
   }
 }
 
-function* scanInteractionsMedia(json: Record<string, unknown>): Generator<TurnEvent> {
+export function* scanInteractionsMedia(json: Record<string, unknown>): Generator<TurnEvent> {
   const steps = json.steps;
   if (!Array.isArray(steps)) {
     return;
@@ -427,24 +472,25 @@ function* scanInteractionsMedia(json: Record<string, unknown>): Generator<TurnEv
   }
 }
 
-function isVoiceProfile(req: ProviderCompleteRequest): boolean {
+export function isVoiceProfile(req: ProviderCompleteRequest): boolean {
   return Boolean(req.speech?.voice);
 }
 
-function shouldSynthesizeAudio(req: ProviderCompleteRequest, fold: StreamFold): boolean {
-  return isVoiceProfile(req) && !fold.sawStreamedMedia && Boolean(fold.text);
+export function shouldReportMissingSpeechAudio(
+  req: ProviderCompleteRequest,
+  fold: StreamFold,
+): boolean {
+  // Any speech-role completion without real audio is a failure — including
+  // empty turns (no text and no media). Never invent PCM from text.
+  return isVoiceProfile(req) && !fold.sawStreamedMedia;
 }
 
-function* synthesizeVoiceAudio(fold: StreamFold): Generator<TurnEvent> {
-  const pcm = new TextEncoder().encode(fold.text);
-  const wav = wrapPcmAsWav(pcm, 24000);
-  yield {
-    type: 'media',
-    media: { mimeType: 'audio/wav', data: bytesToBase64(wav) },
-  };
+/** Speech-role turns must receive real audio; never invent PCM from text bytes. */
+export function* missingSpeechAudioError(): Generator<TurnEvent> {
+  yield toErrorEvent(new TheorumError('speech audio was not returned by the model'));
 }
 
-async function* parseInteractionsSse(
+export async function* parseInteractionsSse(
   response: Response,
   req: ProviderCompleteRequest,
 ): AsyncGenerator<TurnEvent> {
@@ -461,17 +507,20 @@ async function* parseInteractionsSse(
     }
     const events = foldPayload(row, fold);
     for (const ev of events) {
+      if (ev.type === 'media') {
+        fold.sawStreamedMedia = true;
+      }
       yield normalizeSpeechMedia(ev, speech);
     }
   }
   yield* flushCompletedCodeSteps(fold.codeSteps, fold.emittedEvidenceKeys);
   yield* finalizeStructured(req, fold);
-  if (shouldSynthesizeAudio(req, fold)) {
-    yield* synthesizeVoiceAudio(fold);
+  if (shouldReportMissingSpeechAudio(req, fold)) {
+    yield* missingSpeechAudioError();
   }
 }
 
-function readApiErrorMessage(record: Record<string, unknown>): string | null {
+export function readApiErrorMessage(record: Record<string, unknown>): string | null {
   const error = record.error;
   if (!error || typeof error !== 'object') return null;
   const errorRecord = error as { message?: unknown; status?: unknown; code?: unknown };
@@ -482,7 +531,7 @@ function readApiErrorMessage(record: Record<string, unknown>): string | null {
   return 'Gemini returned an error.';
 }
 
-async function readNonOkErrorMessage(response: Response): Promise<string> {
+export async function readNonOkErrorMessage(response: Response): Promise<string> {
   try {
     const text = await response.text();
     if (!text.trim()) return `HTTP ${response.status}`;
@@ -501,7 +550,7 @@ async function readNonOkErrorMessage(response: Response): Promise<string> {
   }
 }
 
-async function* fetchInteractionsOnce(
+export async function* fetchInteractionsOnce(
   req: ProviderCompleteRequest,
   transport: GeminiTransport,
 ): AsyncGenerator<TurnEvent> {
@@ -537,12 +586,12 @@ async function* fetchInteractionsOnce(
     yield ev;
   }
   yield* finalizeStructured(req, fold);
-  if (shouldSynthesizeAudio(req, fold)) {
-    yield* synthesizeVoiceAudio(fold);
+  if (shouldReportMissingSpeechAudio(req, fold)) {
+    yield* missingSpeechAudioError();
   }
 }
 
-function withTap(req: ProviderCompleteRequest, transport: GeminiTransport): GeminiTransport {
+export function withTap(req: ProviderCompleteRequest, transport: GeminiTransport): GeminiTransport {
   if (!req.tapUpstream) {
     return transport;
   }
@@ -550,7 +599,7 @@ function withTap(req: ProviderCompleteRequest, transport: GeminiTransport): Gemi
   return { ...transport, fetch: fetchFn };
 }
 
-async function* streamInteractions(
+export async function* streamInteractions(
   req: ProviderCompleteRequest,
   transport: GeminiTransport,
 ): AsyncGenerator<TurnEvent> {
@@ -572,7 +621,7 @@ async function* streamInteractions(
 }
 
 /** Create a `ModelProvider` backed by Google Interactions HTTP / SSE. */
-function createInteractionsProvider(transport: GeminiTransport): ModelProvider {
+export function createInteractionsProvider(transport: GeminiTransport): ModelProvider {
   return {
     async *complete(req: ProviderCompleteRequest): AsyncGenerator<TurnEvent> {
       try {
@@ -590,45 +639,3 @@ function createInteractionsProvider(transport: GeminiTransport): ModelProvider {
     },
   };
 }
-
-markModuleLoad('google-interactions-adapter');
-
-exposeForTests('google-interactions', {
-  base64ToBytes,
-  bytesToBase64,
-  isRawPcmMime,
-  normalizeSpeechMedia,
-  newStreamFold,
-  eventType,
-  isDeltaEvent,
-  isCompleteEvent,
-  yieldGrounding,
-  yieldTokens,
-  functionCallKey,
-  yieldEvidenceStep,
-  recordCodeStep,
-  flushCompletedCodeSteps,
-  foldArgumentsDelta,
-  foldFunctionCallDelta,
-  foldStepStart,
-  foldDeltaPayload,
-  foldPayload,
-  readData,
-  readMime,
-  yieldMediaChunk,
-  scanMediaParts,
-  finalizeStructured,
-  scanInteractionsMedia,
-  isVoiceProfile,
-  shouldSynthesizeAudio,
-  synthesizeVoiceAudio,
-  parseInteractionsSse,
-  readApiErrorMessage,
-  readNonOkErrorMessage,
-  withTap,
-  fetchInteractionsOnce,
-  streamInteractions,
-  createInteractionsProvider,
-});
-
-export { createInteractionsProvider };

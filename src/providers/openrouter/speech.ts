@@ -16,7 +16,6 @@ import type {
   SpeechAudioFormat,
   TurnEvent,
 } from '../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
 import { bytesToBase64, wrapPcmAsWav } from '../shared/pcm.ts';
 import type { OpenAiGatewayConfig } from '../types.ts';
 import { openAiGatewayHeaders } from './openai/compat.ts';
@@ -29,7 +28,7 @@ export type SpeechProviderConfig = OpenAiGatewayConfig & {
   voice?: string;
 };
 
-function extractInputText(input: InteractionPart[]): string {
+export function extractInputText(input: InteractionPart[]): string {
   return input
     .filter((p) => p.type === 'text')
     .map((p) => (p.type === 'text' ? p.text : ''))
@@ -37,7 +36,7 @@ function extractInputText(input: InteractionPart[]): string {
     .trim();
 }
 
-function buildHeaders(apiKey: string, config: SpeechProviderConfig): Record<string, string> {
+export function buildHeaders(apiKey: string, config: SpeechProviderConfig): Record<string, string> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
@@ -47,7 +46,7 @@ function buildHeaders(apiKey: string, config: SpeechProviderConfig): Record<stri
   return headers;
 }
 
-function buildPayload(
+export function buildPayload(
   req: ProviderCompleteRequest,
   text: string,
   speech: ProfileSpeechSpec | undefined,
@@ -66,7 +65,7 @@ function buildPayload(
   return payload;
 }
 
-async function requestSpeech(
+export async function requestSpeech(
   apiKey: string,
   text: string,
   req: ProviderCompleteRequest,
@@ -83,7 +82,7 @@ async function requestSpeech(
   });
 }
 
-function* yieldSpeechSuccess(
+export function* yieldSpeechSuccess(
   rawBytes: Uint8Array,
   text: string,
   format: SpeechAudioFormat,
@@ -111,7 +110,7 @@ function* yieldSpeechSuccess(
   yield { type: 'done' };
 }
 
-async function* streamSpeech(
+export async function* streamSpeech(
   req: ProviderCompleteRequest,
   config: SpeechProviderConfig = {},
 ): AsyncGenerator<TurnEvent> {
@@ -147,21 +146,9 @@ async function* streamSpeech(
 }
 
 /** Internal ModelProvider for openAi speech roles. */
-function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider {
+export function createSpeechProvider(config: SpeechProviderConfig = {}): ModelProvider {
   return {
     complete: (req: ProviderCompleteRequest) => streamSpeech(req, config),
   };
 }
 
-export { createSpeechProvider, streamSpeech };
-
-markModuleLoad('openrouter-speech');
-
-exposeForTests('speech', {
-  bytesToBase64,
-  extractInputText,
-  buildHeaders,
-  buildPayload,
-  requestSpeech,
-  yieldSpeechSuccess,
-});

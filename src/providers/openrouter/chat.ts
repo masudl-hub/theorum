@@ -9,14 +9,7 @@
  */
 
 import { createOpenRouter, type OpenRouterChatSettings } from '@openrouter/ai-sdk-provider';
-import {
-  jsonSchema,
-  type LanguageModelUsage,
-  streamText,
-  type TextStreamPart,
-  type ToolSet,
-  tool,
-} from 'ai';
+import { jsonSchema, streamText, type TextStreamPart, type ToolSet, tool } from 'ai';
 import { isAbortError, toErrorEvent } from '../../guardrails/error.ts';
 import { tryStructured } from '../../kernel/engine/delta.ts';
 import { turnStopFromOpenAiFinishReason } from '../../kernel/stop.ts';
@@ -27,13 +20,12 @@ import type {
   TurnTokens,
   WireFunctionTool,
 } from '../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../expose-for-tests.ts';
 import type { OpenAiGatewayConfig } from '../types.ts';
 import { resolveOpenRouterPlugins } from './openai/chat-payload.ts';
 import { openAiGatewayHeaders, resolveResponseFormat } from './openai/compat.ts';
 import { buildAiSdkMessages } from './openai/sdk-messages.ts';
 
-interface StreamAccumulator {
+export interface StreamAccumulator {
   text: string;
   evidenceSeen: boolean;
   emittedTokens: boolean;
@@ -42,12 +34,12 @@ interface StreamAccumulator {
   nativeFinishReason?: string | null;
 }
 
-interface OpenRouterStreamContext {
+export interface OpenRouterStreamContext {
   openrouter: ReturnType<typeof createOpenRouter>;
   modelName: string;
 }
 
-type JsonValue =
+export type JsonValue =
   | string
   | number
   | boolean
@@ -56,16 +48,16 @@ type JsonValue =
   | {
       [key: string]: JsonValue;
     };
-type ProviderOptions = Record<string, { [key: string]: JsonValue }>;
+export type ProviderOptions = Record<string, { [key: string]: JsonValue }>;
 
-function trimApiKey(explicitKey?: string): string | undefined {
+export function trimApiKey(explicitKey?: string): string | undefined {
   if (explicitKey?.trim()) {
     return explicitKey.trim();
   }
   return undefined;
 }
 
-function createAccumulator(): StreamAccumulator {
+export function createAccumulator(): StreamAccumulator {
   return {
     text: '',
     evidenceSeen: false,
@@ -74,30 +66,34 @@ function createAccumulator(): StreamAccumulator {
   };
 }
 
-function sourceEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'source' }>): TurnEvent {
+export function sourceEvent(part: {
+  sourceType?: string;
+  title?: string | null;
+  url?: string;
+}): TurnEvent {
   if (part.sourceType !== 'url') {
     return {
       type: 'evidence',
       evidence: { provider: 'openrouter', raw: part as Record<string, unknown> },
     };
   }
-  const title = part.title ?? part.url;
+  const title = part.title ?? part.url ?? '';
   return {
     type: 'evidence',
     evidence: {
       provider: 'openrouter',
       raw: part as Record<string, unknown>,
-      citations: [part.url],
-      sources: [{ title, uri: part.url, type: 'web' as const }],
+      citations: part.url ? [part.url] : [],
+      sources: part.url ? [{ title, uri: part.url, type: 'web' as const }] : [],
     },
   };
 }
 
-function schemaForTool(decl: WireFunctionTool): Record<string, unknown> {
+export function schemaForTool(decl: WireFunctionTool): Record<string, unknown> {
   return decl.parameters ?? { type: 'object', properties: {}, additionalProperties: true };
 }
 
-function buildTools(wireTools?: WireFunctionTool[]): ToolSet | undefined {
+export function buildTools(wireTools?: WireFunctionTool[]): ToolSet | undefined {
   if (!wireTools || wireTools.length === 0) {
     return undefined;
   }
@@ -111,7 +107,9 @@ function buildTools(wireTools?: WireFunctionTool[]): ToolSet | undefined {
   return tools;
 }
 
-function openRouterSettings(req: ProviderCompleteRequest): OpenRouterChatSettings | undefined {
+export function openRouterSettings(
+  req: ProviderCompleteRequest,
+): OpenRouterChatSettings | undefined {
   const { plugins, webSearch } = resolveOpenRouterPlugins(req.builtins);
   if (plugins.length === 0 && !webSearch) {
     return undefined;
@@ -122,7 +120,11 @@ function openRouterSettings(req: ProviderCompleteRequest): OpenRouterChatSetting
   return settings;
 }
 
-function tokensFromUsage(usage: LanguageModelUsage): TurnTokens | undefined {
+export function tokensFromUsage(usage: {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+}): TurnTokens | undefined {
   const input = usage.inputTokens ?? 0;
   const output = usage.outputTokens ?? 0;
   const total = usage.totalTokens ?? input + output;
@@ -136,14 +138,14 @@ function tokensFromUsage(usage: LanguageModelUsage): TurnTokens | undefined {
   };
 }
 
-function rawRecord(value: unknown): Record<string, unknown> | undefined {
+export function rawRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
   return undefined;
 }
 
-function stringArray(value: unknown): string[] | undefined {
+export function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
@@ -151,14 +153,14 @@ function stringArray(value: unknown): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-function metadataRecord(
+export function metadataRecord(
   raw: Record<string, unknown>,
   key: string,
 ): Record<string, unknown> | undefined {
   return rawRecord(raw[key]);
 }
 
-function citationCandidates(raw: Record<string, unknown>): unknown[] {
+export function citationCandidates(raw: Record<string, unknown>): unknown[] {
   const openrouter = metadataRecord(raw, 'openrouter') ?? {};
   return [
     raw.citations,
@@ -170,7 +172,7 @@ function citationCandidates(raw: Record<string, unknown>): unknown[] {
   ];
 }
 
-function nestedCitations(raw: Record<string, unknown>): string[] | undefined {
+export function nestedCitations(raw: Record<string, unknown>): string[] | undefined {
   for (const candidate of citationCandidates(raw)) {
     const citations = stringArray(candidate);
     if (citations) {
@@ -180,7 +182,7 @@ function nestedCitations(raw: Record<string, unknown>): string[] | undefined {
   return undefined;
 }
 
-function metadataAnnotations(raw: Record<string, unknown>): unknown[] | undefined {
+export function metadataAnnotations(raw: Record<string, unknown>): unknown[] | undefined {
   const openrouter = metadataRecord(raw, 'openrouter');
   if (Array.isArray(raw.annotations)) {
     return raw.annotations;
@@ -191,7 +193,10 @@ function metadataAnnotations(raw: Record<string, unknown>): unknown[] | undefine
   return undefined;
 }
 
-function evidenceFromMetadata(metadata: unknown, acc: StreamAccumulator): TurnEvent | undefined {
+export function evidenceFromMetadata(
+  metadata: unknown,
+  acc: StreamAccumulator,
+): TurnEvent | undefined {
   const raw = rawRecord(metadata);
   if (!raw || acc.evidenceSeen) {
     return undefined;
@@ -208,7 +213,7 @@ function evidenceFromMetadata(metadata: unknown, acc: StreamAccumulator): TurnEv
   };
 }
 
-function toolArguments(input: unknown): Record<string, unknown> | undefined {
+export function toolArguments(input: unknown): Record<string, unknown> | undefined {
   if (input && typeof input === 'object' && !Array.isArray(input)) {
     return input as Record<string, unknown>;
   }
@@ -218,11 +223,11 @@ function toolArguments(input: unknown): Record<string, unknown> | undefined {
   return { value: input };
 }
 
-function toolResultData(output: unknown): Record<string, unknown> | undefined {
+export function toolResultData(output: unknown): Record<string, unknown> | undefined {
   return rawRecord(output);
 }
 
-function rawThoughtEvent(raw: Record<string, unknown>): TurnEvent | undefined {
+export function rawThoughtEvent(raw: Record<string, unknown>): TurnEvent | undefined {
   const choices = raw.choices;
   if (!Array.isArray(choices)) {
     return undefined;
@@ -236,7 +241,7 @@ function rawThoughtEvent(raw: Record<string, unknown>): TurnEvent | undefined {
   return undefined;
 }
 
-function rawChoiceMessageEvidence(
+export function rawChoiceMessageEvidence(
   raw: Record<string, unknown>,
   acc: StreamAccumulator,
 ): TurnEvent | undefined {
@@ -257,7 +262,7 @@ function rawChoiceMessageEvidence(
   return undefined;
 }
 
-function rawEvents(raw: unknown, acc: StreamAccumulator): TurnEvent[] {
+export function rawEvents(raw: unknown, acc: StreamAccumulator): TurnEvent[] {
   const record = rawRecord(raw);
   if (!record) {
     return [];
@@ -289,7 +294,11 @@ function rawEvents(raw: unknown, acc: StreamAccumulator): TurnEvent[] {
   return events;
 }
 
-function toolCallEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'tool-call' }>): TurnEvent {
+export function toolCallEvent(part: {
+  toolName: string;
+  toolCallId: string;
+  input?: unknown;
+}): TurnEvent {
   return {
     type: 'tool',
     tool: {
@@ -300,9 +309,12 @@ function toolCallEvent(part: Extract<TextStreamPart<ToolSet>, { type: 'tool-call
   };
 }
 
-function toolResultEvent(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'tool-result' }>,
-): TurnEvent {
+export function toolResultEvent(part: {
+  toolName: string;
+  toolCallId: string;
+  input?: unknown;
+  output?: unknown;
+}): TurnEvent {
   const output = typeof part.output === 'string' ? part.output : toolResultData(part.output);
   return {
     type: 'tool',
@@ -316,14 +328,18 @@ function toolResultEvent(
   };
 }
 
-function tokenEvent(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'finish' }>,
-): TurnEvent | undefined {
+export function tokenEvent(part: {
+  totalUsage: {
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
+  };
+}): TurnEvent | undefined {
   const tokens = tokensFromUsage(part.totalUsage);
   return tokens ? { type: 'tokens', tokens } : undefined;
 }
 
-function providerMetadataEvent(
+export function providerMetadataEvent(
   part: TextStreamPart<ToolSet>,
   acc: StreamAccumulator,
 ): TurnEvent | undefined {
@@ -333,7 +349,7 @@ function providerMetadataEvent(
   return evidenceFromMetadata(part.providerMetadata, acc);
 }
 
-function eventFromPart(part: TextStreamPart<ToolSet>, acc: StreamAccumulator): TurnEvent[] {
+export function eventFromPart(part: TextStreamPart<ToolSet>, acc: StreamAccumulator): TurnEvent[] {
   const mapped = primaryEventFromPart(part, acc);
   if (mapped) {
     return [mapped];
@@ -342,7 +358,7 @@ function eventFromPart(part: TextStreamPart<ToolSet>, acc: StreamAccumulator): T
   return evidence ? [evidence] : [];
 }
 
-function primaryEventFromPart(
+export function primaryEventFromPart(
   part: TextStreamPart<ToolSet>,
   acc: StreamAccumulator,
 ): TurnEvent | undefined {
@@ -371,24 +387,37 @@ function primaryEventFromPart(
   }
 }
 
-function finishEvent(
-  part: Extract<TextStreamPart<ToolSet>, { type: 'finish' }>,
+export function finishEvent(
+  part: {
+    finishReason?: string | null;
+    totalUsage?: {
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+      totalTokens?: number | null;
+    };
+  },
   acc: StreamAccumulator,
 ): TurnEvent | undefined {
-  if ('finishReason' in part && part.finishReason != null) {
+  if (part.finishReason != null) {
     acc.finishReason = String(part.finishReason);
   }
   if (acc.emittedTokens) {
     return undefined;
   }
-  const event = tokenEvent(part);
+  if (!part.totalUsage) {
+    return undefined;
+  }
+  const event = tokenEvent({ totalUsage: part.totalUsage });
   if (event) {
     acc.emittedTokens = true;
   }
   return event;
 }
 
-function* finalEvents(req: ProviderCompleteRequest, acc: StreamAccumulator): Generator<TurnEvent> {
+export function* finalEvents(
+  req: ProviderCompleteRequest,
+  acc: StreamAccumulator,
+): Generator<TurnEvent> {
   if (acc.errored) {
     return;
   }
@@ -404,7 +433,7 @@ function* finalEvents(req: ProviderCompleteRequest, acc: StreamAccumulator): Gen
   };
 }
 
-function createStreamContext(
+export function createStreamContext(
   req: ProviderCompleteRequest,
   config: OpenAiGatewayConfig,
   apiKey: string,
@@ -422,7 +451,7 @@ function createStreamContext(
   };
 }
 
-function streamTextOptions(
+export function streamTextOptions(
   req: ProviderCompleteRequest,
   context: OpenRouterStreamContext,
 ): Parameters<typeof streamText>[0] {
@@ -441,7 +470,7 @@ function streamTextOptions(
   };
 }
 
-async function* yieldAiSdkStream(
+export async function* yieldAiSdkStream(
   req: ProviderCompleteRequest,
   acc: StreamAccumulator,
   context: OpenRouterStreamContext,
@@ -461,11 +490,11 @@ async function* yieldAiSdkStream(
   }
 }
 
-function missingOpenRouterKey(): TurnEvent {
+export function missingOpenRouterKey(): TurnEvent {
   return toErrorEvent('missing OpenRouter API key');
 }
 
-async function* streamOpenRouter(
+export async function* streamOpenRouter(
   req: ProviderCompleteRequest,
   config: OpenAiGatewayConfig,
 ): AsyncGenerator<TurnEvent> {
@@ -488,7 +517,7 @@ async function* streamOpenRouter(
   }
 }
 
-function providerOptionsFor(req: ProviderCompleteRequest): ProviderOptions | undefined {
+export function providerOptionsFor(req: ProviderCompleteRequest): ProviderOptions | undefined {
   const openrouter: Record<string, JsonValue> = {};
   if (req.thinking !== 'none') {
     openrouter.reasoning = { effort: req.thinking };
@@ -504,46 +533,10 @@ function providerOptionsFor(req: ProviderCompleteRequest): ProviderOptions | und
 }
 
 /** Create a `ModelProvider` backed by OpenRouter through AI SDK Core. */
-function createOpenRouterProvider(config: OpenAiGatewayConfig = {}): ModelProvider {
+export function createOpenRouterProvider(config: OpenAiGatewayConfig = {}): ModelProvider {
   return {
     complete: (req: ProviderCompleteRequest) => streamOpenRouter(req, config),
   };
 }
 
 export type { OpenAiGatewayConfig };
-export { createOpenRouterProvider };
-
-markModuleLoad('openrouter-chat');
-
-exposeForTests('openrouter', {
-  trimApiKey,
-  createAccumulator,
-  schemaForTool,
-  buildTools,
-  openRouterSettings,
-  tokensFromUsage,
-  rawRecord,
-  stringArray,
-  metadataRecord,
-  citationCandidates,
-  nestedCitations,
-  metadataAnnotations,
-  evidenceFromMetadata,
-  toolArguments,
-  toolResultData,
-  rawThoughtEvent,
-  rawChoiceMessageEvidence,
-  rawEvents,
-  toolCallEvent,
-  toolResultEvent,
-  tokenEvent,
-  providerMetadataEvent,
-  eventFromPart,
-  primaryEventFromPart,
-  finishEvent,
-  sourceEvent,
-  finalEvents,
-  providerOptionsFor,
-  missingOpenRouterKey,
-  streamTextOptions,
-});

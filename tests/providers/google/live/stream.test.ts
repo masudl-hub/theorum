@@ -1,10 +1,13 @@
 import { assertEquals, assertExists } from '@std/assert';
-import type { ProviderCompleteRequest } from '../../../../src/kernel/types.ts';
 import type { GeminiTransport } from '../../../../src/providers/google/keys.ts';
-import { createGoogleLiveProvider } from '../../../../src/providers/google/live/stream.ts';
-import { testInternals } from '../../../fixtures/testInternals.js';
-
-const _internals = testInternals('google-live-stream');
+import {
+  createGoogleLiveProvider,
+  createLiveQueue,
+  readGeminiLiveErrorMessage,
+  readMessageData,
+  sendInitialPayloads,
+} from '../../../../src/providers/google/live/stream.ts';
+import { stubCompleteRequest } from '../../../fixtures/provider-request.ts';
 
 Deno.test('createGoogleLiveProvider returns ModelProvider with complete function', () => {
   const transport: GeminiTransport = {
@@ -15,39 +18,39 @@ Deno.test('createGoogleLiveProvider returns ModelProvider with complete function
   assertEquals(typeof provider.complete, 'function');
 });
 
-Deno.test('_internals.readMessageData handles strings, ArrayBuffers, and Blobs', async () => {
-  const str = await _internals.readMessageData('hello');
+Deno.test('readMessageData handles strings, ArrayBuffers, and Blobs', async () => {
+  const str = await readMessageData('hello');
   assertEquals(str, 'hello');
 
   const buf = new TextEncoder().encode('buffer text').buffer;
-  const fromBuf = await _internals.readMessageData(buf);
+  const fromBuf = await readMessageData(buf);
   assertEquals(fromBuf, 'buffer text');
 
   const blob = new Blob(['blob text']);
-  const fromBlob = await _internals.readMessageData(blob);
+  const fromBlob = await readMessageData(blob);
   assertEquals(fromBlob, 'blob text');
 
-  const fromNumber = await _internals.readMessageData(12345);
+  const fromNumber = await readMessageData(12345);
   assertEquals(fromNumber, '12345');
 });
 
-Deno.test('_internals.readGeminiLiveErrorMessage extracts error details', () => {
-  assertEquals(_internals.readGeminiLiveErrorMessage({}), null);
-  assertEquals(_internals.readGeminiLiveErrorMessage({ error: null }), null);
+Deno.test('readGeminiLiveErrorMessage extracts error details', () => {
+  assertEquals(readGeminiLiveErrorMessage({}), null);
+  assertEquals(readGeminiLiveErrorMessage({ error: null }), null);
   assertEquals(
-    _internals.readGeminiLiveErrorMessage({
+    readGeminiLiveErrorMessage({
       error: { message: 'Invalid payload', status: 'INVALID_ARGUMENT' },
     }),
     'INVALID_ARGUMENT: Invalid payload',
   );
   assertEquals(
-    _internals.readGeminiLiveErrorMessage({
+    readGeminiLiveErrorMessage({
       error: { message: 'Quota exceeded' },
     }),
     'Quota exceeded',
   );
   assertEquals(
-    _internals.readGeminiLiveErrorMessage({
+    readGeminiLiveErrorMessage({
       error: { status: 'UNKNOWN' },
     }),
     'Gemini returned an error during live session.',
@@ -59,11 +62,11 @@ Deno.test('streamGeminiLive yields error when API key is missing', async () => {
     vault: { freeA: undefined, freeB: undefined, freeC: undefined, paid: undefined },
   };
   const provider = createGoogleLiveProvider(transport);
-  const req = {
+  const req = stubCompleteRequest({
     model: 'gemini-3.1-flash-live-preview',
     apiId: 'gemini-3.1-flash-live-preview',
     geminiBucket: 'freeA',
-  } as unknown as ProviderCompleteRequest;
+  });
 
   const events = [];
   for await (const ev of provider.complete(req)) {
@@ -81,12 +84,12 @@ Deno.test('streamGeminiLive handles pre-aborted signal gracefully', async () => 
   const controller = new AbortController();
   controller.abort();
 
-  const req = {
+  const req = stubCompleteRequest({
     model: 'gemini-3.1-flash-live-preview',
     apiId: 'gemini-3.1-flash-live-preview',
     geminiBucket: 'freeA',
     signal: controller.signal,
-  } as unknown as ProviderCompleteRequest;
+  });
 
   const events = [];
   try {
@@ -98,25 +101,25 @@ Deno.test('streamGeminiLive handles pre-aborted signal gracefully', async () => 
   }
 });
 
-Deno.test('_internals.sendInitialPayloads sends history and input payloads over websocket', () => {
+Deno.test('sendInitialPayloads sends history and input payloads over websocket', () => {
   const sent: string[] = [];
   const mockWs = {
     send: (payload: string) => sent.push(payload),
-  } as unknown as WebSocket;
+  };
 
-  const req = {
+  const req = stubCompleteRequest({
     history: [{ role: 'user', content: 'hello' }],
     input: [{ type: 'text', text: 'live input' }],
-  } as unknown as ProviderCompleteRequest;
+  });
 
-  _internals.sendInitialPayloads(mockWs, req);
+  sendInitialPayloads(mockWs, req);
   assertEquals(sent.length, 2);
   assertEquals(sent[0]?.includes('clientContent'), true);
   assertEquals(sent[1]?.includes('realtimeInput'), true);
 });
 
-Deno.test('_internals.createLiveQueue queues items and resolves async next', async () => {
-  const queue = _internals.createLiveQueue();
+Deno.test('createLiveQueue queues items and resolves async next', async () => {
+  const queue = createLiveQueue();
   assertEquals(queue.isClosed(), false);
 
   queue.push({ type: 'event', events: [{ type: 'text', text: 'hi' }] });

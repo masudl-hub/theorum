@@ -8,6 +8,7 @@
  * @module
  */
 
+import { bindCanary } from '../../../guardrails/canary.ts';
 import { throwIfAborted } from '../../../guardrails/error.ts';
 import { sanitizeTurnRequest } from '../../../guardrails/sanitize.ts';
 import { noopSink, type TraceSink, writeTrace } from '../../../observability/trace.ts';
@@ -26,7 +27,6 @@ import type {
   TurnHistoryMessage,
   TurnRequest,
 } from '../../types.ts';
-import { bindCanary } from '../boundary.ts';
 import { resolveCompactionTokens, shouldCompact, splitForCompaction } from '../compaction.ts';
 import { runAttemptsWithValidation } from './gates.ts';
 import type { StepExecutionState } from './state.ts';

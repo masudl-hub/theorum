@@ -7,7 +7,6 @@
 import type { z } from 'zod';
 import { throwIfAborted } from '../../guardrails/error.ts';
 import { sanitizeText } from '../../guardrails/sanitize.ts';
-import { exposeForTests } from '../../providers/expose-for-tests.ts';
 import type { Profile, TurnEvent } from '../types.ts';
 import { getTool } from './registry.ts';
 import { promoteLoadedTools } from './resolve.ts';
@@ -24,25 +23,25 @@ import type {
   TurnToolSnapshot,
 } from './types.ts';
 
-function isStreamHandler(handler: unknown): boolean {
+export function isStreamHandler(handler: unknown): boolean {
   return (
     typeof handler === 'function' &&
     Object.prototype.toString.call(handler) === '[object AsyncGeneratorFunction]'
   );
 }
 
-function isResumeContinuation(resume?: InvokeToolResume): boolean {
+export function isResumeContinuation(resume?: InvokeToolResume): boolean {
   return resume?.value !== undefined || resume?.granted === true;
 }
 
-function isToolPause(value: ToolFailure | ToolPause): value is ToolPause {
+export function isToolPause(value: ToolFailure | ToolPause): value is ToolPause {
   return (
     'kind' in value &&
     (value.kind === 'interactive' || value.kind === 'confirmation' || value.kind === 'permission')
   );
 }
 
-function* yieldHandlerSideEvent(
+export function* yieldHandlerSideEvent(
   base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
   event: Exclude<ToolStreamEvent, { kind: 'complete' }>,
 ): Generator<TurnEvent> {
@@ -86,14 +85,14 @@ async function* runHandler<TIn, TOut>(
   return output;
 }
 
-function permissionGranted(toolName: string, sessionPermissions?: string[]): boolean {
+export function permissionGranted(toolName: string, sessionPermissions?: string[]): boolean {
   if (!sessionPermissions) {
     return false;
   }
   return sessionPermissions.includes('*') || sessionPermissions.includes(toolName);
 }
 
-function checkPermission(
+export function checkPermission(
   toolName: string,
   permission: ToolPermission,
   sessionPermissions?: string[],
@@ -124,7 +123,7 @@ function checkPermission(
   };
 }
 
-function toolEvent(
+export function toolEvent(
   base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
   patch: Partial<ToolCallEvent>,
 ): TurnEvent {
@@ -134,14 +133,14 @@ function toolEvent(
   };
 }
 
-function failureEvent(
+export function failureEvent(
   base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
   failure: ToolFailure,
 ): TurnEvent {
   return toolEvent(base, { phase: 'error', failure });
 }
 
-function projectForModel(tool: FunctionToolDef, output: unknown): ModelToolResult {
+export function projectForModel(tool: FunctionToolDef, output: unknown): ModelToolResult {
   if (tool.exposeToModel === false) {
     return { finding: 'Completed.' };
   }
@@ -156,7 +155,7 @@ function projectForModel(tool: FunctionToolDef, output: unknown): ModelToolResul
 }
 
 /** Format model-facing tool output for provider history continuation. */
-function formatToolResult(result: ModelToolResult): string {
+export function formatToolResult(result: ModelToolResult): string {
   if (result.data !== undefined) {
     return sanitizeText(`${result.finding}\n${JSON.stringify(result.data)}`);
   }
@@ -164,7 +163,7 @@ function formatToolResult(result: ModelToolResult): string {
 }
 
 /** Format a tool failure for provider history — structured so the model (or host) sees the code. */
-function formatToolFailureForModel(failure: ToolFailure): ModelToolResult {
+export function formatToolFailureForModel(failure: ToolFailure): ModelToolResult {
   return {
     finding: `Tool error (${failure.code}): ${failure.message}`,
     data: {
@@ -176,7 +175,7 @@ function formatToolFailureForModel(failure: ToolFailure): ModelToolResult {
   };
 }
 
-function* startToolExecution<T>(
+export function* startToolExecution<T>(
   tool: { input: z.ZodType<T> },
   rawInput: unknown,
   ctx: ToolContext,
@@ -196,7 +195,7 @@ function* startToolExecution<T>(
   return { ok: true, data: parsed.data };
 }
 
-async function* executeFunction(
+export async function* executeFunction(
   tool: FunctionToolDef,
   rawInput: unknown,
   ctx: ToolContext,
@@ -332,7 +331,7 @@ async function* executeFunction(
   }
 }
 
-function notLoadedMessage(tool: FunctionToolDef): string {
+export function notLoadedMessage(tool: FunctionToolDef): string {
   if (tool.loadTier === 'T1') {
     return `Tool '${tool.name}' is not wired — profile.tools.t1Policy must select it`;
   }
@@ -342,7 +341,7 @@ function notLoadedMessage(tool: FunctionToolDef): string {
   return `Tool '${tool.name}' is not visible this turn`;
 }
 
-function extractLoadedIds(output: unknown): string[] | undefined {
+export function extractLoadedIds(output: unknown): string[] | undefined {
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
     return undefined;
   }
@@ -354,7 +353,7 @@ function extractLoadedIds(output: unknown): string[] | undefined {
 }
 
 /** Strip prototype-pollution keys from provider/host tool args before validation. */
-function plainToolInput(input: unknown): unknown {
+export function plainToolInput(input: unknown): unknown {
   if (input === null || typeof input !== 'object') {
     return input;
   }
@@ -371,7 +370,7 @@ function plainToolInput(input: unknown): unknown {
   return out;
 }
 
-async function* executeBuiltin(
+export async function* executeBuiltin(
   tool: { name: string },
   ctx: ToolContext,
   base: Pick<ToolCallEvent, 'name' | 'callId' | 'arguments'>,
@@ -393,7 +392,7 @@ async function* executeBuiltin(
   return undefined;
 }
 
-async function* executeRegisteredTool(args: {
+export async function* executeRegisteredTool(args: {
   profile: Profile;
   name: string;
   input: unknown;
@@ -459,23 +458,6 @@ async function* executeRegisteredTool(args: {
   return yield* executeFunction(tool, safeInput, fullCtx, base, snapshot);
 }
 
-function newCallId(name: string): string {
+export function newCallId(name: string): string {
   return `call_${name}_${Date.now()}`;
 }
-
-exposeForTests('kernel-tools-execute', {
-  isStreamHandler,
-  isResumeContinuation,
-  isToolPause,
-  yieldHandlerSideEvent,
-  permissionGranted,
-  checkPermission,
-  projectForModel,
-  formatToolFailureForModel,
-  formatToolResult,
-  notLoadedMessage,
-  extractLoadedIds,
-  plainToolInput,
-});
-
-export { executeRegisteredTool, formatToolFailureForModel, formatToolResult, newCallId };

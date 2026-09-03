@@ -4,9 +4,9 @@
  * @module
  */
 
+import { wrapUserData } from '../../guardrails/canary.ts';
 import { sanitizeText } from '../../guardrails/sanitize.ts';
 import type { Profile } from '../types.ts';
-import { wrapUserData } from './boundary.ts';
 
 /** Sanitize profile-controlled inbound text and wrap with user_data fencing. */
 function prepareLiveInboundText(profile: Profile, text: string): string {

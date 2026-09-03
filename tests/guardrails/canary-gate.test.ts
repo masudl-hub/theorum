@@ -94,3 +94,19 @@ Deno.test('filterCanaryGatedEvents handles thought-type streaming event', () => 
   assertEquals(result.leaked, false);
   assertEquals(session.lastStreamType, 'thought');
 });
+
+Deno.test('filterCanaryGatedEvents detects canary at every chunk partition boundary', () => {
+  const canary = mintCanary();
+  for (let splitIdx = 1; splitIdx < canary.length; splitIdx++) {
+    const session = createCanaryGateSession(canary);
+    const first = filterCanaryGatedEvents(session, [
+      { type: 'text', text: canary.slice(0, splitIdx) },
+    ]);
+    const second = filterCanaryGatedEvents(session, [
+      { type: 'text', text: canary.slice(splitIdx) },
+    ]);
+    if (!(first.leaked || second.leaked)) {
+      throw new Error(`canary leak missed at split index ${splitIdx}`);
+    }
+  }
+});

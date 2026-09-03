@@ -6,8 +6,8 @@
  * @module
  */
 
+import { wrapUserData } from '../../guardrails/canary.ts';
 import { TheorumError } from '../../guardrails/error.ts';
-import { wrapUserData } from '../engine/boundary.ts';
 import { synthesizeRepairPrompt } from '../engine/repair.ts';
 import type {
   ImageResponseFormat,
@@ -21,43 +21,6 @@ import type {
 import { assertAttachmentLimits, requireMediaLimits } from './attachments.ts';
 import { mediaKindForMime, mimeAllowed, mimeEssence } from './catalog.ts';
 import { getStructured } from './schemas.ts';
-
-function listedValue(allowed: string[] | undefined, value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-  if (!allowed || allowed.length === 0) {
-    return value;
-  }
-  if (allowed.includes(value)) {
-    return value;
-  }
-  return undefined;
-}
-
-function resolveSlotOrPin(
-  profileId: string,
-  label: string,
-  slotValue: string | undefined,
-  pin: string | undefined,
-  allow: string[] | undefined,
-): string | undefined {
-  if (slotValue !== undefined) {
-    const fromSlot = listedValue(allow, slotValue);
-    if (!fromSlot) {
-      throw new TheorumError(`Unknown image ${label} for ${profileId}`);
-    }
-    return fromSlot;
-  }
-  if (pin === undefined) {
-    return undefined;
-  }
-  const fromPin = listedValue(allow, pin);
-  if (!fromPin) {
-    throw new TheorumError(`Unknown image ${label} for ${profileId}`);
-  }
-  return fromPin;
-}
 
 type PrimaryOutputMode = 'structured' | 'image' | 'speech';
 
@@ -126,37 +89,16 @@ function assertSpeechRole(profile: Profile): void {
   }
 }
 
-function resolveImageFormat(
-  profile: Profile,
-  _model: ModelId,
-  slots?: Record<string, string>,
-): ImageResponseFormat | null {
+function resolveImageFormat(profile: Profile): ImageResponseFormat | null {
   if (!profile.outputs.image) {
     return null;
   }
   const pins = assertImageRole(profile);
-  const aspectRatio = resolveSlotOrPin(
-    profile.id,
-    'aspect',
-    slots?.aspectRatio,
-    pins.aspectRatio,
-    profile.inputs.slots?.aspectRatio,
-  );
-  const size = resolveSlotOrPin(
-    profile.id,
-    'size',
-    slots?.size,
-    pins.size,
-    profile.inputs.slots?.size,
-  );
-  if (!(aspectRatio && size)) {
-    throw new TheorumError(`Unknown image aspect or size for ${profile.id}`);
-  }
   return {
     type: 'image',
     mimeType: pins.mimeType ?? 'image/jpeg',
-    aspectRatio,
-    size,
+    aspectRatio: pins.aspectRatio,
+    size: pins.size,
     includeText: pins.includeText === true,
   };
 }

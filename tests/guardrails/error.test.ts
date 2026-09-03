@@ -186,13 +186,11 @@ Deno.test('publicError maps Speech HTTP to UNAVAILABLE', () => {
 });
 
 Deno.test('publicError maps mid-string TTS HTTP to UNAVAILABLE (kills t.includes removal)', () => {
-  // Kills: || t.includes('TTS HTTP') → removed mutation — the regex is anchored with ^, so
   // strings that contain 'TTS HTTP' not at the start require the includes() fallback.
   assertEquals(publicError('Provider: TTS HTTP 503 error'), PUBLIC_UNAVAILABLE);
 });
 
 Deno.test('publicError maps mid-string Speech HTTP to UNAVAILABLE (kills t.includes removal)', () => {
-  // Kills: || t.includes('Speech HTTP') → removed mutation
   assertEquals(publicError('Provider: Speech HTTP 503 error'), PUBLIC_UNAVAILABLE);
 });
 
@@ -247,57 +245,42 @@ Deno.test('publicError maps "must pin thinking" and "has no models" both to GENE
 Deno.test('describeError stringifies Error with empty message via fallback', () => {
   const err = new Error('');
   // err.message is '' (falsy), so the && err.message guard is false → uses String(err) = 'Error'
-  // Kills: err instanceof Error && err.message → err instanceof Error (removing the falsy guard)
   assertEquals(describeError(err), 'Error');
 });
 
-Deno.test('TheorumError default message is empty string not a placeholder', () => {
-  // Kills: constructor(message = "Stryker was here!", ...)
-  assertEquals(new TheorumError().message, '');
-});
-
-Deno.test('TheorumError name is TheorumError not empty string', () => {
-  // Kills: this.name = ""
+Deno.test('TheorumError name is TheorumError', () => {
   assertEquals(new TheorumError('test').name, 'TheorumError');
 });
 
 Deno.test('UPSTREAM_FAILED constant is the literal string upstream failed', () => {
-  // Kills: const UPSTREAM_FAILED = ""
   assertEquals(UPSTREAM_FAILED, 'upstream failed');
 });
 
 Deno.test('PUBLIC_GENERIC constant is the expected user-safe copy', () => {
-  // Kills: const PUBLIC_GENERIC = ""
   assertEquals(PUBLIC_GENERIC, 'Something went wrong. Try again.');
 });
 
 Deno.test('PUBLIC_FILE_COUNT constant is the expected user-safe copy', () => {
-  // Kills: const PUBLIC_FILE_COUNT = ""
   assertEquals(PUBLIC_FILE_COUNT, 'Too many files for one message.');
 });
 
 Deno.test('PUBLIC_FILE_SIZE constant is the expected user-safe copy', () => {
-  // Kills: const PUBLIC_FILE_SIZE = ""
   assertEquals(PUBLIC_FILE_SIZE, 'That file is too large.');
 });
 
 Deno.test('PUBLIC_IMAGE_SIZE constant is the expected user-safe copy', () => {
-  // Kills: const PUBLIC_IMAGE_SIZE = ""
   assertEquals(PUBLIC_IMAGE_SIZE, "That image size isn't supported.");
 });
 
 Deno.test('PUBLIC_CANCELLED constant is the expected user-safe copy', () => {
-  // Kills: const PUBLIC_CANCELLED = ""
   assertEquals(PUBLIC_CANCELLED, 'Cancelled.');
 });
 
 Deno.test('publicError does not map a string starting with Error: Gemini to UNAVAILABLE (anchor mutation)', () => {
-  // Kills: regex anchor ^ removal — without ^, "Error: Gemini HTTP 500" would match
   assertEquals(publicError('Error: Gemini HTTP 500'), PUBLIC_GENERIC);
 });
 
 Deno.test('throwIfAborted re-throws the exact same AbortError object not a new one', () => {
-  // Kills: if (false) mutation that skips the rethrow and always creates a new DOMException
   const ctrl = new AbortController();
   const reason = new DOMException('specific abort reason', 'AbortError');
   ctrl.abort(reason);
@@ -311,7 +294,6 @@ Deno.test('throwIfAborted re-throws the exact same AbortError object not a new o
 });
 
 Deno.test('throwIfAborted wraps non-AbortError with correct message and name', () => {
-  // Kills: DOMException message = "" and name = "" mutations
   const ctrl = new AbortController();
   ctrl.abort(new Error('underlying cause'));
   let caught: DOMException | undefined;

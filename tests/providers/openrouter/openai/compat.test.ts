@@ -1,10 +1,11 @@
-import '../../../fixtures/enable-test-internals.ts';
-import '../../../../src/providers/openrouter/openai/compat.ts';
-import { assertEquals } from '../../../../src/kernel/engine/assert.ts';
-import { testInternals } from '../../../fixtures/testInternals.js';
-
-const { openAiGatewayHeaders, parseToolInput, fallbackToolCallId, stringDefault } =
-  testInternals('openai/compat');
+import { TheorumError } from '../../../../src/guardrails/error.ts';
+import { assertEquals, assertThrows } from '../../../../src/kernel/engine/assert.ts';
+import {
+  fallbackToolCallId,
+  openAiGatewayHeaders,
+  parseToolInput,
+  stringDefault,
+} from '../../../../src/providers/openrouter/openai/compat.ts';
 
 Deno.test('openAiGatewayHeaders returns undefined when no site info', () => {
   assertEquals(openAiGatewayHeaders({}), undefined);
@@ -32,8 +33,9 @@ Deno.test('parseToolInput parses valid JSON', () => {
   assertEquals(parseToolInput('{"a":1}'), { a: 1 });
 });
 
-Deno.test('parseToolInput wraps invalid JSON', () => {
-  assertEquals(parseToolInput('not json'), { _raw: 'not json' });
+Deno.test('parseToolInput throws on invalid JSON', () => {
+  assertThrows(() => parseToolInput('not json'), TheorumError);
+  assertThrows(() => parseToolInput('[1]'), TheorumError);
 });
 
 Deno.test('stringDefault uses fallback for undefined', () => {

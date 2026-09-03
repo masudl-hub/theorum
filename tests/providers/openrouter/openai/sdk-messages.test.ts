@@ -1,25 +1,22 @@
 import '../../../fixtures/test-host.ts';
-import '../../../fixtures/enable-test-internals.ts';
-import '../../../../src/providers/openrouter/openai/sdk-messages.ts';
-import { assertEquals } from '../../../../src/kernel/engine/assert.ts';
+import { TheorumError } from '../../../../src/guardrails/error.ts';
+import { assertEquals, assertThrows } from '../../../../src/kernel/engine/assert.ts';
 import { resolveTurn } from '../../../../src/kernel/registry/resolve.ts';
 import type {
   InteractionPart,
   ProviderCompleteRequest,
   TurnHistoryMessage,
 } from '../../../../src/kernel/types.ts';
-import { testInternals } from '../../../fixtures/testInternals.js';
-
-const {
-  sdkPart,
-  sdkContentFromParts,
-  sdkContentFromOptionalParts,
-  toolResultMessage,
+import {
   assistantToolCallMessage,
+  buildAiSdkMessages,
   contentHistoryMessage,
   historyToSdk,
-  buildAiSdkMessages,
-} = testInternals('openai/sdk-messages');
+  sdkContentFromOptionalParts,
+  sdkContentFromParts,
+  sdkPart,
+  toolResultMessage,
+} from '../../../../src/providers/openrouter/openai/sdk-messages.ts';
 
 function createMockTurnRequest(profile: string, text: string): ProviderCompleteRequest {
   const { generation } = resolveTurn({ profile, input: { text } });
@@ -105,23 +102,27 @@ Deno.test('toolResultMessage builds tool result message', () => {
     tool_call_id: 'call_123',
     name: 'search',
   };
-  const result = toolResultMessage(msg) as unknown as Record<string, unknown>;
+  const result = toolResultMessage(msg);
+  if (result.role !== 'tool') throw new Error('expected tool message');
   assertEquals(result.role, 'tool');
-  const content = result.content as Array<Record<string, unknown>>;
+  const content = result.content;
   assertEquals(content.length, 1);
-  assertEquals(content[0].type, 'tool-result');
-  assertEquals(content[0].toolCallId, 'call_123');
-  assertEquals(content[0].toolName, 'search');
-  assertEquals((content[0].output as Record<string, unknown>).value, 'result data');
+  const part = content[0];
+  if (part.type !== 'tool-result') throw new Error('expected tool-result part');
+  assertEquals(part.toolCallId, 'call_123');
+  assertEquals(part.toolName, 'search');
+  assertEquals(part.output, { type: 'text', value: 'result data' });
 });
 
 Deno.test('toolResultMessage uses fallback IDs', () => {
   const msg: TurnHistoryMessage = { role: 'tool' };
-  const result = toolResultMessage(msg) as unknown as Record<string, unknown>;
-  const content = result.content as Array<Record<string, unknown>>;
-  assertEquals(content[0].toolCallId, 'call_tool');
-  assertEquals(content[0].toolName, 'tool');
-  assertEquals((content[0].output as Record<string, unknown>).value, '');
+  const result = toolResultMessage(msg);
+  if (result.role !== 'tool') throw new Error('expected tool message');
+  const part = result.content[0];
+  if (part.type !== 'tool-result') throw new Error('expected tool-result part');
+  assertEquals(part.toolCallId, 'call_tool');
+  assertEquals(part.toolName, 'tool');
+  assertEquals(part.output, { type: 'text', value: '' });
 });
 
 Deno.test('assistantToolCallMessage returns null without tool calls', () => {
@@ -138,29 +139,31 @@ Deno.test('assistantToolCallMessage maps tool calls', () => {
       { id: 'c1', type: 'function', function: { name: 'search', arguments: '{"q":"x"}' } },
     ],
   };
-  const result = assistantToolCallMessage(msg) as unknown as Record<string, unknown>;
+  const result = assistantToolCallMessage(msg);
+  if (!result || result.role !== 'assistant') throw new Error('expected assistant message');
   assertEquals(result.role, 'assistant');
-  const content = result.content as Array<Record<string, unknown>>;
+  const content = result.content;
+  if (!Array.isArray(content)) throw new Error('expected array content');
   assertEquals(content.length, 1);
-  assertEquals(content[0].type, 'tool-call');
-  assertEquals(content[0].toolCallId, 'c1');
-  assertEquals(content[0].toolName, 'search');
-  assertEquals(content[0].input, { q: 'x' });
+  const part = content[0];
+  if (part.type !== 'tool-call') throw new Error('expected tool-call part');
+  assertEquals(part.toolCallId, 'c1');
+  assertEquals(part.toolName, 'search');
+  assertEquals(part.input, { q: 'x' });
 });
 
-Deno.test('assistantToolCallMessage handles invalid JSON args', () => {
+Deno.test('assistantToolCallMessage throws on invalid JSON args', () => {
   const msg: TurnHistoryMessage = {
     role: 'assistant',
     tool_calls: [{ id: 'c1', type: 'function', function: { name: 'fn', arguments: 'bad' } }],
   };
-  const result = assistantToolCallMessage(msg) as unknown as Record<string, unknown>;
-  const content = result.content as Array<Record<string, unknown>>;
-  assertEquals(content[0].input, { _raw: 'bad' });
+  assertThrows(() => assistantToolCallMessage(msg), TheorumError);
 });
 
 Deno.test('historyToSdk dispatches tool messages', () => {
   const msg: TurnHistoryMessage = { role: 'tool', content: 'ok', name: 'fn', tool_call_id: 'c1' };
-  const result = historyToSdk(msg) as unknown as Record<string, unknown>;
+  const result = historyToSdk(msg);
+  if (!result || result.role !== 'tool') throw new Error('expected tool message');
   assertEquals(result.role, 'tool');
 });
 
@@ -169,14 +172,18 @@ Deno.test('historyToSdk dispatches assistant with tool calls', () => {
     role: 'assistant',
     tool_calls: [{ id: 'c1', type: 'function', function: { name: 'fn', arguments: '{}' } }],
   };
-  const result = historyToSdk(msg) as unknown as Record<string, unknown>;
+  const result = historyToSdk(msg);
+  if (!result || result.role !== 'assistant') throw new Error('expected assistant message');
   assertEquals(result.role, 'assistant');
-  assertEquals((result.content as Array<Record<string, unknown>>)[0].type, 'tool-call');
+  const content = result.content;
+  if (!Array.isArray(content)) throw new Error('expected array content');
+  assertEquals(content[0].type, 'tool-call');
 });
 
 Deno.test('historyToSdk dispatches content messages', () => {
   const msg: TurnHistoryMessage = { role: 'user', content: 'hello' };
-  const result = historyToSdk(msg) as unknown as Record<string, unknown>;
+  const result = historyToSdk(msg);
+  if (!result || result.role !== 'user') throw new Error('expected user message');
   assertEquals(result.role, 'user');
   assertEquals(result.content, 'hello');
 });
@@ -197,14 +204,16 @@ Deno.test('contentHistoryMessage builds message with parts', () => {
     role: 'user',
     parts: [{ type: 'text', text: 'hello' }],
   };
-  const result = contentHistoryMessage(msg) as unknown as Record<string, unknown>;
+  const result = contentHistoryMessage(msg);
+  if (result.role !== 'user') throw new Error('expected user message');
   assertEquals(result.role, 'user');
   assertEquals(result.content, 'hello');
 });
 
 Deno.test('contentHistoryMessage builds message with content string', () => {
   const msg: TurnHistoryMessage = { role: 'assistant', content: 'hi' };
-  const result = contentHistoryMessage(msg) as unknown as Record<string, unknown>;
+  const result = contentHistoryMessage(msg);
+  if (result.role !== 'assistant') throw new Error('expected assistant message');
   assertEquals(result.role, 'assistant');
   assertEquals(result.content, 'hi');
 });
@@ -214,9 +223,11 @@ Deno.test('buildAiSdkMessages includes history and input without system', () => 
   req.history = [{ role: 'user', content: 'prev' }];
   const messages = buildAiSdkMessages(req);
   assertEquals(messages.length, 2);
-  assertEquals((messages[0] as unknown as Record<string, unknown>).content, 'prev');
+  const first = messages[0];
+  if (first.role !== 'user') throw new Error('expected user message');
+  assertEquals(first.content, 'prev');
   assertEquals(
-    messages.some((m: unknown) => (m as Record<string, unknown>).role === 'system'),
+    messages.some((m) => m.role === 'system'),
     false,
   );
 });

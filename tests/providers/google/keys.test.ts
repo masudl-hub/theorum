@@ -1,5 +1,4 @@
 import '../../fixtures/test-host.ts';
-import '../../fixtures/enable-test-internals.ts';
 import { TheorumError, UPSTREAM_FAILED } from '../../../src/guardrails/error.ts';
 import { assertEquals } from '../../../src/kernel/engine/assert.ts';
 import {
@@ -9,22 +8,18 @@ import {
 } from '../../../src/kernel/registry/profiles.ts';
 import { resolveTurn } from '../../../src/kernel/registry/resolve.ts';
 import {
+  backoffMs,
+  canOverflow,
   fetchGemini,
   type GeminiVault,
-  withGeminiKey,
-} from '../../../src/providers/google/keys.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
-
-const {
-  waitDefault,
   isQuota,
   isTransientHttp,
   isTransientThrown,
   requireKey,
-  backoffMs,
-  canOverflow,
+  waitDefault,
   withApiKey,
-} = testInternals('keys');
+  withGeminiKey,
+} from '../../../src/providers/google/keys.ts';
 
 const vault: GeminiVault = {
   freeA: 'free-a-key',
@@ -396,6 +391,6 @@ Deno.test('requireKey returns the key when present', () => {
 });
 
 Deno.test('waitDefault returns a promise', () => {
-  const result = waitDefault(0) as unknown as Promise<void>;
+  const result = waitDefault(0);
   assertEquals(typeof result.then, 'function');
 });

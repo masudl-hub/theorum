@@ -1826,7 +1826,6 @@ Deno.test('guardrails.egress withholds media until prose clears', async () => {
         profile: 'media_egress_bot',
         input: {
           text: 'make image',
-          slots: { aspectRatio: '1:1', size: '1K' },
         },
       },
       provider,

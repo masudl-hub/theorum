@@ -18,8 +18,8 @@ import type {
   ProviderCompleteRequest,
   TurnEvent,
 } from '../kernel/types.ts';
-import { exposeForTests } from './expose-for-tests.ts';
 import type { GeminiTransport } from './google/keys.ts';
+import { markModuleLoad } from './probe.ts';
 import type { LocalProviderConfig, OpenAiGatewayConfig } from './types.ts';
 
 /** Credentials supplied by the host when creating a provider. */
@@ -36,56 +36,65 @@ export interface CreateProviderOptions {
   local?: LocalProviderConfig;
 }
 
-function isSpeechRole(profile: Profile): boolean {
+export function isSpeechRole(profile: Profile): boolean {
   return profile.outputs.speech !== undefined;
 }
 
-function isImageRole(profile: Profile): boolean {
+export function isImageRole(profile: Profile): boolean {
   return profile.outputs.image !== undefined;
 }
 
-function lazyAdapter(load: () => Promise<ModelProvider>): ModelProvider {
+/**
+ * Lazy-load an adapter on first `complete`. When `THEORUM_IMPORT_PROBE=1`,
+ * emits `LOADED:<label>` exactly once at load time (import-isolation tests).
+ */
+function lazyAdapter(label: string, load: () => Promise<ModelProvider>): ModelProvider {
   let pending: Promise<ModelProvider> | undefined;
   return {
     async *complete(req: ProviderCompleteRequest): AsyncGenerator<TurnEvent> {
-      pending ??= load();
+      pending ??= (async () => {
+        markModuleLoad(label);
+        return await load();
+      })();
       yield* (await pending).complete(req);
     },
   };
 }
 
 function lazyOpenRouterChat(config: OpenAiGatewayConfig): ModelProvider {
-  return lazyAdapter(() =>
+  return lazyAdapter('openrouter-chat', () =>
     import('./openrouter/chat.ts').then((m) => m.createOpenRouterProvider(config)),
   );
 }
 
 function lazyGoogleInteractions(config: GeminiTransport): ModelProvider {
-  return lazyAdapter(() =>
+  return lazyAdapter('google-interactions-adapter', () =>
     import('./google/interactions/mod.ts').then((m) => m.createInteractionsProvider(config)),
   );
 }
 
 function lazyGoogleLive(config: GeminiTransport): ModelProvider {
-  return lazyAdapter(() =>
+  return lazyAdapter('google-live-stream', () =>
     import('./google/live/mod.ts').then((m) => m.createGoogleLiveProvider(config)),
   );
 }
 
 function lazySpeech(config: OpenAiGatewayConfig & { voice?: string }): ModelProvider {
-  return lazyAdapter(() =>
+  return lazyAdapter('openrouter-speech', () =>
     import('./openrouter/speech.ts').then((m) => m.createSpeechProvider(config)),
   );
 }
 
 function lazyImage(config: OpenAiGatewayConfig): ModelProvider {
-  return lazyAdapter(() =>
+  return lazyAdapter('openrouter-image', () =>
     import('./openrouter/image.ts').then((m) => m.createImageProvider(config)),
   );
 }
 
 function lazyLocal(config?: LocalProviderConfig): ModelProvider {
-  return lazyAdapter(() => import('./local/local.ts').then((m) => m.createLocalProvider(config)));
+  return lazyAdapter('local-adapter', () =>
+    import('./local/local.ts').then((m) => m.createLocalProvider(config)),
+  );
 }
 
 /**
@@ -147,15 +156,3 @@ export function createProvider(
     `createProvider: unsupported protocol/provider pair '${protocol}'/'${provider}'`,
   );
 }
-
-exposeForTests('create-provider', {
-  isSpeechRole,
-  isImageRole,
-  createProvider,
-  lazyOpenRouterChat,
-  lazyGoogleInteractions,
-  lazyGoogleLive,
-  lazySpeech,
-  lazyImage,
-  lazyLocal,
-});

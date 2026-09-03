@@ -1,23 +1,23 @@
-import '../../fixtures/enable-test-internals.ts';
 import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC } from '../../../src/guardrails/error.ts';
 import type { ImageResponseFormat, ProviderCompleteRequest } from '../../../src/kernel/types.ts';
-import { createImageProvider, streamImage } from '../../../src/providers/openrouter/image.ts';
-import '../../../src/providers/openrouter/openai/image-payload.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
-
-const { buildImagesPayload, outputFormatFromMime, wireInputReferences, imageToolParameters } =
-  testInternals('openai/image-payload');
-
-const {
+import {
   buildInterleavedChatPayload,
-  mediaFromImagesResponse,
+  createImageProvider,
+  fetchImageAsBase64,
   markdownImageUrls,
+  mediaFromImagesResponse,
   plainTextFromContent,
+  streamImage,
   yieldImagesEndpoint,
   yieldInterleavedChat,
-  fetchImageAsBase64,
-} = testInternals('image');
+} from '../../../src/providers/openrouter/image.ts';
+import {
+  buildImagesPayload,
+  imageToolParameters,
+  outputFormatFromMime,
+  wireInputReferences,
+} from '../../../src/providers/openrouter/openai/image-payload.ts';
 
 const IMAGE: ImageResponseFormat = {
   type: 'image',
@@ -254,4 +254,24 @@ Deno.test('imageToolParameters maps image pins for chat tool parameters', () => 
     resolution: '2K',
     output_format: 'png',
   });
+});
+
+Deno.test('imageToolParameters and buildImagesPayload omit unset aspect and size', () => {
+  const image: ImageResponseFormat = {
+    type: 'image',
+    mimeType: 'image/jpeg',
+    includeText: false,
+  };
+  assertEquals(imageToolParameters(image), { output_format: 'jpeg' });
+  const payload = buildImagesPayload(
+    createMockImageRequest({
+      image,
+      input: [{ type: 'text', text: 'a fox' }],
+    }),
+  );
+  assertEquals(payload.model, 'bytedance-seed/seedream-4.5');
+  assertEquals(payload.prompt, 'a fox');
+  assertEquals(payload.output_format, 'jpeg');
+  assertEquals(Object.hasOwn(payload, 'aspect_ratio'), false);
+  assertEquals(Object.hasOwn(payload, 'resolution'), false);
 });

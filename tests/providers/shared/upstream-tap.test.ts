@@ -1,9 +1,10 @@
-import '../../fixtures/enable-test-internals.ts';
 import { assertEquals } from '../../../src/kernel/engine/assert.ts';
-import { tapFetch } from '../../../src/providers/shared/upstream-tap.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
-
-const { tapeHeaderValue, tapeHeaders, throwRow } = testInternals('upstream-tap');
+import {
+  tapFetch,
+  tapeHeaders,
+  tapeHeaderValue,
+  throwRow,
+} from '../../../src/providers/shared/upstream-tap.ts';
 
 Deno.test('tapeHeaderValue redacts secret-looking header names', () => {
   assertEquals(tapeHeaderValue('Authorization', 'Bearer abc'), '[redacted]');

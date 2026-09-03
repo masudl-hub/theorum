@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Cursor stop / subagentStop hook.
- * Runs full lint, then deno tests for theorum roots. Returns followup_message on failure.
+ * Lints only files this conversation edited, then runs theorum tests when src/tests changed.
  */
-import { readFileSync, constants } from 'node:fs';
+import { readFileSync, constants, existsSync } from 'node:fs';
 import { access, mkdir, open, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { Buffer } from 'node:buffer';
@@ -11,6 +11,12 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import console from 'node:console';
+import {
+	clearEditedFiles,
+	getEditedFiles,
+	groupFilesByRoot,
+	toRelativeFiles,
+} from './_edited-files.mjs';
 
 /** Must match loop_limit in hooks.json */
 const LOOP_LIMIT = 12;
@@ -50,11 +56,6 @@ async function readPackageJson(root) {
 	}
 }
 
-async function hasLintScript(root) {
-	const pkg = await readPackageJson(root);
-	return typeof pkg?.scripts?.lint === 'string';
-}
-
 async function isTheorumTestRoot(root) {
 	const pkg = await readPackageJson(root);
 	if (!pkg || typeof pkg.scripts?.test !== 'string') return false;
@@ -91,24 +92,22 @@ function runCommand(root, command, args) {
 	});
 }
 
-function runLint(root) {
-	return runCommand(root, 'npm', ['run', 'lint']);
-}
-
-function runTests(root) {
-	return runCommand(root, 'npm', ['run', 'test']);
-}
-
 function truncate(text) {
 	if (text.length <= MAX_OUTPUT_CHARS) return text;
 	return `${text.slice(0, MAX_OUTPUT_CHARS)}\n\n[… output truncated …]`;
 }
 
-function focusDiagnostics(output) {
+function focusDiagnostics(output, editedRelFiles = []) {
 	const lines = output.split('\n');
+	const pathHints = editedRelFiles.map((file) => file.replaceAll('\\', '/'));
 	const focused = lines.filter((line) => {
 		if (/npm warn|deprecated/i.test(line)) return false;
-		return /(?:^|\s)(?:error|warning|×|✖|FAIL|FAILED)\b|:\d+:\d+|:\d+\s/.test(line);
+		const looksLikeDiag =
+			/(?:^|\s)(?:error|warning|×|✖|FAIL|FAILED)\b|:\d+:\d+|:\d+\s/.test(line);
+		if (!looksLikeDiag) return false;
+		if (pathHints.length === 0) return true;
+		const normalized = line.replaceAll('\\', '/');
+		return pathHints.some((hint) => normalized.includes(hint) || normalized.includes(path.basename(hint)));
 	});
 	return focused.length > 0 ? focused.join('\n') : output;
 }
@@ -138,20 +137,24 @@ async function releaseRunLock(lockPath) {
 	}
 }
 
-function buildFollowup(failures, loopCount) {
+function buildFollowup(failures, loopCount, editedFiles) {
 	const finalAttempt = loopCount >= LOOP_LIMIT - 1;
-	const sections = failures.map(({ root, step, code, output }) => {
+	const fileList = editedFiles.map((file) => `- \`${file}\``).join('\n');
+	const sections = failures.map(({ root, step, code, output, relFiles }) => {
 		const label = path.basename(root);
-		return `### \`${label}\` — ${step} (exit ${code})\n\`\`\`text\n${truncate(focusDiagnostics(output))}\n\`\`\``;
+		return `### \`${label}\` — ${step} (exit ${code})\n\`\`\`text\n${truncate(focusDiagnostics(output, relFiles))}\n\`\`\``;
 	});
 
 	const body = [
 		'**Verification hook failed** after your last turn.',
 		`Automatic fix loop: ${loopCount + 1} of ${LOOP_LIMIT}.`,
 		'',
+		'Scope: **only files this conversation edited** (not other agents / pre-existing failures).',
+		fileList ? `Edited files:\n${fileList}` : '',
+		'',
 		finalAttempt
 			? '**Last automatic attempt.** Fix every cited file:line, or ask the user — lint/tests are still failing and auto-fix is exhausted.'
-			: 'Fix every reported file:line. Do **not** ignore, suppress, or reconfigure linters to pass.',
+			: 'Fix every reported file:line in the edited set. Do **not** ignore, suppress, or reconfigure linters to pass.',
 		'If a failure is genuinely wrong, ask the user — do not bypass the rule.',
 		'When behavior or APIs change, update relevant documentation references before finishing.',
 		'',
@@ -159,10 +162,169 @@ function buildFollowup(failures, loopCount) {
 		'',
 		finalAttempt
 			? '**Required:** ask the user for help if you cannot fix these failures at the root cause.'
-			: '**Required next step:** fix root causes at each cited location, then continue.',
-	].join('\n');
+			: '**Required next step:** fix root causes at each cited location among your edited files, then continue.',
+	]
+		.filter((line) => line !== '')
+		.join('\n');
 
 	return { followup_message: body };
+}
+
+function isDocsPath(relPath) {
+	const normalized = relPath.replaceAll('\\', '/');
+	return (
+		normalized.startsWith('docs/') ||
+		normalized === 'README.md' ||
+		normalized.startsWith('scripts/docs-truth/') ||
+		normalized === 'package.json' ||
+		normalized === 'deno.json' ||
+		normalized === 'mod.ts'
+	);
+}
+
+function isKernelSourceOrTest(relPath) {
+	const normalized = relPath.replaceAll('\\', '/');
+	return normalized.startsWith('src/') || normalized.startsWith('tests/');
+}
+
+/** Minimal glob match for biome `files.includes` entries (`*` / `**` only). */
+function matchIncludeGlob(file, pattern) {
+	const normalizedFile = file.replaceAll('\\', '/');
+	const normalizedPattern = pattern.replaceAll('\\', '/');
+	if (normalizedPattern.startsWith('!')) return false;
+	const escaped = normalizedPattern
+		.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+		.replace(/\*\*/g, '§§')
+		.replace(/\*/g, '[^/]*')
+		.replace(/§§/g, '.*');
+	return new RegExp(`^${escaped}$`).test(normalizedFile);
+}
+
+function readBiomeIncludes(root) {
+	for (const name of ['biome.json', 'biome.jsonc']) {
+		const configPath = path.join(root, name);
+		if (!existsSync(configPath)) continue;
+		try {
+			const config = JSON.parse(readFileSync(configPath, 'utf8'));
+			const includes = config?.files?.includes;
+			return Array.isArray(includes) ? includes.filter((entry) => typeof entry === 'string') : null;
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
+function filterBiomeTargets(root, relFiles) {
+	const includes = readBiomeIncludes(root);
+	if (!includes) return relFiles;
+	const positives = includes.filter((entry) => !entry.startsWith('!'));
+	const negatives = includes.filter((entry) => entry.startsWith('!')).map((entry) => entry.slice(1));
+	return relFiles.filter((file) => {
+		const normalized = file.replaceAll('\\', '/');
+		if (!positives.some((pattern) => matchIncludeGlob(normalized, pattern))) return false;
+		if (negatives.some((pattern) => matchIncludeGlob(normalized, pattern))) return false;
+		return true;
+	});
+}
+
+function isAllPathsIgnoredByBiome(output) {
+	return /No files were processed in the specified paths/i.test(output);
+}
+
+function collectConversationFiles(payload) {
+	const conversationId = payload.conversation_id ?? payload.session_id;
+	const tracked = getEditedFiles(conversationId);
+	const fromPayload = Array.isArray(payload.modified_files)
+		? payload.modified_files.filter((entry) => typeof entry === 'string')
+		: [];
+	return {
+		conversationId,
+		files: [...new Set([...tracked, ...fromPayload].map((file) => path.resolve(file)))],
+	};
+}
+
+async function lintEditedFiles(root, relFiles, pkg) {
+	const failures = [];
+	const scripts = pkg?.scripts ?? {};
+
+	const biomeCandidates = relFiles.filter((file) =>
+		/\.(?:[cm]?[jt]s|tsx|jsx|json|jsonc|css|svelte|md|mdx)$/i.test(file),
+	);
+	const biomeTargets = filterBiomeTargets(root, biomeCandidates);
+	if (
+		biomeTargets.length > 0 &&
+		(existsSync(path.join(root, 'biome.json')) || existsSync(path.join(root, 'biome.jsonc')))
+	) {
+		console.error(`[lint-turn] biome check (${biomeTargets.length} files) in ${root}`);
+		const result = await runCommand(root, 'npx', ['biome', 'check', ...biomeTargets]);
+		if (result.code !== 0 && !isAllPathsIgnoredByBiome(result.output)) {
+			failures.push({
+				root,
+				step: 'biome (edited files)',
+				code: result.code,
+				output: result.output,
+				relFiles: biomeTargets,
+			});
+		} else if (result.code !== 0) {
+			console.error('[lint-turn] biome skipped — provided paths are outside biome includes');
+		}
+	} else if (biomeCandidates.length > 0) {
+		console.error(
+			`[lint-turn] biome skipped — ${biomeCandidates.length} edited file(s) outside biome includes`,
+		);
+	}
+
+	const eslintTargets = relFiles.filter((file) =>
+		/\.(?:[cm]?[jt]s|tsx|jsx|svelte)$/i.test(file),
+	);
+	const hasEslint =
+		existsSync(path.join(root, 'eslint.config.js')) ||
+		existsSync(path.join(root, 'eslint.config.mjs')) ||
+		existsSync(path.join(root, 'eslint.config.cjs'));
+	if (eslintTargets.length > 0 && hasEslint) {
+		console.error(`[lint-turn] eslint (${eslintTargets.length} files) in ${root}`);
+		const result = await runCommand(root, 'npx', ['eslint', ...eslintTargets]);
+		if (result.code !== 0) {
+			failures.push({
+				root,
+				step: 'eslint (edited files)',
+				code: result.code,
+				output: result.output,
+				relFiles: eslintTargets,
+			});
+		}
+	}
+
+	if (typeof scripts['lint:docs'] === 'string' && relFiles.some(isDocsPath)) {
+		console.error(`[lint-turn] lint:docs (docs-related edit) in ${root}`);
+		const result = await runCommand(root, 'npm', ['run', 'lint:docs']);
+		if (result.code !== 0) {
+			failures.push({
+				root,
+				step: 'lint:docs',
+				code: result.code,
+				output: result.output,
+				relFiles,
+			});
+		}
+	}
+
+	if (typeof scripts['lint:ast-grep'] === 'string' && relFiles.some(isKernelSourceOrTest)) {
+		console.error(`[lint-turn] lint:ast-grep (source/test edit) in ${root}`);
+		const result = await runCommand(root, 'npm', ['run', 'lint:ast-grep']);
+		if (result.code !== 0) {
+			failures.push({
+				root,
+				step: 'lint:ast-grep',
+				code: result.code,
+				output: result.output,
+				relFiles,
+			});
+		}
+	}
+
+	return failures;
 }
 
 async function main() {
@@ -178,7 +340,10 @@ async function main() {
 	}
 
 	const status = payload.status ?? 'completed';
+	const { conversationId, files: editedFiles } = collectConversationFiles(payload);
+
 	if (status === 'aborted') {
+		clearEditedFiles(conversationId);
 		process.stdout.write('{}\n');
 		return;
 	}
@@ -198,48 +363,53 @@ async function main() {
 	}
 
 	try {
-		const roots = payload.workspace_roots?.length
-			? payload.workspace_roots.map((root) => path.resolve(root))
-			: [process.cwd()];
-
-		const lintRoots = [];
-		const testRoots = [];
-		for (const root of roots) {
-			if (await hasLintScript(root)) lintRoots.push(root);
-			if (await isTheorumTestRoot(root)) testRoots.push(root);
-		}
-
-		if (lintRoots.length === 0 && testRoots.length === 0) {
+		if (editedFiles.length === 0) {
+			console.error('[lint-turn] no edited files for this conversation — skipping');
 			process.stdout.write('{}\n');
 			return;
 		}
 
+		const roots = payload.workspace_roots?.length
+			? payload.workspace_roots.map((root) => path.resolve(root))
+			: [process.cwd()];
+
+		const grouped = groupFilesByRoot(editedFiles, roots);
 		const failures = [];
+		const displayFiles = [];
 
-		for (const root of lintRoots) {
-			console.error(`[lint-turn] running npm run lint in ${root}`);
-			const result = await runLint(root);
-			if (result.code !== 0) {
-				failures.push({ root, step: 'lint', code: result.code, output: result.output });
-			}
-		}
+		for (const [root, files] of grouped) {
+			if (files.length === 0) continue;
+			const relFiles = toRelativeFiles(root, files);
+			if (relFiles.length === 0) continue;
+			displayFiles.push(...relFiles.map((file) => path.join(path.basename(root), file)));
 
-		if (failures.length === 0) {
-			for (const root of testRoots) {
-				console.error(`[lint-turn] running npm run test in ${root}`);
-				const result = await runTests(root);
+			const pkg = await readPackageJson(root);
+			failures.push(...(await lintEditedFiles(root, relFiles, pkg)));
+
+			if (failures.length === 0 && (await isTheorumTestRoot(root)) && relFiles.some(isKernelSourceOrTest)) {
+				console.error(`[lint-turn] npm run test (source/test edit) in ${root}`);
+				const result = await runCommand(root, 'npm', ['run', 'test']);
 				if (result.code !== 0) {
-					failures.push({ root, step: 'test', code: result.code, output: result.output });
+					failures.push({
+						root,
+						step: 'test',
+						code: result.code,
+						output: result.output,
+						relFiles,
+					});
 				}
 			}
 		}
 
 		if (failures.length === 0) {
+			clearEditedFiles(conversationId);
 			process.stdout.write('{}\n');
 			return;
 		}
 
-		process.stdout.write(`${JSON.stringify(buildFollowup(failures, loopCount))}\n`);
+		process.stdout.write(
+			`${JSON.stringify(buildFollowup(failures, loopCount, displayFiles))}\n`,
+		);
 	} finally {
 		await releaseRunLock(lockPath);
 	}

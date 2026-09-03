@@ -1,14 +1,16 @@
-import '../../fixtures/enable-test-internals.ts';
 import { assertEquals } from '@std/assert';
 import { PUBLIC_GENERIC, PUBLIC_UNAVAILABLE } from '../../../src/guardrails/error.ts';
 import type { InteractionPart, ProviderCompleteRequest } from '../../../src/kernel/types.ts';
-import { createSpeechProvider, streamSpeech } from '../../../src/providers/openrouter/speech.ts';
+import {
+  buildHeaders,
+  buildPayload,
+  createSpeechProvider,
+  extractInputText,
+  streamSpeech,
+  yieldSpeechSuccess,
+} from '../../../src/providers/openrouter/speech.ts';
 import { wrapPcmAsWav } from '../../../src/providers/shared/pcm.ts';
 import { HOST_MODELS } from '../../fixtures/models.ts';
-import { testInternals } from '../../fixtures/testInternals.js';
-
-const { extractInputText, buildHeaders, buildPayload, yieldSpeechSuccess } =
-  testInternals('speech');
 
 function createMockSpeechRequest(text: string): ProviderCompleteRequest {
   const spec = HOST_MODELS.gemini31FlashTts;
@@ -226,9 +228,9 @@ Deno.test('streamSpeech respects outputs.speech voice and format mp3', async () 
   assertEquals(mediaEvent.media.data, btoa(String.fromCharCode(...mockMp3Bytes)));
 });
 
-// -- _internals: extractInputText ------------------------------------------
+// -- extractInputText ------------------------------------------
 
-Deno.test('_internals.extractInputText joins multiple text parts with a space', () => {
+Deno.test('extractInputText joins multiple text parts with a space', () => {
   const input: InteractionPart[] = [
     { type: 'text', text: 'Hello' },
     { type: 'text', text: 'world' },
@@ -236,7 +238,7 @@ Deno.test('_internals.extractInputText joins multiple text parts with a space', 
   assertEquals(extractInputText(input), 'Hello world');
 });
 
-Deno.test('_internals.extractInputText ignores non-text parts', () => {
+Deno.test('extractInputText ignores non-text parts', () => {
   const input: InteractionPart[] = [
     { type: 'text', text: 'Hello' },
     { type: 'image', mimeType: 'image/png', data: 'base64data' },
@@ -245,23 +247,23 @@ Deno.test('_internals.extractInputText ignores non-text parts', () => {
   assertEquals(extractInputText(input), 'Hello world');
 });
 
-Deno.test('_internals.extractInputText trims surrounding whitespace', () => {
+Deno.test('extractInputText trims surrounding whitespace', () => {
   const input: InteractionPart[] = [{ type: 'text', text: '  padded  ' }];
   assertEquals(extractInputText(input), 'padded');
 });
 
-Deno.test('_internals.extractInputText returns empty string for no text parts', () => {
+Deno.test('extractInputText returns empty string for no text parts', () => {
   const input: InteractionPart[] = [{ type: 'image', mimeType: 'image/png', data: 'base64data' }];
   assertEquals(extractInputText(input), '');
 });
 
-Deno.test('_internals.extractInputText returns empty string for empty input array', () => {
+Deno.test('extractInputText returns empty string for empty input array', () => {
   assertEquals(extractInputText([]), '');
 });
 
-// -- _internals: buildHeaders ------------------------------------------------
+// -- buildHeaders ------------------------------------------------
 
-Deno.test('_internals.buildHeaders sets Authorization and Content-Type only by default', () => {
+Deno.test('buildHeaders sets Authorization and Content-Type only by default', () => {
   const headers = buildHeaders('secret-key', {});
   assertEquals(headers.Authorization, 'Bearer secret-key');
   assertEquals(headers['Content-Type'], 'application/json');
@@ -269,17 +271,17 @@ Deno.test('_internals.buildHeaders sets Authorization and Content-Type only by d
   assertEquals(headers['X-Title'], undefined);
 });
 
-Deno.test('_internals.buildHeaders adds HTTP-Referer when siteUrl is set', () => {
+Deno.test('buildHeaders adds HTTP-Referer when siteUrl is set', () => {
   const headers = buildHeaders('secret-key', { siteUrl: 'https://theorum.dev' });
   assertEquals(headers['HTTP-Referer'], 'https://theorum.dev');
 });
 
-Deno.test('_internals.buildHeaders adds X-Title when siteName is set', () => {
+Deno.test('buildHeaders adds X-Title when siteName is set', () => {
   const headers = buildHeaders('secret-key', { siteName: 'Theorum' });
   assertEquals(headers['X-Title'], 'Theorum');
 });
 
-Deno.test('_internals.buildHeaders adds both when siteUrl and siteName are set', () => {
+Deno.test('buildHeaders adds both when siteUrl and siteName are set', () => {
   const headers = buildHeaders('secret-key', {
     siteUrl: 'https://theorum.dev',
     siteName: 'Theorum',
@@ -288,9 +290,9 @@ Deno.test('_internals.buildHeaders adds both when siteUrl and siteName are set',
   assertEquals(headers['X-Title'], 'Theorum');
 });
 
-// -- _internals: buildPayload -------------------------------------------------
+// -- buildPayload -------------------------------------------------
 
-Deno.test('_internals.buildPayload defaults to pcm format with no voice', () => {
+Deno.test('buildPayload defaults to pcm format with no voice', () => {
   const req = createMockSpeechRequest('hi');
   const payload = buildPayload(req, 'hi there', undefined, undefined);
   assertEquals(payload.response_format, 'pcm');
@@ -298,33 +300,33 @@ Deno.test('_internals.buildPayload defaults to pcm format with no voice', () => 
   assertEquals('voice' in payload, false);
 });
 
-Deno.test('_internals.buildPayload prefers speech.voice over configVoice', () => {
+Deno.test('buildPayload prefers speech.voice over configVoice', () => {
   const req = createMockSpeechRequest('hi');
   const payload = buildPayload(req, 'hi there', { voice: 'Kore' }, 'fallback-voice');
   assertEquals(payload.voice, 'Kore');
 });
 
-Deno.test('_internals.buildPayload falls back to configVoice when speech.voice is absent', () => {
+Deno.test('buildPayload falls back to configVoice when speech.voice is absent', () => {
   const req = createMockSpeechRequest('hi');
   const payload = buildPayload(req, 'hi there', undefined, 'fallback-voice');
   assertEquals(payload.voice, 'fallback-voice');
 });
 
-Deno.test('_internals.buildPayload honors speech.format', () => {
+Deno.test('buildPayload honors speech.format', () => {
   const req = createMockSpeechRequest('hi');
   const payload = buildPayload(req, 'hi there', { format: 'mp3' }, undefined);
   assertEquals(payload.response_format, 'mp3');
 });
 
-Deno.test('_internals.buildPayload uses apiId on the wire', () => {
+Deno.test('buildPayload uses apiId on the wire', () => {
   const req = createMockSpeechRequest('hi');
   const payload = buildPayload(req, 'hi there', undefined, undefined);
   assertEquals(payload.model, req.apiId);
 });
 
-// -- _internals: yieldSpeechSuccess -------------------------------------------
+// -- yieldSpeechSuccess -------------------------------------------
 
-Deno.test('_internals.yieldSpeechSuccess wraps pcm bytes as wav media', () => {
+Deno.test('yieldSpeechSuccess wraps pcm bytes as wav media', () => {
   const rawBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
   const events = [...yieldSpeechSuccess(rawBytes, 'hello world', 'pcm')];
 
@@ -335,7 +337,7 @@ Deno.test('_internals.yieldSpeechSuccess wraps pcm bytes as wav media', () => {
   assertEquals(typeof mediaEvent.media.data, 'string');
 });
 
-Deno.test('_internals.yieldSpeechSuccess passes mp3 bytes through unwrapped', () => {
+Deno.test('yieldSpeechSuccess passes mp3 bytes through unwrapped', () => {
   const rawBytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64]);
   const events = [...yieldSpeechSuccess(rawBytes, 'hello world', 'mp3')];
 
@@ -345,7 +347,7 @@ Deno.test('_internals.yieldSpeechSuccess passes mp3 bytes through unwrapped', ()
   assertEquals(mediaEvent.media.data, btoa(String.fromCharCode(...rawBytes)));
 });
 
-Deno.test('_internals.yieldSpeechSuccess computes token counts from text and byte lengths', () => {
+Deno.test('yieldSpeechSuccess computes token counts from text and byte lengths', () => {
   const rawBytes = new Uint8Array(250);
   const text = 'a'.repeat(40);
   const events = [...yieldSpeechSuccess(rawBytes, text, 'mp3')];
@@ -357,7 +359,7 @@ Deno.test('_internals.yieldSpeechSuccess computes token counts from text and byt
   assertEquals(tokenEvent.tokens.total, 13);
 });
 
-Deno.test('_internals.yieldSpeechSuccess floors token counts at 1', () => {
+Deno.test('yieldSpeechSuccess floors token counts at 1', () => {
   const rawBytes = new Uint8Array(1);
   const events = [...yieldSpeechSuccess(rawBytes, 'a', 'mp3')];
 
@@ -367,7 +369,7 @@ Deno.test('_internals.yieldSpeechSuccess floors token counts at 1', () => {
   assertEquals(tokenEvent.tokens.total, 2);
 });
 
-Deno.test('_internals.yieldSpeechSuccess ends with a done event', () => {
+Deno.test('yieldSpeechSuccess ends with a done event', () => {
   const rawBytes = new Uint8Array([1, 2, 3]);
   const events = [...yieldSpeechSuccess(rawBytes, 'hi', 'mp3')];
   assertEquals(events[2]?.type, 'done');

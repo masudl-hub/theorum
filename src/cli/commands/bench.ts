@@ -13,8 +13,8 @@
  * @module
  */
 
+import { bindCanary, eventHasCanary, mintCanary } from '../../guardrails/canary.ts';
 import { sanitizeTurnRequest } from '../../guardrails/sanitize.ts';
-import { bindCanary, eventHasCanary, mintCanary } from '../../kernel/engine/boundary.ts';
 import { runTurn } from '../../kernel/engine/runner.ts';
 import { clearProfiles, registerProfile } from '../../kernel/registry/profiles.ts';
 import { pickSystemRole, resolveTurn } from '../../kernel/registry/resolve.ts';

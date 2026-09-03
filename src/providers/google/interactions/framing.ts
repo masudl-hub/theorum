@@ -7,13 +7,12 @@ import type {
   TurnHistoryMessage,
   WireFunctionTool,
 } from '../../../kernel/types.ts';
-import { exposeForTests, markModuleLoad } from '../../expose-for-tests.ts';
 
-function camelToSnake(key: string): string {
+export function camelToSnake(key: string): string {
   return key.replaceAll(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
 }
 
-function toGoogleValue(value: unknown): unknown {
+export function toGoogleValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(toGoogleValue);
   }
@@ -33,7 +32,7 @@ function toGoogleValue(value: unknown): unknown {
   return value;
 }
 
-function wirePart(part: InteractionPart): Record<string, string> {
+export function wirePart(part: InteractionPart): Record<string, string> {
   if (part.type === 'text') {
     return { type: 'text', text: part.text };
   }
@@ -42,11 +41,11 @@ function wirePart(part: InteractionPart): Record<string, string> {
 
 const USER_INPUT = 'user_input';
 
-function userInputStep(parts: InteractionPart[]): Record<string, unknown> {
+export function userInputStep(parts: InteractionPart[]): Record<string, unknown> {
   return { type: USER_INPUT, content: parts.map(wirePart) };
 }
 
-function functionResultStep(msg: TurnHistoryMessage): Record<string, unknown> {
+export function functionResultStep(msg: TurnHistoryMessage): Record<string, unknown> {
   return {
     type: 'function_result',
     name: msg.name ?? '',
@@ -55,7 +54,7 @@ function functionResultStep(msg: TurnHistoryMessage): Record<string, unknown> {
   };
 }
 
-function historyStep(msg: TurnHistoryMessage): Record<string, unknown> {
+export function historyStep(msg: TurnHistoryMessage): Record<string, unknown> {
   if (msg.role === 'tool') {
     return functionResultStep(msg);
   }
@@ -68,7 +67,7 @@ function historyStep(msg: TurnHistoryMessage): Record<string, unknown> {
   return { type, content: [{ type: 'text', text: msg.content ?? '' }] };
 }
 
-function systemHoldsUserInput(system: string, parts: InteractionPart[]): boolean {
+export function systemHoldsUserInput(system: string, parts: InteractionPart[]): boolean {
   for (const part of parts) {
     if (part.type === 'text' && part.text && system.includes(part.text)) {
       return true;
@@ -77,11 +76,14 @@ function systemHoldsUserInput(system: string, parts: InteractionPart[]): boolean
   return false;
 }
 
-function jsonResponseFormat(schema: Record<string, unknown>): unknown[] {
+export function jsonResponseFormat(schema: Record<string, unknown>): unknown[] {
   return [{ type: 'text', mimeType: 'application/json', schema }];
 }
 
-function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string, unknown>): void {
+export function attachResponseFormat(
+  req: ProviderCompleteRequest,
+  camel: Record<string, unknown>,
+): void {
   if (req.speech) {
     if (req.image) {
       throw new TheorumError('cannot mix speech and image response formats');
@@ -94,12 +96,16 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
     return;
   }
   if (req.image) {
-    const imageEntry = {
+    const imageEntry: Record<string, unknown> = {
       type: 'image',
       mimeType: req.image.mimeType,
-      aspectRatio: req.image.aspectRatio,
-      imageSize: req.image.size,
     };
+    if (req.image.aspectRatio) {
+      imageEntry.aspectRatio = req.image.aspectRatio;
+    }
+    if (req.image.size) {
+      imageEntry.imageSize = req.image.size;
+    }
     // Post–May 2026 Interactions API: object = image-only; array = text + image.
     camel.responseFormat = req.image.includeText ? [{ type: 'text' }, imageEntry] : imageEntry;
     return;
@@ -114,7 +120,7 @@ function attachResponseFormat(req: ProviderCompleteRequest, camel: Record<string
   camel.responseFormat = jsonResponseFormat(spec.jsonSchema);
 }
 
-function attachSpeechConfig(
+export function attachSpeechConfig(
   req: ProviderCompleteRequest,
   generationConfig: Record<string, unknown>,
 ): void {
@@ -153,7 +159,7 @@ function wireInteractionsTools(req: ProviderCompleteRequest): Record<string, unk
   return tools;
 }
 
-function inputStepsFromRequest(req: ProviderCompleteRequest): Record<string, unknown>[] {
+export function inputStepsFromRequest(req: ProviderCompleteRequest): Record<string, unknown>[] {
   if (req.interactionOnlyInput && req.interactionOnlyInput.length > 0) {
     return req.interactionOnlyInput;
   }
@@ -167,7 +173,7 @@ function inputStepsFromRequest(req: ProviderCompleteRequest): Record<string, unk
   return inputSteps;
 }
 
-function applyOptionalRequestFields(
+export function applyOptionalRequestFields(
   req: ProviderCompleteRequest,
   camel: Record<string, unknown>,
 ): void {
@@ -178,6 +184,9 @@ function applyOptionalRequestFields(
     camel.previousInteractionId = req.previousInteractionId;
   }
   if (req.system) {
+    if (systemHoldsUserInput(req.system, req.input)) {
+      throw new TheorumError('User payload must not be copied into system instructions');
+    }
     camel.systemInstruction = req.system;
   }
   const tools = wireInteractionsTools(req);
@@ -186,7 +195,7 @@ function applyOptionalRequestFields(
   }
 }
 
-function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
+export function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
   const generationConfig: Record<string, unknown> = {
     temperature: req.temperature,
     maxOutputTokens: req.maxOutputTokens,
@@ -206,33 +215,10 @@ function baseInteractionsBody(req: ProviderCompleteRequest): Record<string, unkn
   };
 }
 
-/** Interactions REST body for one complete() call (Google snake_case keys). */
-function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
-  if (!req.interactionOnlyInput?.length && systemHoldsUserInput(req.system, req.input)) {
-    throw new TheorumError('user input cannot be placed in the system block');
-  }
-  const camel = baseInteractionsBody(req);
-  applyOptionalRequestFields(req, camel);
-  attachResponseFormat(req, camel);
-  return toGoogleValue(camel) as Record<string, unknown>;
+/** Compatibility wrapper for callers that need the complete wire body. */
+export function toInteractionsBody(req: ProviderCompleteRequest): Record<string, unknown> {
+  const body = baseInteractionsBody(req);
+  attachResponseFormat(req, body);
+  applyOptionalRequestFields(req, body);
+  return toGoogleValue(body) as Record<string, unknown>;
 }
-
-export { camelToSnake, toInteractionsBody };
-
-markModuleLoad('google-interactions-wire');
-
-exposeForTests('interactions', {
-  camelToSnake,
-  toGoogleValue,
-  wirePart,
-  userInputStep,
-  historyStep,
-  systemHoldsUserInput,
-  jsonResponseFormat,
-  attachResponseFormat,
-  attachSpeechConfig,
-  inputStepsFromRequest,
-  applyOptionalRequestFields,
-  baseInteractionsBody,
-  toInteractionsBody,
-});

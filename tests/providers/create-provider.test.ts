@@ -1,34 +1,14 @@
-import '../fixtures/enable-test-internals.ts';
 import { TheorumError } from '../../src/guardrails/error.ts';
 import { assertEquals } from '../../src/kernel/engine/assert.ts';
-import type { Profile } from '../../src/kernel/types.ts';
-import { createProvider } from '../../src/providers/create-provider.ts';
-import { testInternals } from '../fixtures/testInternals.js';
-
-const { isSpeechRole, isImageRole } = testInternals('create-provider');
+import type { Protocol, Provider } from '../../src/kernel/types.ts';
+import { createProvider, isImageRole, isSpeechRole } from '../../src/providers/create-provider.ts';
+import { stubProfile } from '../fixtures/profiles.ts';
 
 function baseProfile(
-  model: { protocol: 'geminiInteractions' | 'openAi'; provider: string },
+  model: { protocol: Protocol; provider: Provider },
   role: 'chat' | 'speech' | 'image',
-): Profile {
-  const outputs =
-    role === 'speech'
-      ? { structured: null, speech: { voice: 'Kore', format: 'pcm' as const } }
-      : role === 'image'
-        ? {
-            structured: null,
-            image: { aspectRatio: '1:1', size: '1K', mimeType: 'image/png' },
-          }
-        : { structured: null };
-  return {
-    id: 'test-profile',
-    identity: { handle: 'test' },
-    model: { ...model, allow: [], config: {} },
-    tools: { allow: [] },
-    inputs: {},
-    outputs,
-    guardrails: { quota: { perDay: 1 } },
-  } as unknown as Profile;
+) {
+  return stubProfile({ protocol: model.protocol, provider: model.provider, role });
 }
 
 Deno.test('isSpeechRole is true when outputs.speech is defined', () => {

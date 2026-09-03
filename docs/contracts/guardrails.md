@@ -32,9 +32,6 @@ Owns every module under `src/guardrails/`.
 | `normalize.ts` | Detection normalization |
 | `quota.ts` | In-memory daily slots for HTTP hosts |
 
-Kernel re-exports (`src/kernel/engine/boundary.ts`, etc.) point here for backward
-compatible import paths.
-
 ## Canary
 
 | API | Role |

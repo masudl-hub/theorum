@@ -277,7 +277,6 @@ Deno.test('scanTextForCanaryLeak returns false for unrelated text containing "th
 });
 
 Deno.test('scanTextForCanaryLeak does not false-positive on spaced hex without theo prefix', () => {
-  // Kills: removing the early-return guard at line 61 — without it, text containing only the
   // spaced hex (no "theo" or B64 hint) would wrongly trigger the spaced-hex leak check.
   // Hex chars (0-9a-f) never contain 't' so the spaced form never contains "theo".
   const canary = mintCanary();
@@ -381,7 +380,6 @@ Deno.test('wrapUserData produces correct fence boundaries and strips spoofed inn
 });
 
 Deno.test('scanTextForCanaryLeak returns false when spaced hex present but no theo or b64 hint', () => {
-  // Kills B64_THEO_HINT='' and `if (false)` mutations at the early-return guard:
   // with either mutation, the hex scan runs on ALL text and would find the spaced hex.
   const canary = mintCanary();
   const hex = canary.slice('theo-'.length);
@@ -393,39 +391,36 @@ Deno.test('scanTextForCanaryLeak returns false when spaced hex present but no th
 });
 
 Deno.test('scanTextForCanaryLeak returns false for canary not starting with theo- prefix', () => {
-  // Kills `if (hex.length > 0)` → `if (true)` and `>= 0` mutations:
   // when canary lacks the prefix, hex = '' and spaced = '' → text.includes('') is always true.
   const canary = 'invalid-format-not-theo-prefixed';
   assertEquals(scanTextForCanaryLeak('some text with theo word in it', canary), false);
 });
 
 Deno.test('redactCanary replacement text is the literal omit marker not empty string', () => {
-  // Kills OMIT_CANARY = '' mutation: the OMIT_CANARY constant must equal the literal string.
   const canary = mintCanary();
   const event = redactCanary({ type: 'text', text: `leak ${canary}` }, canary);
   assertEquals(event.text, `leak [omitted - canary]`);
 });
 
 Deno.test('wrapUserData trims leading and trailing whitespace from inner content', () => {
-  // Kills the `.trim()` removal mutation in stripUserFences.
   const wrapped = wrapUserData('  padded  ');
   assertEquals(wrapped, `${USER_OPEN}\npadded\n${USER_CLOSE}`);
 });
 
-Deno.test('wrapUserData replaces fences with empty string not a placeholder', () => {
-  // Kills the StringLiteral "Stryker was here!" mutation in replaceAll.
+Deno.test('wrapUserData strips spoofed fence tags from inner content', () => {
   const text = `before ${USER_OPEN} inside ${USER_CLOSE} after`;
   const wrapped = wrapUserData(text);
-  assertEquals(wrapped.includes('Stryker'), false);
   assertEquals(wrapped.includes(USER_OPEN), true);
   assertEquals(wrapped.endsWith(USER_CLOSE), true);
   const inner = wrapped.slice(USER_OPEN.length + 1, wrapped.length - USER_CLOSE.length - 1);
   assertEquals(inner.includes(USER_OPEN), false);
   assertEquals(inner.includes(USER_CLOSE), false);
+  assertEquals(inner.includes('before'), true);
+  assertEquals(inner.includes('inside'), true);
+  assertEquals(inner.includes('after'), true);
 });
 
 Deno.test('eventHasCanary returns false for structured event without canary', () => {
-  // Kills `event.structured !== undefined && scan(...)` → `|| scan(...)` mutation.
   const canary = mintCanary();
   assertEquals(
     eventHasCanary({ type: 'structured', structured: { note: 'safe data' } }, canary),
@@ -434,7 +429,6 @@ Deno.test('eventHasCanary returns false for structured event without canary', ()
 });
 
 Deno.test('eventHasCanary returns false for tool event without canary', () => {
-  // Kills `event.tool !== undefined && scan(...)` → `|| scan(...)` mutation.
   const canary = mintCanary();
   assertEquals(
     eventHasCanary({ type: 'tool', tool: { name: 'fn', arguments: { q: 'safe' } } }, canary),
@@ -443,7 +437,6 @@ Deno.test('eventHasCanary returns false for tool event without canary', () => {
 });
 
 Deno.test('eventHasCanary returns false for grounding event without canary', () => {
-  // Kills `event.grounding !== undefined && scan(...)` → `|| scan(...)` mutation.
   const canary = mintCanary();
   assertEquals(
     eventHasCanary({ type: 'grounding', grounding: { sources: [], metadata: {} } }, canary),
@@ -452,7 +445,6 @@ Deno.test('eventHasCanary returns false for grounding event without canary', () 
 });
 
 Deno.test('eventHasCanary returns false for evidence event without canary', () => {
-  // Kills `event.evidence !== undefined && scan(...)` → `|| scan(...)` mutation.
   const canary = mintCanary();
   assertEquals(
     eventHasCanary({ type: 'evidence', evidence: { provider: 'google', raw: {} } }, canary),
@@ -461,7 +453,6 @@ Deno.test('eventHasCanary returns false for evidence event without canary', () =
 });
 
 Deno.test('eventHasCanary returns false for sessionResumptionHandle without canary', () => {
-  // Kills `sessionResumptionHandle && scan(...)` → `|| scan(...)` mutation.
   const canary = mintCanary();
   assertEquals(
     eventHasCanary({ type: 'done', sessionResumptionHandle: 'safe-handle-no-canary' }, canary),
@@ -470,7 +461,6 @@ Deno.test('eventHasCanary returns false for sessionResumptionHandle without cana
 });
 
 Deno.test('createCanaryStreamGate emits the correct number of safe bytes for long input', () => {
-  // Kills canary.length - 1 → canary.length + 1 overlap mutation:
   // with the +1 mutation the safe window shrinks by 2, producing fewer emitted bytes.
   const canary = mintCanary();
   const gate = createCanaryStreamGate(canary);

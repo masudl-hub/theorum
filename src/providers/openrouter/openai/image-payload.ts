@@ -13,9 +13,8 @@ import type {
   InteractionPart,
   ProviderCompleteRequest,
 } from '../../../kernel/types.ts';
-import { exposeForTests } from '../../expose-for-tests.ts';
 
-function extractPromptText(input: InteractionPart[]): string {
+export function extractPromptText(input: InteractionPart[]): string {
   return input
     .filter((part) => part.type === 'text')
     .map((part) => (part.type === 'text' ? part.text : ''))
@@ -23,7 +22,7 @@ function extractPromptText(input: InteractionPart[]): string {
     .trim();
 }
 
-function outputFormatFromMime(mimeType: string): string {
+export function outputFormatFromMime(mimeType: string): string {
   const essence = mimeType.toLowerCase().replace(/^image\//, '');
   if (essence === 'jpg') {
     return 'jpeg';
@@ -34,14 +33,14 @@ function outputFormatFromMime(mimeType: string): string {
   return 'png';
 }
 
-function wireInputReference(part: InteractionMediaPart): Record<string, unknown> {
+export function wireInputReference(part: InteractionMediaPart): Record<string, unknown> {
   return {
     type: 'image_url',
     image_url: { url: `data:${part.mimeType};base64,${part.data}` },
   };
 }
 
-function wireInputReferences(input: InteractionPart[]): Record<string, unknown>[] {
+export function wireInputReferences(input: InteractionPart[]): Record<string, unknown>[] {
   const references: Record<string, unknown>[] = [];
   for (const part of input) {
     if (part.type === 'image') {
@@ -51,14 +50,21 @@ function wireInputReferences(input: InteractionPart[]): Record<string, unknown>[
   return references;
 }
 
-function attachImagePins(payload: Record<string, unknown>, image: ImageResponseFormat): void {
-  payload.aspect_ratio = image.aspectRatio;
-  payload.resolution = image.size;
+export function attachImagePins(
+  payload: Record<string, unknown>,
+  image: ImageResponseFormat,
+): void {
+  if (image.aspectRatio) {
+    payload.aspect_ratio = image.aspectRatio;
+  }
+  if (image.size) {
+    payload.resolution = image.size;
+  }
   payload.output_format = outputFormatFromMime(image.mimeType);
 }
 
 /** Build a POST `/images` body for native image-generation models. */
-function buildImagesPayload(req: ProviderCompleteRequest): Record<string, unknown> {
+export function buildImagesPayload(req: ProviderCompleteRequest): Record<string, unknown> {
   if (!req.image) {
     throw new Error('buildImagesPayload requires req.image');
   }
@@ -78,22 +84,15 @@ function buildImagesPayload(req: ProviderCompleteRequest): Record<string, unknow
 }
 
 /** Tool parameters for gateways that generate images inside chat completions. */
-function imageToolParameters(image: ImageResponseFormat): Record<string, unknown> {
-  return {
-    aspect_ratio: image.aspectRatio,
-    resolution: image.size,
+export function imageToolParameters(image: ImageResponseFormat): Record<string, unknown> {
+  const params: Record<string, unknown> = {
     output_format: outputFormatFromMime(image.mimeType),
   };
+  if (image.aspectRatio) {
+    params.aspect_ratio = image.aspectRatio;
+  }
+  if (image.size) {
+    params.resolution = image.size;
+  }
+  return params;
 }
-
-export { buildImagesPayload, extractPromptText, imageToolParameters };
-
-exposeForTests('openai/image-payload', {
-  extractPromptText,
-  outputFormatFromMime,
-  wireInputReference,
-  wireInputReferences,
-  attachImagePins,
-  buildImagesPayload,
-  imageToolParameters,
-});

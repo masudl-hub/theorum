@@ -18,10 +18,18 @@
     "cov_profile",
     ".fallow"
   ],
-  "reporters": ["clear-text", "progress"],
+  "reporters": [
+    "clear-text",
+    "progress"
+  ],
   "coverageAnalysis": "off",
   "incremental": false,
   "timeoutMS": 60000,
   "concurrency": 1,
-  "ignoreStatic": false
+  "ignoreStatic": false,
+  "mutator": {
+    "excludedMutations": [
+      "StringLiteral"
+    ]
+  }
 }

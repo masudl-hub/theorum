@@ -1,9 +1,8 @@
-import { OMIT_CANARY } from '../../kernel/engine/boundary.ts';
+import { OMIT_CANARY } from '../../guardrails/canary.ts';
 import { sha256 } from '../../kernel/engine/hash.ts';
 import { mapStrings } from '../../kernel/engine/tree.ts';
-import { exposeForTests } from '../expose-for-tests.ts';
 
-function isImageBlob(rec: Record<string, unknown>): boolean {
+export function isImageBlob(rec: Record<string, unknown>): boolean {
   if (rec.type === 'image' || rec.type === 'media') {
     return true;
   }
@@ -13,7 +12,7 @@ function isImageBlob(rec: Record<string, unknown>): boolean {
   return false;
 }
 
-async function scrubEntry(
+export async function scrubEntry(
   rec: Record<string, unknown>,
   key: string,
   nested: unknown,
@@ -24,7 +23,7 @@ async function scrubEntry(
   return [key, await scrubUpstream(nested)];
 }
 
-function scrubRecord(rec: Record<string, unknown>): Promise<Record<string, unknown>> {
+export function scrubRecord(rec: Record<string, unknown>): Promise<Record<string, unknown>> {
   return Promise.all(Object.entries(rec).map(([key, nested]) => scrubEntry(rec, key, nested))).then(
     (pairs) => {
       const out = Object.fromEntries(pairs);
@@ -36,7 +35,7 @@ function scrubRecord(rec: Record<string, unknown>): Promise<Record<string, unkno
   );
 }
 
-function scrubUpstream(value: unknown): Promise<unknown> {
+export function scrubUpstream(value: unknown): Promise<unknown> {
   if (Array.isArray(value)) {
     return Promise.all(value.map((item) => scrubUpstream(item)));
   }
@@ -46,24 +45,13 @@ function scrubUpstream(value: unknown): Promise<unknown> {
   return Promise.resolve(value);
 }
 
-function redactCanaryInTree(value: unknown, canary: string): unknown {
+export function redactCanaryInTree(value: unknown, canary: string): unknown {
   if (!canary) {
     return value;
   }
   return mapStrings(value, (text) => text.replaceAll(canary, OMIT_CANARY));
 }
 
-async function tapeUpstream(value: unknown, canary: string): Promise<unknown> {
+export async function tapeUpstream(value: unknown, canary: string): Promise<unknown> {
   return redactCanaryInTree(await scrubUpstream(value), canary);
 }
-
-export { tapeUpstream };
-
-exposeForTests('upstream-tape', {
-  isImageBlob,
-  scrubEntry,
-  scrubRecord,
-  scrubUpstream,
-  redactCanaryInTree,
-  tapeUpstream,
-});

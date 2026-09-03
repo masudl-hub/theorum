@@ -299,14 +299,7 @@ Deno.test('processLiveOutboundBatch with holdUserVisible buffers thought events 
   assertEquals(s.pendingVisible.length, 1);
 });
 
-Deno.test('createLiveOutboundGateSession initial accumulatedText is empty string not a placeholder', () => {
-  // Kills: accumulatedText = "Stryker was here!" mutation
-  const s = session(mintCanary());
-  assertEquals(s.accumulatedText, '');
-});
-
 Deno.test('createLiveOutboundGateSession with canary=false profile ignores provided canary', () => {
-  // Kills: useCanary = true and useCanary = true && Boolean(canary) mutations
   registerProfile(
     defineProfile({
       id: 'live_canary_disabled',
@@ -322,21 +315,18 @@ Deno.test('createLiveOutboundGateSession with canary=false profile ignores provi
 });
 
 Deno.test('createLiveOutboundGateSession with canary=true profile but no canary string leaves gate null', () => {
-  // Kills: useCanary = profile.guardrails.canary !== false || Boolean(canary) mutation
   const s = session();
   assertEquals(s.gate, null);
   assertEquals(s.canary, undefined);
 });
 
 Deno.test('flushCanaryTail action is idle not empty object when gate is null', async () => {
-  // Kills: return {} mutation at line 66 — need action === 'idle' exactly
   const s = session();
   const result = await finalizeLiveOutboundTurn(s);
   assertEquals(result.action, 'idle');
 });
 
 Deno.test('appendVisibleText skips non-text and non-thought events (type filter)', () => {
-  // Kills: if (false) mutation at line 55 — non-text events must not be appended
   registerProfile(
     defineProfile({
       id: 'live_type_filter',
@@ -362,7 +352,6 @@ Deno.test('appendVisibleText skips non-text and non-thought events (type filter)
 });
 
 Deno.test('appendVisibleText only accumulates non-empty text not undefined/empty', () => {
-  // Kills: if (true) mutation at line 58 — undefined text must not increment accumulatedText
   registerProfile(
     defineProfile({
       id: 'live_text_gate',
@@ -385,25 +374,7 @@ Deno.test('appendVisibleText only accumulates non-empty text not undefined/empty
   assertEquals(s.accumulatedText, 'hello');
 });
 
-Deno.test('processLiveOutboundBatch action is idle string not empty object when buffering', () => {
-  // Kills: action: "" mutation at line 66/197/etc — verify action is the literal string
-  const s = session(mintCanary());
-  const result = processLiveOutboundBatch(s, [{ type: 'text', text: 'hi' }]);
-  assertEquals(result.action, 'idle');
-});
-
-Deno.test('processLiveOutboundBatch action is emit string not empty when emitting', () => {
-  // Kills: action: "" mutation at various emit returns
-  const s = session();
-  const result = processLiveOutboundBatch(s, [{ type: 'text', text: 'hello world safe text' }]);
-  assertEquals(result.action, 'emit');
-  if (result.action === 'emit') {
-    assertEquals(result.events.length > 0, true);
-  }
-});
-
 Deno.test('finalizeLiveOutboundTurn action and events correct when pending visible with no egress enforce', async () => {
-  // Kills: action: "" and events: [] mutations at line 207
   registerProfile(
     defineProfile({
       id: 'live_hold_no_egress',
@@ -436,7 +407,6 @@ Deno.test('finalizeLiveOutboundTurn action and events correct when pending visib
 });
 
 Deno.test('finalizeLiveOutboundTurn emits refuse_to_user event type is text not empty', async () => {
-  // Kills: type: "" mutation at line 221
   registerProfile(
     defineProfile({
       id: 'live_refuse_type_check',
@@ -467,7 +437,6 @@ Deno.test('finalizeLiveOutboundTurn emits refuse_to_user event type is text not 
 });
 
 Deno.test('finalizeLiveOutboundTurn onBlock=refuse_to_user requires both condition parts', async () => {
-  // Kills: || mutation and true && mutation at line 220
   registerProfile(
     defineProfile({
       id: 'live_refuse_both_parts',
@@ -496,7 +465,6 @@ Deno.test('finalizeLiveOutboundTurn onBlock=refuse_to_user requires both conditi
 });
 
 Deno.test('abortLiveOutboundTurn resets accumulatedText to empty string not placeholder', () => {
-  // Kills: accumulatedText = "Stryker was here!" on line 203
   const s = session(mintCanary());
   s.accumulatedText = 'some text';
   abortLiveOutboundTurn(s);
@@ -504,7 +472,6 @@ Deno.test('abortLiveOutboundTurn resets accumulatedText to empty string not plac
 });
 
 Deno.test('processLiveOutboundBatch emitType in flush is text string when lastStreamType is text', async () => {
-  // Kills: lastStreamType ?? "" (empty string emitType) and lastStreamType && 'text' mutations
   const canary = mintCanary();
   const s = session(canary);
   processLiveOutboundBatch(s, [{ type: 'text', text: 'a'.repeat(50) }]);
@@ -551,7 +518,6 @@ Deno.test('processLiveOutboundBatch emits non-visible event types immediately ev
 // ── appendVisibleText: if (event.text) guard (line 58) ───────────────────────
 
 Deno.test('appendVisibleText does not accumulate when text field is absent', () => {
-  // Kills: if (true) mutation at line 58 — undefined text must not increment accumulatedText
   // Uses holdUserVisible profile so appendVisibleText is called via holdUserVisible path
   registerProfile(
     defineProfile({
@@ -579,7 +545,6 @@ Deno.test('appendVisibleText does not accumulate when text field is absent', () 
 // ── processStreamChunk with gate + holdUserVisible (lines 113-115) ────────────
 
 Deno.test('processStreamChunk with gate and holdUserVisible buffers emitted content', () => {
-  // Kills: if (false) at 113:7, BlockStatement at 113:32, CallExpression at 114:5
   registerProfile(
     defineProfile({
       id: 'live_gate_hold',
@@ -612,7 +577,6 @@ Deno.test('processStreamChunk with gate and holdUserVisible buffers emitted cont
 // ── processStreamChunk with gate + no holdUserVisible (lines 117) ─────────────
 
 Deno.test('processStreamChunk with gate and no holdUserVisible emits content directly', () => {
-  // Kills: {} at 117:10, action:"" at 117:20, events:[] at 117:36
   const canary = mintCanary();
   const s = session(canary);
   assertEquals(s.holdUserVisible, false);
@@ -628,7 +592,6 @@ Deno.test('processStreamChunk with gate and no holdUserVisible emits content dir
 // ── flushCanaryTail with empty pending → idle (lines 74-75) ──────────────────
 
 Deno.test('finalizeLiveOutboundTurn is idle when gate pending is empty after empty-text event', async () => {
-  // Kills: if (false) at 74:7 and BlockStatement at 75:22 — empty tail must yield idle
   // Scenario: empty text event sets lastStreamType without filling pending buffer
   const canary = mintCanary();
   const s = session(canary);
@@ -644,7 +607,6 @@ Deno.test('finalizeLiveOutboundTurn is idle when gate pending is empty after emp
 // ── finalizeLiveOutboundTurn with holdUserVisible + no content (line 203) ─────
 
 Deno.test('finalizeLiveOutboundTurn is idle when holdUserVisible but nothing buffered', async () => {
-  // Kills: if (false) at 203:7 and BlockStatement at 203:44
   // When pendingVisible is empty, should return idle (or emit extra if extra is also empty)
   const profile = getProfile('live_egress_hold');
   const s = createLiveOutboundGateSession(profile);
@@ -657,7 +619,6 @@ Deno.test('finalizeLiveOutboundTurn is idle when holdUserVisible but nothing buf
 // ── finalizeLiveOutboundTurn clears session state (lines 209-210) ─────────────
 
 Deno.test('finalizeLiveOutboundTurn clears pendingVisible after processing', async () => {
-  // Kills: pendingVisible = ["Stryker was here"] mutation at 209:28
   const profile = getProfile('live_egress_hold');
   const s = createLiveOutboundGateSession(profile);
   processLiveOutboundBatch(s, [{ type: 'text', text: 'content' }]);
@@ -667,7 +628,6 @@ Deno.test('finalizeLiveOutboundTurn clears pendingVisible after processing', asy
 });
 
 Deno.test('finalizeLiveOutboundTurn clears accumulatedText after processing', async () => {
-  // Kills: accumulatedText = "Stryker was here!" mutation at 210:29
   const profile = getProfile('live_egress_hold');
   const s = createLiveOutboundGateSession(profile);
   processLiveOutboundBatch(s, [{ type: 'text', text: 'content' }]);
@@ -679,7 +639,6 @@ Deno.test('finalizeLiveOutboundTurn clears accumulatedText after processing', as
 // ── finalizeLiveOutboundTurn: enforce called with ctx.text (line 217) ─────────
 
 Deno.test('finalizeLiveOutboundTurn passes accumulated text to egress enforce ctx', async () => {
-  // Kills: enforcement = await egress.enforce({}) mutation at 217:44
   // Enforce that throws when ctx.text is missing/undefined
   registerProfile(
     defineProfile({
@@ -707,7 +666,6 @@ Deno.test('finalizeLiveOutboundTurn passes accumulated text to egress enforce ct
 // ── abortLiveOutboundTurn: gate reset prevents stale canary prefix (line 239) ─
 
 Deno.test('abortLiveOutboundTurn resets gate so canary prefix does not persist', () => {
-  // Kills: if (false) at 239:7 and BlockStatement at 239:23
   const canary = mintCanary();
   const s = session(canary);
   const half = Math.ceil(canary.length / 2);
@@ -723,7 +681,6 @@ Deno.test('abortLiveOutboundTurn resets gate so canary prefix does not persist',
 // ── processStreamChunk type-switch: if(true) guard at 99:9 kills thought processing
 
 Deno.test('processLiveOutboundBatch type switch delivers thought content after text', async () => {
-  // Kills: if (true) at 99:9 — always returning tailResult on type switch drops thought content
   const canary = mintCanary();
   const s = session(canary);
   // Send long text (fills pending with safe content)

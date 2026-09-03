@@ -150,7 +150,7 @@ Deno.test('Interactions speech turn wraps PCM as WAV media', async () => {
   assertEquals(media?.data, btoa(String.fromCharCode(...wavBytes)));
 });
 
-Deno.test('Interactions speech profile synthesizes voice audio when model emits text only', async () => {
+Deno.test('Interactions speech profile errors when model emits text only (no fake PCM)', async () => {
   const { generation } = resolveTurn({
     profile: 'speech',
     input: { text: 'say it' },
@@ -186,11 +186,8 @@ Deno.test('Interactions speech profile synthesizes voice audio when model emits 
   assertEquals(events.length, 2);
   assertEquals(events[0]?.type, 'text');
   assertEquals(events[0]?.text, 'hello');
-  assertEquals(events[1]?.type, 'media');
-  const media = events[1]?.media;
-  assertEquals(media?.mimeType, 'audio/wav');
-  const expectedWav = wrapPcmAsWav(new TextEncoder().encode('hello'), 24000);
-  assertEquals(media?.data, btoa(String.fromCharCode(...expectedWav)));
+  assertEquals(events[1]?.type, 'error');
+  assertEquals(typeof events[1]?.error, 'string');
 });
 
 Deno.test('Interactions non-voice profile does not synthesize speech media from text', async () => {

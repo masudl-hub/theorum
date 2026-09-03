@@ -4,11 +4,9 @@
  * @module
  */
 
-import { exposeForTests } from '../expose-for-tests.ts';
-
 const SAMPLE_RATE = 24000;
 
-function writeAscii(view: DataView, offset: number, str: string): void {
+export function writeAscii(view: DataView, offset: number, str: string): void {
   for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
 }
 
@@ -52,5 +50,3 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Ar
   new Uint8Array(buf, 44).set(pcm);
   return new Uint8Array(buf);
 }
-
-exposeForTests('pcm', { base64ToBytes, bytesToBase64, writeAscii, wrapPcmAsWav });

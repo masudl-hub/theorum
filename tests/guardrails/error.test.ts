@@ -185,6 +185,17 @@ Deno.test('publicError maps Speech HTTP to UNAVAILABLE', () => {
   assertEquals(publicError('OpenRouter TTS HTTP 429'), PUBLIC_UNAVAILABLE);
 });
 
+Deno.test('publicError maps mid-string TTS HTTP to UNAVAILABLE (kills t.includes removal)', () => {
+  // Kills: || t.includes('TTS HTTP') → removed mutation — the regex is anchored with ^, so
+  // strings that contain 'TTS HTTP' not at the start require the includes() fallback.
+  assertEquals(publicError('Provider: TTS HTTP 503 error'), PUBLIC_UNAVAILABLE);
+});
+
+Deno.test('publicError maps mid-string Speech HTTP to UNAVAILABLE (kills t.includes removal)', () => {
+  // Kills: || t.includes('Speech HTTP') → removed mutation
+  assertEquals(publicError('Provider: Speech HTTP 503 error'), PUBLIC_UNAVAILABLE);
+});
+
 Deno.test('publicError maps aspect or size to IMAGE_SIZE', () => {
   assertEquals(publicError('Invalid aspect or size for image'), PUBLIC_IMAGE_SIZE);
 });
@@ -235,8 +246,9 @@ Deno.test('publicError maps "must pin thinking" and "has no models" both to GENE
 
 Deno.test('describeError stringifies Error with empty message via fallback', () => {
   const err = new Error('');
-  // Error with empty string message uses the String() fallback
-  assertEquals(typeof describeError(err), 'string');
+  // err.message is '' (falsy), so the && err.message guard is false → uses String(err) = 'Error'
+  // Kills: err instanceof Error && err.message → err instanceof Error (removing the falsy guard)
+  assertEquals(describeError(err), 'Error');
 });
 
 Deno.test('TheorumError default message is empty string not a placeholder', () => {

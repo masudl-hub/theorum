@@ -276,6 +276,17 @@ Deno.test('scanTextForCanaryLeak returns false for unrelated text containing "th
   assertEquals(scanTextForCanaryLeak('theo is just a word', canary), false);
 });
 
+Deno.test('scanTextForCanaryLeak does not false-positive on spaced hex without theo prefix', () => {
+  // Kills: removing the early-return guard at line 61 — without it, text containing only the
+  // spaced hex (no "theo" or B64 hint) would wrongly trigger the spaced-hex leak check.
+  // Hex chars (0-9a-f) never contain 't' so the spaced form never contains "theo".
+  const canary = mintCanary();
+  const hex = canary.slice('theo-'.length); // 32 hex chars
+  const spaced = hex.split('').join(' '); // e.g. "a b c d ..." — no "theo"
+  assertEquals(spaced.includes('theo'), false); // guard: confirm no "theo" in spaced
+  assertEquals(scanTextForCanaryLeak(spaced, canary), false); // must NOT false-positive
+});
+
 Deno.test('scanTextForCanaryLeak detects spaced hex when text has B64 theo hint but not literal theo', () => {
   // B64_THEO_HINT = 'dGhlbw'; text has no literal 'theo' but has the base64 hint
   // The spaced-hex branch must still activate via the hint path

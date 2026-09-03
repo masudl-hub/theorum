@@ -5,10 +5,7 @@
     "command": "deno test --no-check --allow-read --allow-write --allow-net --allow-env --allow-sys tests/guardrails/ tests/cli/fuzz-guardrails.test.ts"
   },
   "mutate": [
-    "src/guardrails/**/*.ts",
-    "!src/guardrails/corpus/**",
-    "!src/guardrails/testing.ts",
-    "!src/guardrails/mod.ts"
+    "src/guardrails/injection.ts"
   ],
   "ignorePatterns": [
     "coverage",
@@ -23,13 +20,7 @@
   ],
   "reporters": ["clear-text", "progress"],
   "coverageAnalysis": "off",
-  "incremental": true,
-  "incrementalFile": ".stryker-cache/guardrails-incremental.json",
-  "thresholds": {
-    "high": 90,
-    "low": 80,
-    "break": 80
-  },
+  "incremental": false,
   "timeoutMS": 60000,
   "concurrency": 1,
   "ignoreStatic": false

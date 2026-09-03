@@ -5,6 +5,7 @@
  */
 
 import { TheorumError } from '../../guardrails/error.ts';
+import { exposeForTests } from '../../providers/expose-for-tests.ts';
 import type { ModelId, Profile, ToolId, TurnRequest } from '../types.ts';
 import { getTool } from './registry.ts';
 import type {
@@ -291,6 +292,22 @@ function promotionFailure(id: string, profile: Profile): ToolFailure | undefined
   }
   return undefined;
 }
+
+exposeForTests('kernel-tools-resolve', {
+  pathMatches,
+  applyBuiltinMutualExclusions,
+  resolveAllowedCustomToolIds,
+  resolveModelBuiltinIds,
+  wireForTool,
+  buildWire,
+  cloneTurnToolSnapshot,
+  promoteTool,
+  promoteBuiltin,
+  initialVisible,
+  initialBuiltins,
+  promoteLoadedTools,
+  promotionFailure,
+});
 
 export {
   cloneTurnToolSnapshot,

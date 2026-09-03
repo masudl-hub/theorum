@@ -7,6 +7,7 @@
 import type { z } from 'zod';
 import { throwIfAborted } from '../../guardrails/error.ts';
 import { sanitizeText } from '../../guardrails/sanitize.ts';
+import { exposeForTests } from '../../providers/expose-for-tests.ts';
 import type { Profile, TurnEvent } from '../types.ts';
 import { getTool } from './registry.ts';
 import { promoteLoadedTools } from './resolve.ts';
@@ -461,5 +462,20 @@ async function* executeRegisteredTool(args: {
 function newCallId(name: string): string {
   return `call_${name}_${Date.now()}`;
 }
+
+exposeForTests('kernel-tools-execute', {
+  isStreamHandler,
+  isResumeContinuation,
+  isToolPause,
+  yieldHandlerSideEvent,
+  permissionGranted,
+  checkPermission,
+  projectForModel,
+  formatToolFailureForModel,
+  formatToolResult,
+  notLoadedMessage,
+  extractLoadedIds,
+  plainToolInput,
+});
 
 export { executeRegisteredTool, formatToolFailureForModel, formatToolResult, newCallId };

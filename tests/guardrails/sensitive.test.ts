@@ -204,3 +204,28 @@ Deno.test('sensitiveSpans detects IPV4 address with 100-199 three-digit first oc
   assertEquals(sensitiveSpans('host: 123.45.67.89').length > 0, true);
   assertEquals(sensitiveSpans('ip: 192.168.1.1').length > 0, true);
 });
+
+Deno.test('sensitiveSpans detects IPV4 address with 200-249 in the last octet', () => {
+  // Kills: 2[0-4]\d → 2[0-4]\D mutation in the last (non-repeated) IPV4 group
+  assertEquals(sensitiveSpans('ip: 10.0.0.200').length > 0, true);
+});
+
+Deno.test('sensitiveSpans does not detect IPV6 address with only two colon groups', () => {
+  // Kills: {7} removal mutation — without {7}, a single :xxxx repetition suffices
+  // "0db8" is valid hex so the mutated pattern (?:[0-9a-f]{1,4}:)[0-9a-f]{1,4} matches
+  assertEquals(sensitiveSpans('x: 2001:0db8 end').length === 0, true);
+});
+
+Deno.test('sensitiveSpans detects 13-digit Luhn-valid card at CARD_MIN_DIGITS boundary', () => {
+  // Kills: >= CARD_MIN_DIGITS → > CARD_MIN_DIGITS mutation — 13 > 13 = false drops it
+  // All-zero 13-digit sequence is Luhn-valid (sum=0)
+  assertEquals(sensitiveSpans('0000000000000').length > 0, true);
+});
+
+Deno.test('cardSpans span kind is sensitive not empty string', () => {
+  // Kills: kind: 'sensitive' → kind: '' mutation at line 86 (cardSpans, not spansFromPatterns)
+  // The SSN test at line 163 covers line 95; this test specifically exercises line 86
+  const spans = sensitiveSpans('4111111111111111');
+  assertEquals(spans.length > 0, true);
+  assertEquals(spans[0]?.kind, 'sensitive');
+});
